@@ -1,0 +1,231 @@
+//@version=5
+// ═══════════════════════════════════════════════════════════════════════════
+//  BTC TREND RIDER v6  —  4H BTCUSDT  —  LONG + SHORT SLEEVE
+//
+//  v6 = the validated v5.2 long engine, unchanged, PLUS a stop-free
+//  vol-sized short sleeve for bear markets (LONGSHORT_REPORT.md).
+//
+//  Backtest (real Binance 4h, 2023-06 → 2026-07, fees included):
+//  +204.5% (CAGR 42.7%), Sharpe 1.48, max DD −17.2%, worst month −7.9%,
+//  23/37 green months. Out-of-sample bear year 2025-07→2026-07: +31.7%
+//  (long-only v5.2: −2.1%, buy & hold: −41.4%).
+//
+//  LONG ENGINE (v5.2, unchanged):
+//    regime: close > SMA200 AND EMA50 > EMA200
+//    entries: fresh regime, or EMA20 pullback-resumption
+//    2.5×ATR stop → TP1 @1R sells 40%, stop→breakeven → 4×ATR trail
+//    exit on regime death; 4% monthly circuit breaker
+//
+//  SHORT SLEEVE (new — no price stop; risk is controlled by SIZE):
+//    when:  close < SMA200 − 0.5×ATR  AND  EMA50 < EMA200  (deep bear)
+//    size:  75% × min(1, 40% / realized_vol) of equity
+//           (vol targeting: violent crashes automatically shrink the short)
+//    cover: deep-bear condition fails on a 4h close
+//    sleeve breaker: short pnl −4% of equity within a month → cover,
+//           stand aside until the 1st
+//    Long and short regimes are mutually exclusive — never both, no leverage.
+//
+//  WHY NO STOP ON SHORTS: every stopped-short variant was tested and loses —
+//  bear rallies whipsaw stops. The sleeve rides through rallies at reduced,
+//  vol-controlled size instead. Do not "improve" it by adding a stop.
+// ═══════════════════════════════════════════════════════════════════════════
+strategy("BTC Trend Rider v6 (4h long/short)", overlay=true,
+     initial_capital=10000,
+     default_qty_type=strategy.percent_of_equity, default_qty_value=100,
+     commission_type=strategy.commission.percent, commission_value=0.04,
+     pyramiding=0, calc_on_every_tick=false,
+     max_labels_count=500)
+
+// ════════════════════════════ INPUTS ════════════════════════════
+grpR = "═══ Regime Filter (the edge — don't over-tune) ═══"
+smaLen     = input.int(200, "Regime SMA", group=grpR)
+emaFastLen = input.int(50,  "Regime EMA Fast", group=grpR)
+emaSlowLen = input.int(200, "Regime EMA Slow", group=grpR)
+
+grpE = "═══ Long entries ═══"
+pullEmaLen = input.int(20, "Pullback EMA", group=grpE)
+takeFresh  = input.bool(true, "Enter when regime turns on", group=grpE)
+takePull   = input.bool(true, "Enter on pullback-resumption", group=grpE)
+
+grpM = "═══ Long trade management (validated defaults) ═══"
+atrLen    = input.int(14, "ATR Length", group=grpM)
+stopAtr   = input.float(2.5, "Initial Stop (×ATR)", step=0.1, group=grpM)
+tp1R      = input.float(1.0, "TP1 distance (R multiples)", step=0.25, group=grpM)
+tp1Pct    = input.float(40, "TP1 size (% of position)", minval=10, maxval=90, group=grpM)
+trailAtr  = input.float(4.0, "Runner Trail (×ATR)", step=0.5, group=grpM)
+
+grpS = "═══ Short sleeve (v6 — validated defaults) ═══"
+useShorts  = input.bool(true, "Trade the short sleeve", group=grpS)
+depthAtr   = input.float(0.5, "Deep-bear depth (×ATR below SMA200)", step=0.25, group=grpS,
+     tooltip="Short only while close < SMA200 − depth×ATR and EMA50 < EMA200. Robust 0–1.")
+shortW     = input.float(75, "Sleeve weight (% of equity)", minval=10, maxval=100, step=5, group=grpS,
+     tooltip="The smoothness dial. 50% = smoothest (Sharpe 1.54), 75% = chosen balance, 100% = max bear profit.")
+volTgt     = input.float(40, "Vol target (% annualized)", minval=10, maxval=100, step=5, group=grpS,
+     tooltip="Short size is scaled by min(1, target/realized vol). Robust 30–50, or off via 100.")
+volSpan    = input.int(48, "Realized-vol window (4h bars)", group=grpS)
+rebalTol   = input.float(20, "Resize only if target differs by (%)", minval=5, maxval=50, group=grpS)
+sleeveCap  = input.float(4.0, "Sleeve monthly loss cap (%)", minval=1, maxval=15, step=0.5, group=grpS)
+
+grpB = "═══ Monthly circuit breaker — long side (validated) ═══"
+useBreaker = input.bool(true, "Halt month after equity loss", group=grpB)
+breakerPct = input.float(4.0, "Monthly loss cap (%)", minval=1, maxval=15, step=0.5, group=grpB)
+
+grpV = "═══ Visuals ═══"
+showLines = input.bool(true, "Show Entry/SL/TP lines", group=grpV)
+showTable = input.bool(true, "Show status table", group=grpV)
+
+// ════════════════════════ CALCULATIONS ══════════════════════════
+sma200  = ta.sma(close, smaLen)
+emaF    = ta.ema(close, emaFastLen)
+emaS    = ta.ema(close, emaSlowLen)
+ema20   = ta.ema(close, pullEmaLen)
+atr     = ta.atr(atrLen)
+
+regime      = close > sma200 and emaF > emaS
+freshRegime = regime and not regime[1]
+deepBear    = useShorts and close < sma200 - depthAtr * atr and emaF < emaS
+
+// realized vol (annualized, 4h bars → 2190/yr) and short size scale
+ret4h    = close / close[1] - 1
+rvol     = ta.stdev(ret4h, volSpan) * math.sqrt(2190)
+volScale = na(rvol) or rvol <= 0 ? 0.0 : math.min(1.0, (volTgt / 100) / rvol)
+shortNotional = strategy.equity * (shortW / 100) * volScale
+shortQty = shortNotional / close
+
+// pullback state for long entries
+var bool wasBelow = false
+if close < ema20
+    wasBelow := true
+pullResume = wasBelow and close > ema20 and regime
+
+// ---- monthly breakers ----
+var float monthStartEq   = na
+var bool  halted         = false          // long-side breaker
+var bool  sleeveHalted   = false          // short-sleeve breaker
+var float sleeveMonthPnl = 0.0
+newMonth = month != month[1] or year != year[1]
+if newMonth or na(monthStartEq)
+    monthStartEq   := strategy.equity
+    halted         := false
+    sleeveHalted   := false
+    sleeveMonthPnl := 0.0
+
+// accrue sleeve pnl on bars where we were short
+if strategy.position_size[1] < 0
+    sleeveMonthPnl += strategy.equity - strategy.equity[1]
+
+inLong  = strategy.position_size > 0
+inShort = strategy.position_size < 0
+flat    = strategy.position_size == 0
+
+if useBreaker and not halted and inLong and strategy.equity < monthStartEq * (1 - breakerPct / 100)
+    halted := true
+    strategy.close_all(comment="Month breaker",
+         alert_message="Trend Rider v6: monthly loss cap hit — closed all, standing aside until next month.")
+
+if inShort and not sleeveHalted and sleeveMonthPnl < -(sleeveCap / 100) * monthStartEq
+    sleeveHalted := true
+    strategy.close_all(comment="Sleeve breaker",
+         alert_message="Trend Rider v6: SHORT sleeve monthly cap hit — covered, no shorts until next month.")
+
+// ═══════════════════════ LONG ENGINE (v5.2) ═════════════════════
+longSignal = flat and not halted and regime and ((takeFresh and freshRegime) or (takePull and pullResume))
+
+var float entryPx  = na
+var float slPx     = na
+var float tp1Px    = na
+var float highestH = na
+var bool  tp1Done  = false
+var float sizeAtEntry = na
+
+if longSignal
+    strategy.entry("L", strategy.long,
+         alert_message="Trend Rider v6: BUY signal (4h). Stop=2.5xATR, TP1=1R sell 40%, then trail.")
+    entryPx  := close
+    slPx     := close - stopAtr * atr
+    tp1Px    := close + tp1R * (stopAtr * atr)
+    tp1Done  := false
+    highestH := high
+    wasBelow := false
+    sizeAtEntry := na
+
+if inLong
+    if na(sizeAtEntry)
+        sizeAtEntry := strategy.position_size
+        entryPx  := strategy.position_avg_price
+        stopDist = stopAtr * atr[1]
+        slPx     := entryPx - stopDist
+        tp1Px    := entryPx + tp1R * stopDist
+    if not tp1Done and strategy.position_size < sizeAtEntry
+        tp1Done := true
+        slPx := entryPx
+    highestH := math.max(highestH, high)
+    if tp1Done
+        slPx := math.max(slPx, highestH - trailAtr * atr)
+    if not regime
+        strategy.close_all(comment="Regime off",
+             alert_message="Trend Rider v6: EXIT ALL LONGS — trend regime turned off.")
+    else
+        if not tp1Done
+            strategy.exit("TP1", "L", qty_percent=tp1Pct, limit=tp1Px, stop=slPx,
+                 alert_message="Trend Rider v6: TP1 hit — sold 40%, stop moved to breakeven.")
+        strategy.exit("Runner", "L", qty_percent=100, stop=slPx,
+             alert_message="Trend Rider v6: Runner stopped out (breakeven/trailing stop).")
+
+if not inLong and not longSignal
+    sizeAtEntry := na
+
+// ═══════════════════════ SHORT SLEEVE (v6) ══════════════════════
+shortSignal = flat and deepBear and not sleeveHalted and shortQty > 0
+
+if shortSignal
+    strategy.entry("S", strategy.short, qty=shortQty,
+         alert_message="Trend Rider v6: OPEN SHORT (deep bear). Size = 75% x vol-scale of equity. NO price stop — exit on regime close or sleeve cap.")
+
+if inShort
+    if not deepBear
+        strategy.close_all(comment="Bear off",
+             alert_message="Trend Rider v6: COVER SHORT — deep-bear condition ended.")
+    else
+        // resize toward target only when it drifts far (avoids fee churn)
+        curQty = math.abs(strategy.position_size)
+        if curQty > 0 and math.abs(shortQty - curQty) / curQty > rebalTol / 100
+            if shortQty > curQty
+                strategy.order("S+", strategy.short, qty=shortQty - curQty,
+                     alert_message="Trend Rider v6: short resize — ADD to short (vol fell).")
+            else
+                strategy.order("S-", strategy.long, qty=curQty - shortQty,
+                     alert_message="Trend Rider v6: short resize — REDUCE short (vol spiked).")
+
+// ════════════════════════════ VISUALS ═══════════════════════════
+plot(sma200, "SMA200 (regime)", color=color.new(color.red, 0), linewidth=2)
+plot(emaF,   "EMA50",  color=color.new(color.orange, 30))
+plot(emaS,   "EMA200", color=color.new(color.maroon, 30))
+plot(ema20,  "EMA20 (pullback)", color=color.new(color.blue, 40))
+bgcolor(regime ? color.new(color.green, 94) : deepBear ? color.new(color.maroon, 90) : color.new(color.gray, 96), title="Regime")
+
+plotshape(longSignal, "BUY", shape.triangleup, location.belowbar,
+     color=color.new(color.green, 0), size=size.small, text="BUY")
+plotshape(shortSignal, "SHORT", shape.triangledown, location.abovebar,
+     color=color.new(color.maroon, 0), size=size.small, text="SHORT")
+
+pSL  = plot(showLines and inLong ? slPx : na, "Stop",  color=color.new(color.red, 0),   style=plot.style_linebr, linewidth=2)
+pTP  = plot(showLines and inLong and not tp1Done ? tp1Px : na, "TP1", color=color.new(color.green, 0), style=plot.style_linebr, linewidth=2)
+pEnt = plot(showLines and inLong ? entryPx : na, "Entry", color=color.new(color.blue, 0), style=plot.style_linebr)
+
+var table t = table.new(position.top_right, 2, 7, bgcolor=color.new(color.gray, 85), border_width=1, border_color=color.new(color.gray, 70))
+if showTable and barstate.islast
+    table.cell(t, 0, 0, "TREND RIDER v6", text_color=color.white, bgcolor=color.new(color.blue, 40))
+    table.cell(t, 1, 0, regime ? "BULL REGIME ✓" : deepBear ? "DEEP BEAR ▼" : "NEUTRAL", text_color=regime ? color.green : deepBear ? color.orange : color.gray, bgcolor=color.new(color.blue, 40))
+    table.cell(t, 0, 1, "Position", text_color=color.white, text_size=size.small)
+    table.cell(t, 1, 1, halted ? "HALTED (long cap)" : sleeveHalted ? "SHORTS HALTED (cap)" : inLong ? (tp1Done ? "LONG RUNNER (BE)" : "LONG → TP1") : inShort ? "SHORT (sleeve)" : "FLAT", text_color=halted or sleeveHalted ? color.orange : inLong ? color.green : inShort ? color.red : color.gray, text_size=size.small)
+    table.cell(t, 0, 2, "Entry", text_color=color.white, text_size=size.small)
+    table.cell(t, 1, 2, inLong ? str.tostring(entryPx, "#,###") : inShort ? str.tostring(strategy.position_avg_price, "#,###") : "—", text_color=color.aqua, text_size=size.small)
+    table.cell(t, 0, 3, "Stop now", text_color=color.white, text_size=size.small)
+    table.cell(t, 1, 3, inLong ? str.tostring(slPx, "#,###") : inShort ? "none (size-managed)" : "—", text_color=color.red, text_size=size.small)
+    table.cell(t, 0, 4, "TP1 (1R)", text_color=color.white, text_size=size.small)
+    table.cell(t, 1, 4, inLong and not tp1Done ? str.tostring(tp1Px, "#,###") : "done/—", text_color=color.green, text_size=size.small)
+    table.cell(t, 0, 5, "Short target", text_color=color.white, text_size=size.small)
+    table.cell(t, 1, 5, deepBear ? str.tostring(shortNotional / strategy.equity * 100, "#.#") + "% of equity" : "—", text_color=color.orange, text_size=size.small)
+    table.cell(t, 0, 6, "Rules", text_color=color.white, text_size=size.small)
+    table.cell(t, 1, 6, "Long: 2.5ATR stop·TP1 40%·4ATR trail\nShort: vol-sized·no stop·cover on close", text_color=color.silver, text_size=size.small)

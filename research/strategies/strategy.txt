@@ -1,0 +1,576 @@
+//@version=5
+indicator("High Probability BTC Strategy - Multi-Confluence System v1.1", overlay=true, max_labels_count=500, max_lines_count=500)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// STRATEGY DESCRIPTION
+// ══════════════════════════════════════════════════════════════════════════════
+// This indicator combines 5 high-win-rate strategies into one system:
+// 1. Support/Resistance with Volume Profile concepts
+// 2. EMA Ribbon with trend alignment (80% win rate)
+// 3. Fibonacci Golden Zone identification
+// 4. MACD + RSI dual momentum confirmation (73% win rate)
+// 5. Smart Money Concepts (Break of Structure)
+//
+// v1.1 Changes: 
+// - Optimized parameters from backtesting report
+// - Added visual SL/TP lines on chart
+// - Added risk info to signal labels
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ════════════════════════════════════════════════════════════════════
+// INPUT SETTINGS
+// ════════════════════════════════════════════════════════════════════
+
+// === STRATEGY SELECTION ===
+strategyGroup = "═══ STRATEGY SELECTION ═══"
+useVolumeProfile = input.bool(true, "Use Volume/S&R Analysis", group=strategyGroup)
+useEMARibbon = input.bool(true, "Use EMA Ribbon System", group=strategyGroup)
+useFibonacci = input.bool(true, "Use Fibonacci Levels", group=strategyGroup)
+useMACDRSI = input.bool(true, "Use MACD + RSI System", group=strategyGroup)
+useSmartMoney = input.bool(true, "Use Smart Money Concepts", group=strategyGroup)
+confluenceRequired = input.int(3, "Minimum Confluence Required", minval=2, maxval=5, group=strategyGroup, tooltip="How many strategies must agree for a signal")
+
+// === RISK MANAGEMENT (NEW) ===
+riskGroup = "═══ RISK MANAGEMENT ═══"
+riskPerTrade = input.float(5.0, "Risk Per Trade (USDT)", minval=1, maxval=100, group=riskGroup, tooltip="Fixed risk amount per trade")
+stopATRMultiplier = input.float(2.0, "Stop Loss ATR Multiplier", minval=0.5, maxval=5, step=0.1, group=riskGroup, tooltip="From report: 2x ATR")
+takeProfitRR = input.float(2.5, "Take Profit (Risk:Reward)", minval=1, maxval=5, step=0.5, group=riskGroup, tooltip="From report: 2.5:1")
+showSLTP = input.bool(true, "Show SL/TP Lines on Chart", group=riskGroup)
+atrLength = input.int(14, "ATR Length", group=riskGroup)
+
+// === EMA RIBBON SETTINGS (OPTIMIZED FROM REPORT) ===
+emaGroup = "═══ EMA RIBBON SETTINGS ═══"
+emaFast = input.int(23, "Fast EMA", group=emaGroup)      // Changed from 25
+emaMedium = input.int(95, "Medium EMA", group=emaGroup)   // Changed from 100
+emaSlow = input.int(197, "Slow EMA", group=emaGroup)      // Changed from 200
+showEMAs = input.bool(true, "Show EMA Lines", group=emaGroup)
+
+// === RSI SETTINGS (OPTIMIZED FROM REPORT) ===
+rsiGroup = "═══ RSI SETTINGS ═══"
+rsiLength = input.int(14, "RSI Length", group=rsiGroup)   // Changed from 21
+rsiOverbought = input.int(65, "Overbought Level", group=rsiGroup)  // Changed from 70
+rsiOversold = input.int(35, "Oversold Level", group=rsiGroup)      // Changed from 30
+rsiMidline = input.int(50, "Midline", group=rsiGroup)
+showRSI = input.bool(false, "Show RSI Panel", group=rsiGroup)
+
+// === MACD SETTINGS (OPTIMIZED FROM REPORT) ===
+macdGroup = "═══ MACD SETTINGS ═══"
+macdFast = input.int(11, "MACD Fast", group=macdGroup)    // Changed from 12
+macdSlow = input.int(25, "MACD Slow", group=macdGroup)    // Changed from 26
+macdSignal = input.int(8, "MACD Signal", group=macdGroup) // Changed from 9
+showMACD = input.bool(false, "Show MACD Panel", group=macdGroup)
+
+// === ADX SETTINGS ===
+adxGroup = "═══ ADX TREND FILTER ═══"
+adxLength = input.int(14, "ADX Length", group=adxGroup)
+adxThreshold = input.int(25, "ADX Threshold", group=adxGroup, tooltip="Minimum ADX for trend confirmation")
+useADXFilter = input.bool(true, "Use ADX Filter", group=adxGroup)
+
+// === FIBONACCI SETTINGS ===
+fibGroup = "═══ FIBONACCI SETTINGS ═══"
+fibLookback = input.int(50, "Swing Lookback Period", group=fibGroup)
+showFibLevels = input.bool(true, "Show Fib Levels", group=fibGroup)
+fibGoldenZone = input.bool(true, "Highlight Golden Zone (0.618-0.65)", group=fibGroup)
+
+// === VOLUME SETTINGS ===
+volGroup = "═══ VOLUME ANALYSIS ═══"
+volMALength = input.int(20, "Volume MA Length", group=volGroup)
+volMultiplier = input.float(1.5, "Volume Spike Multiplier", group=volGroup, tooltip="Volume must be X times average")
+useVolumeFilter = input.bool(true, "Require Volume Confirmation", group=volGroup)
+
+// === SMART MONEY SETTINGS ===
+smGroup = "═══ SMART MONEY CONCEPTS ═══"
+structureLookback = input.int(20, "Structure Lookback", group=smGroup)
+showBOS = input.bool(true, "Show Break of Structure", group=smGroup)
+showOrderBlocks = input.bool(true, "Show Order Blocks", group=smGroup)
+
+// === VISUAL SETTINGS ===
+visualGroup = "═══ VISUAL SETTINGS ═══"
+showSignals = input.bool(true, "Show Buy/Sell Signals", group=visualGroup)
+showLabels = input.bool(true, "Show Signal Labels", group=visualGroup)
+showBackground = input.bool(true, "Color Background on Signal", group=visualGroup)
+showConfluenceScore = input.bool(true, "Show Confluence Score", group=visualGroup)
+
+// === ALERT SETTINGS ===
+alertGroup = "═══ ALERT SETTINGS ═══"
+alertOnBuy = input.bool(true, "Alert on Buy Signal", group=alertGroup)
+alertOnSell = input.bool(true, "Alert on Sell Signal", group=alertGroup)
+
+// ════════════════════════════════════════════════════════════════════
+// CALCULATIONS
+// ════════════════════════════════════════════════════════════════════
+
+// === ATR FOR RISK MANAGEMENT ===
+atr = ta.atr(atrLength)
+
+// === EMA CALCULATIONS ===
+ema25 = ta.ema(close, emaFast)
+ema100 = ta.ema(close, emaMedium)
+ema200 = ta.ema(close, emaSlow)
+
+// EMA Trend Alignment
+bullishEMAAlignment = ema25 > ema100 and ema100 > ema200
+bearishEMAAlignment = ema25 < ema100 and ema100 < ema200
+priceAboveEMA200 = close > ema200
+priceBelowEMA200 = close < ema200
+
+// === RSI CALCULATIONS ===
+rsi = ta.rsi(close, rsiLength)
+rsiOversoldBounce = ta.crossover(rsi, rsiOversold)
+rsiOverboughtDrop = ta.crossunder(rsi, rsiOverbought)
+rsiBullishMomentum = ta.crossover(rsi, rsiMidline)
+rsiBearishMomentum = ta.crossunder(rsi, rsiMidline)
+rsiInOversoldZone = rsi < rsiOversold + 10
+rsiInOverboughtZone = rsi > rsiOverbought - 10
+
+// === MACD CALCULATIONS ===
+[macdLine, signalLine, macdHist] = ta.macd(close, macdFast, macdSlow, macdSignal)
+macdBullishCross = ta.crossover(macdLine, signalLine)
+macdBearishCross = ta.crossunder(macdLine, signalLine)
+macdBullish = macdLine > signalLine
+macdBearish = macdLine < signalLine
+macdHistGrowing = macdHist > macdHist[1]
+macdHistShrinking = macdHist < macdHist[1]
+
+// === ADX CALCULATIONS ===
+[diPlus, diMinus, adx] = ta.dmi(adxLength, adxLength)
+strongTrend = adx > adxThreshold
+bullishTrend = diPlus > diMinus and adx > adxThreshold
+bearishTrend = diMinus > diPlus and adx > adxThreshold
+
+// === VOLUME CALCULATIONS ===
+volumeMA = ta.sma(volume, volMALength)
+highVolume = volume > volumeMA * volMultiplier
+volumeIncreasing = volume > volume[1]
+
+// === FIBONACCI CALCULATIONS ===
+// Find swing high and low
+swingHigh = ta.highest(high, fibLookback)
+swingLow = ta.lowest(low, fibLookback)
+fibRange = swingHigh - swingLow
+
+// Fibonacci levels (for retracement)
+fib236 = swingHigh - (fibRange * 0.236)
+fib382 = swingHigh - (fibRange * 0.382)
+fib500 = swingHigh - (fibRange * 0.500)
+fib618 = swingHigh - (fibRange * 0.618)  // Golden ratio
+fib786 = swingHigh - (fibRange * 0.786)
+
+// Check if price is near key Fibonacci levels (within 1%)
+nearFib618 = math.abs(close - fib618) < (close * 0.01)
+nearFib500 = math.abs(close - fib500) < (close * 0.01)
+nearFib382 = math.abs(close - fib382) < (close * 0.01)
+inGoldenZone = close >= fib618 * 0.99 and close <= fib618 * 1.01
+
+// For downtrend Fibonacci (bearish retracement)
+fibRangeBear = swingHigh - swingLow
+fibBear236 = swingLow + (fibRangeBear * 0.236)
+fibBear382 = swingLow + (fibRangeBear * 0.382)
+fibBear500 = swingLow + (fibRangeBear * 0.500)
+fibBear618 = swingLow + (fibRangeBear * 0.618)
+nearFibBear618 = math.abs(close - fibBear618) < (close * 0.01)
+
+// === SMART MONEY CONCEPTS ===
+// Break of Structure
+highestHigh = ta.highest(high, structureLookback)
+lowestLow = ta.lowest(low, structureLookback)
+
+bullishBOS = ta.crossover(high, highestHigh[1])
+bearishBOS = ta.crossunder(low, lowestLow[1])
+
+// Order Blocks (last opposite candle before strong move)
+bullishCandle = close > open
+bearishCandle = close < open
+strongBullMove = (close - open) > (ta.atr(14) * 1.5) and bullishCandle
+strongBearMove = (open - close) > (ta.atr(14) * 1.5) and bearishCandle
+
+// Bullish Order Block = last red candle before strong green move
+bullishOB = bearishCandle[1] and strongBullMove
+bearishOB = bullishCandle[1] and strongBearMove
+
+// Market Structure
+higherHigh = high > high[1] and high > high[2]
+higherLow = low > low[1] and low > low[2]
+lowerHigh = high < high[1] and high < high[2]
+lowerLow = low < low[1] and low < low[2]
+
+uptrendStructure = higherHigh and higherLow
+downtrendStructure = lowerHigh and lowerLow
+
+// === SUPPORT/RESISTANCE (Simplified Volume Profile Concept) ===
+// Using pivot points as proxy for high volume areas
+pivotHigh = ta.pivothigh(high, 5, 5)
+pivotLow = ta.pivotlow(low, 5, 5)
+
+// Price near recent pivot = near key support/resistance
+nearResistance = not na(pivotHigh) or (high >= ta.highest(high, 20) * 0.99)
+nearSupport = not na(pivotLow) or (low <= ta.lowest(low, 20) * 1.01)
+
+// ════════════════════════════════════════════════════════════════════
+// STRATEGY LOGIC (UNCHANGED FROM ORIGINAL)
+// ════════════════════════════════════════════════════════════════════
+
+// === STRATEGY 1: VOLUME PROFILE + SUPPORT/RESISTANCE ===
+volumeProfileBullish = nearSupport and highVolume and bullishCandle
+volumeProfileBearish = nearResistance and highVolume and bearishCandle
+
+// === STRATEGY 2: EMA RIBBON SYSTEM ===
+// Pullback to EMA25 in established trend
+emaPullbackBullish = priceAboveEMA200 and bullishEMAAlignment and ta.crossover(close, ema25) and (useADXFilter ? strongTrend : true)
+emaPullbackBearish = priceBelowEMA200 and bearishEMAAlignment and ta.crossunder(close, ema25) and (useADXFilter ? strongTrend : true)
+
+// === STRATEGY 3: FIBONACCI + MACD ===
+fibMACDBullish = (nearFib618 or nearFib500) and macdBullishCross and bullishCandle
+fibMACDBearish = nearFibBear618 and macdBearishCross and bearishCandle
+
+// === STRATEGY 4: MACD + RSI DUAL MOMENTUM ===
+macdRSIBullish = priceAboveEMA200 and rsiOversoldBounce[1] and rsiBullishMomentum and macdBullishCross
+macdRSIBearish = priceBelowEMA200 and rsiOverboughtDrop[1] and rsiBearishMomentum and macdBearishCross
+
+// === STRATEGY 5: SMART MONEY CONCEPTS ===
+smartMoneyBullish = (bullishBOS or bullishOB) and uptrendStructure and bullishCandle
+smartMoneyBearish = (bearishBOS or bearishOB) and downtrendStructure and bearishCandle
+
+// ════════════════════════════════════════════════════════════════════
+// CONFLUENCE CALCULATION (UNCHANGED)
+// ════════════════════════════════════════════════════════════════════
+
+// Count bullish signals
+bullishCount = 0
+bullishCount := bullishCount + (useVolumeProfile and volumeProfileBullish ? 1 : 0)
+bullishCount := bullishCount + (useEMARibbon and emaPullbackBullish ? 1 : 0)
+bullishCount := bullishCount + (useFibonacci and fibMACDBullish ? 1 : 0)
+bullishCount := bullishCount + (useMACDRSI and macdRSIBullish ? 1 : 0)
+bullishCount := bullishCount + (useSmartMoney and smartMoneyBullish ? 1 : 0)
+
+// Count bearish signals
+bearishCount = 0
+bearishCount := bearishCount + (useVolumeProfile and volumeProfileBearish ? 1 : 0)
+bearishCount := bearishCount + (useEMARibbon and emaPullbackBearish ? 1 : 0)
+bearishCount := bearishCount + (useFibonacci and fibMACDBearish ? 1 : 0)
+bearishCount := bearishCount + (useMACDRSI and macdRSIBearish ? 1 : 0)
+bearishCount := bearishCount + (useSmartMoney and smartMoneyBearish ? 1 : 0)
+
+// Volume filter
+volumeConfirmed = not useVolumeFilter or highVolume
+
+// Final signals (requires confluence + volume)
+buySignal = bullishCount >= confluenceRequired and volumeConfirmed and not bearishCandle
+sellSignal = bearishCount >= confluenceRequired and volumeConfirmed and not bullishCandle
+
+// Prevent signals on same bar
+var bool lastSignalWasBuy = false
+var bool lastSignalWasSell = false
+
+if buySignal
+    lastSignalWasBuy := true
+    lastSignalWasSell := false
+    
+if sellSignal
+    lastSignalWasBuy := false
+    lastSignalWasSell := true
+
+// Clean signals (no immediate reversals)
+cleanBuySignal = buySignal and not lastSignalWasBuy[1]
+cleanSellSignal = sellSignal and not lastSignalWasSell[1]
+
+// ════════════════════════════════════════════════════════════════════
+// RISK CALCULATIONS (NEW)
+// ════════════════════════════════════════════════════════════════════
+
+// Calculate stop loss and take profit prices
+stopDistanceLong = atr * stopATRMultiplier
+stopDistanceShort = atr * stopATRMultiplier
+
+// For current signal
+currentSL_Long = close - stopDistanceLong
+currentTP_Long = close + (stopDistanceLong * takeProfitRR)
+currentSL_Short = close + stopDistanceShort
+currentTP_Short = close - (stopDistanceShort * takeProfitRR)
+
+// Position sizing
+positionSize = riskPerTrade / stopDistanceLong
+potentialProfit = riskPerTrade * takeProfitRR
+
+// Track active trade levels
+var float activeSL = na
+var float activeTP = na
+var float activeEntry = na
+var bool isLongTrade = false
+
+if cleanBuySignal
+    activeEntry := close
+    activeSL := currentSL_Long
+    activeTP := currentTP_Long
+    isLongTrade := true
+
+if cleanSellSignal
+    activeEntry := close
+    activeSL := currentSL_Short
+    activeTP := currentTP_Short
+    isLongTrade := false
+
+// Check if SL or TP hit (to clear lines)
+slHit = (isLongTrade and not na(activeSL) and low <= activeSL) or (not isLongTrade and not na(activeSL) and high >= activeSL)
+tpHit = (isLongTrade and not na(activeTP) and high >= activeTP) or (not isLongTrade and not na(activeTP) and low <= activeTP)
+
+if slHit or tpHit
+    activeSL := na
+    activeTP := na
+    activeEntry := na
+
+// ════════════════════════════════════════════════════════════════════
+// VISUALIZATION
+// ════════════════════════════════════════════════════════════════════
+
+// === EMA LINES ===
+plot(showEMAs ? ema25 : na, "EMA 23", color=color.new(color.blue, 0), linewidth=2)
+plot(showEMAs ? ema100 : na, "EMA 95", color=color.new(color.orange, 0), linewidth=2)
+plot(showEMAs ? ema200 : na, "EMA 197", color=color.new(color.red, 0), linewidth=3)
+
+// === SL/TP LINES (NEW) ===
+var line slLine = na
+var line tpLine = na
+var line entryLine = na
+
+// Delete old lines on new signal
+if (cleanBuySignal or cleanSellSignal) and showSLTP
+    if not na(slLine)
+        line.delete(slLine)
+    if not na(tpLine)
+        line.delete(tpLine)
+    if not na(entryLine)
+        line.delete(entryLine)
+    
+    // Draw new lines
+    entryLine := line.new(bar_index, close, bar_index + 30, close, 
+                  color=color.new(color.blue, 0), width=2, style=line.style_solid)
+    
+    if cleanBuySignal
+        slLine := line.new(bar_index, currentSL_Long, bar_index + 30, currentSL_Long, 
+                  color=color.new(color.red, 0), width=2, style=line.style_dashed)
+        tpLine := line.new(bar_index, currentTP_Long, bar_index + 30, currentTP_Long, 
+                  color=color.new(color.green, 0), width=2, style=line.style_dashed)
+    
+    if cleanSellSignal
+        slLine := line.new(bar_index, currentSL_Short, bar_index + 30, currentSL_Short, 
+                  color=color.new(color.red, 0), width=2, style=line.style_dashed)
+        tpLine := line.new(bar_index, currentTP_Short, bar_index + 30, currentTP_Short, 
+                  color=color.new(color.green, 0), width=2, style=line.style_dashed)
+
+// Extend lines while active
+if not na(activeSL) and not na(slLine)
+    line.set_x2(slLine, bar_index + 10)
+    line.set_x2(tpLine, bar_index + 10)
+    line.set_x2(entryLine, bar_index + 10)
+
+// === FIBONACCI LEVELS ===
+var line fib618Line = na
+var line fib500Line = na
+var line fib382Line = na
+var label fibLabel = na
+
+if showFibLevels and barstate.islast
+    // Delete old lines
+    if not na(fib618Line)
+        line.delete(fib618Line)
+    if not na(fib500Line)
+        line.delete(fib500Line)
+    if not na(fib382Line)
+        line.delete(fib382Line)
+    
+    // Draw new lines
+    fib618Line := line.new(bar_index - fibLookback, fib618, bar_index, fib618, 
+                  color=color.new(color.yellow, 30), width=2, style=line.style_dashed)
+    fib500Line := line.new(bar_index - fibLookback, fib500, bar_index, fib500, 
+                  color=color.new(color.purple, 50), width=1, style=line.style_dotted)
+    fib382Line := line.new(bar_index - fibLookback, fib382, bar_index, fib382, 
+                  color=color.new(color.blue, 50), width=1, style=line.style_dotted)
+
+// Golden Zone highlight
+bgcolor(fibGoldenZone and inGoldenZone ? color.new(color.yellow, 90) : na, title="Golden Zone")
+
+// === BUY/SELL SIGNALS ===
+plotshape(showSignals and cleanBuySignal, "Buy Signal", shape.triangleup, location.belowbar, 
+          color=color.new(color.green, 0), size=size.normal)
+plotshape(showSignals and cleanSellSignal, "Sell Signal", shape.triangledown, location.abovebar, 
+          color=color.new(color.red, 0), size=size.normal)
+
+// === SIGNAL LABELS WITH RISK INFO (ENHANCED) ===
+if showLabels and cleanBuySignal
+    labelText = "BUY " + str.tostring(bullishCount) + "/5\n" +
+                 "Entry: " + str.tostring(close, "#.##") + "\n" +
+                 "SL: " + str.tostring(currentSL_Long, "#.##") + "\n" +
+                 "TP: " + str.tostring(currentTP_Long, "#.##") + "\n" +
+                 "Risk: $" + str.tostring(riskPerTrade, "#.##") + "\n" +
+                 "R:R 1:" + str.tostring(takeProfitRR, "#.#")
+    label.new(bar_index, low, 
+              text = labelText,
+              style=label.style_label_up, 
+              color=color.new(color.green, 20), 
+              textcolor=color.white, 
+              size=size.normal)
+
+if showLabels and cleanSellSignal
+    labelText = "SELL " + str.tostring(bearishCount) + "/5\n" +
+                 "Entry: " + str.tostring(close, "#.##") + "\n" +
+                 "SL: " + str.tostring(currentSL_Short, "#.##") + "\n" +
+                 "TP: " + str.tostring(currentTP_Short, "#.##") + "\n" +
+                 "Risk: $" + str.tostring(riskPerTrade, "#.##") + "\n" +
+                 "R:R 1:" + str.tostring(takeProfitRR, "#.#")
+    label.new(bar_index, high, 
+              text = labelText,
+              style=label.style_label_down, 
+              color=color.new(color.red, 20), 
+              textcolor=color.white, 
+              size=size.normal)
+
+// === BACKGROUND COLOR ===
+bgColor = showBackground ? (cleanBuySignal ? color.new(color.green, 90) : 
+          cleanSellSignal ? color.new(color.red, 90) : na) : na
+bgcolor(bgColor, title="Signal Background")
+
+// === BREAK OF STRUCTURE MARKERS ===
+plotshape(showBOS and bullishBOS, "Bullish BOS", shape.circle, location.belowbar, 
+          color=color.new(color.aqua, 30), size=size.tiny)
+plotshape(showBOS and bearishBOS, "Bearish BOS", shape.circle, location.abovebar, 
+          color=color.new(color.fuchsia, 30), size=size.tiny)
+
+// === ORDER BLOCK BOXES ===
+var box bullishOBBox = na
+var box bearishOBBox = na
+
+if showOrderBlocks and bullishOB
+    bullishOBBox := box.new(bar_index - 1, low[1], bar_index + 10, high[1], border_color=color.new(color.green, 50), bgcolor=color.new(color.green, 90), border_width=1)
+
+if showOrderBlocks and bearishOB
+    bearishOBBox := box.new(bar_index - 1, low[1], bar_index + 10, high[1], border_color=color.new(color.red, 50), bgcolor=color.new(color.red, 90), border_width=1)
+
+// ════════════════════════════════════════════════════════════════════
+// INFORMATION TABLE
+// ════════════════════════════════════════════════════════════════════
+
+var table infoTable = table.new(position.top_right, 2, 14, 
+                      bgcolor=color.new(color.gray, 85), 
+                      frame_color=color.new(color.gray, 50), 
+                      frame_width=2, 
+                      border_width=1, 
+                      border_color=color.new(color.gray, 70))
+
+if barstate.islast
+    // Header
+    table.cell(infoTable, 0, 0, "INDICATOR", text_color=color.white, bgcolor=color.new(color.blue, 50), text_size=size.normal)
+    table.cell(infoTable, 1, 0, "STATUS", text_color=color.white, bgcolor=color.new(color.blue, 50), text_size=size.normal)
+    
+    // EMA Status
+    emaStatus = bullishEMAAlignment ? "BULLISH ✓" : bearishEMAAlignment ? "BEARISH ✓" : "NEUTRAL"
+    emaColor = bullishEMAAlignment ? color.green : bearishEMAAlignment ? color.red : color.gray
+    table.cell(infoTable, 0, 1, "EMA Ribbon", text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 1, 1, emaStatus, text_color=emaColor, text_size=size.small)
+    
+    // RSI Status
+    rsiStatus = rsiInOversoldZone ? "OVERSOLD" : rsiInOverboughtZone ? "OVERBOUGHT" : str.tostring(math.round(rsi))
+    rsiColor = rsiInOversoldZone ? color.green : rsiInOverboughtZone ? color.red : color.white
+    table.cell(infoTable, 0, 2, "RSI (" + str.tostring(rsiLength) + ")", text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 1, 2, rsiStatus, text_color=rsiColor, text_size=size.small)
+    
+    // MACD Status
+    macdStatus = macdBullish ? "BULLISH ✓" : macdBearish ? "BEARISH ✓" : "NEUTRAL"
+    macdColor = macdBullish ? color.green : macdBearish ? color.red : color.gray
+    table.cell(infoTable, 0, 3, "MACD", text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 1, 3, macdStatus, text_color=macdColor, text_size=size.small)
+    
+    // ADX Status
+    adxStatus = strongTrend ? "TREND: " + str.tostring(math.round(adx)) : "WEAK: " + str.tostring(math.round(adx))
+    adxColor = strongTrend ? color.green : color.orange
+    table.cell(infoTable, 0, 4, "ADX", text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 1, 4, adxStatus, text_color=adxColor, text_size=size.small)
+    
+    // Volume Status
+    volStatus = highVolume ? "HIGH ✓" : "NORMAL"
+    volColor = highVolume ? color.green : color.white
+    table.cell(infoTable, 0, 5, "Volume", text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 1, 5, volStatus, text_color=volColor, text_size=size.small)
+    
+    // Fibonacci Status
+    fibStatus = inGoldenZone ? "GOLDEN ZONE ✓" : nearFib500 ? "AT 50% ✓" : "AWAY"
+    fibColor = inGoldenZone or nearFib500 ? color.yellow : color.gray
+    table.cell(infoTable, 0, 6, "Fibonacci", text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 1, 6, fibStatus, text_color=fibColor, text_size=size.small)
+    
+    // Structure Status
+    structureStatus = uptrendStructure ? "UPTREND ✓" : downtrendStructure ? "DOWNTREND ✓" : "RANGING"
+    structureColor = uptrendStructure ? color.green : downtrendStructure ? color.red : color.gray
+    table.cell(infoTable, 0, 7, "Structure", text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 1, 7, structureStatus, text_color=structureColor, text_size=size.small)
+    
+    // Separator
+    table.cell(infoTable, 0, 8, "═══════════", text_color=color.gray, text_size=size.small)
+    table.cell(infoTable, 1, 8, "═══════════", text_color=color.gray, text_size=size.small)
+    
+    // Risk Management Info (NEW)
+    table.cell(infoTable, 0, 9, "Stop Loss", text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 1, 9, str.tostring(stopATRMultiplier) + "x ATR", text_color=color.orange, text_size=size.small)
+    
+    table.cell(infoTable, 0, 10, "Risk:Reward", text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 1, 10, "1:" + str.tostring(takeProfitRR), text_color=color.aqua, text_size=size.small)
+    
+    // Confluence Score
+    table.cell(infoTable, 0, 11, "CONFLUENCE", text_color=color.white, text_size=size.normal, bgcolor=color.new(color.purple, 70))
+    bullishScore = str.tostring(bullishCount) + "/5"
+    bearishScore = str.tostring(bearishCount) + "/5"
+    scoreText = "↑" + bullishScore + " ↓" + bearishScore
+    scoreColor = bullishCount >= confluenceRequired ? color.green : bearishCount >= confluenceRequired ? color.red : color.white
+    table.cell(infoTable, 1, 11, scoreText, text_color=scoreColor, text_size=size.normal, bgcolor=color.new(color.purple, 70))
+    
+    // Signal Status
+    table.cell(infoTable, 0, 12, "SIGNAL", text_color=color.white, text_size=size.normal, bgcolor=color.new(color.blue, 70))
+    signalText = cleanBuySignal ? "🔥 BUY 🔥" : cleanSellSignal ? "🔥 SELL 🔥" : "WAIT"
+    signalColor = cleanBuySignal ? color.green : cleanSellSignal ? color.red : color.orange
+    table.cell(infoTable, 1, 12, signalText, text_color=signalColor, text_size=size.normal, bgcolor=color.new(color.blue, 70))
+    
+    // Risk Level
+    riskLevel = adx < 20 ? "HIGH RISK" : adx > 40 ? "LOW RISK" : "MEDIUM"
+    riskColor = adx < 20 ? color.red : adx > 40 ? color.green : color.orange
+    table.cell(infoTable, 0, 13, "Risk Level", text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 1, 13, riskLevel, text_color=riskColor, text_size=size.small)
+
+// ════════════════════════════════════════════════════════════════════
+// ALERTS
+// ════════════════════════════════════════════════════════════════════
+
+if cleanBuySignal and alertOnBuy
+    alert("🚀 HIGH PROBABILITY BUY SIGNAL\n" + 
+          "Confluence: " + str.tostring(bullishCount) + "/5\n" + 
+          "Entry: " + str.tostring(close) + "\n" + 
+          "Stop Loss: " + str.tostring(currentSL_Long, "#.##") + "\n" +
+          "Take Profit: " + str.tostring(currentTP_Long, "#.##") + "\n" +
+          "Risk: $" + str.tostring(riskPerTrade) + " | R:R 1:" + str.tostring(takeProfitRR) + "\n" +
+          "RSI: " + str.tostring(math.round(rsi)) + " | ADX: " + str.tostring(math.round(adx)), 
+          alert.freq_once_per_bar_close)
+
+if cleanSellSignal and alertOnSell
+    alert("🔻 HIGH PROBABILITY SELL SIGNAL\n" + 
+          "Confluence: " + str.tostring(bearishCount) + "/5\n" + 
+          "Entry: " + str.tostring(close) + "\n" + 
+          "Stop Loss: " + str.tostring(currentSL_Short, "#.##") + "\n" +
+          "Take Profit: " + str.tostring(currentTP_Short, "#.##") + "\n" +
+          "Risk: $" + str.tostring(riskPerTrade) + " | R:R 1:" + str.tostring(takeProfitRR) + "\n" +
+          "RSI: " + str.tostring(math.round(rsi)) + " | ADX: " + str.tostring(math.round(adx)), 
+          alert.freq_once_per_bar_close)
+
+// ════════════════════════════════════════════════════════════════════
+// PLOTTING FOR PANELS (Optional RSI & MACD)
+// ════════════════════════════════════════════════════════════════════
+
+// RSI Panel
+hline(rsiOverbought, "RSI Overbought", color=color.new(color.red, 70), linestyle=hline.style_dashed)
+hline(rsiMidline, "RSI Midline", color=color.new(color.gray, 70))
+hline(rsiOversold, "RSI Oversold", color=color.new(color.green, 70), linestyle=hline.style_dashed)
+plot(showRSI ? rsi : na, "RSI", color=color.new(color.purple, 0), linewidth=2)
+
+// MACD Panel
+plot(showMACD ? macdLine : na, "MACD Line", color=color.new(color.blue, 0))
+plot(showMACD ? signalLine : na, "Signal Line", color=color.new(color.orange, 0))
+plot(showMACD ? macdHist : na, "MACD Histogram", color=macdHist >= 0 ? color.green : color.red, style=plot.style_columns)
+

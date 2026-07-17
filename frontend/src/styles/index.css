@@ -1,0 +1,20 @@
+:root { color-scheme: dark; }
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: #0a0e11;
+  color: #e6edf3;
+}
+.skeleton { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 24px; }
+.brand { display: flex; align-items: center; gap: 12px; }
+.brand h1 { margin: 0; font-size: 2rem; letter-spacing: -0.02em; }
+.dot { width: 12px; height: 12px; border-radius: 50%; background: #f5a623; box-shadow: 0 0 12px #f5a623; }
+.tagline { color: #8a969f; margin: 0; }
+.status-card { background: #11181d; border: 1px solid #22303a; border-radius: 12px; padding: 20px 28px; min-width: 280px; }
+.status-card h2 { margin: 0 0 12px; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.08em; color: #8a969f; }
+.status-card ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.ok { color: #2ddb91; }
+.warn { color: #f5a623; }
+.error { color: #ff5c5c; }
+footer { color: #5a6570; font-size: 0.8rem; margin-top: 8px; }

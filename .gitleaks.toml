@@ -1,0 +1,15 @@
+# gitleaks config — extend defaults, ignore obvious test fixtures.
+title = "CryptoPilot gitleaks"
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Test fixtures and examples"
+paths = [
+  '''deploy/\.env\.example''',
+  '''.*test.*\.py''',
+  '''.*\.spec\.ts''',
+]
+regexes = [
+  '''MDAwMDAwMDAw.*''',  # documented all-zeros test master key
+]

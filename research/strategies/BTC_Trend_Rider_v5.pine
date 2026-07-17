@@ -1,0 +1,179 @@
+//@version=5
+// ═══════════════════════════════════════════════════════════════════════════
+//  BTC TREND RIDER v5.2  —  4H BTCUSDT
+//
+//  Built and validated on 3 years of real Binance data (2023-06 → 2026-07),
+//  fees included. Full 3y: +137.3%, Sharpe 1.45, max DD −13.2%, PF 1.84,
+//  100 trades, 48% win rate, worst month −5.6%. Out-of-sample bear year
+//  2025-07→2026-07: −4.1% vs buy&hold −45% (the edge in bear markets is
+//  staying out).
+//
+//  v5.1: added monthly loss circuit-breaker (validated in- and out-of-sample):
+//  if equity drops 4% within a calendar month, close everything and stand
+//  aside until the next month. Improves every metric AND caps bad months.
+//  v5.2: TP1 sells 40% (was 50%) — keeps more runner. Validated IS+OOS after
+//  testing (and rejecting) TP ladders, time stops, early breakeven,
+//  pyramiding, entry filters and FOMC/CPI blackouts (IMPROVEMENT_REPORT.md).
+//
+//  SYSTEM
+//   Regime filter (the real edge): trade LONG ONLY while
+//       close > SMA200  AND  EMA50 > EMA200        (on the 4h chart)
+//   Entries (on bar close, filled next open):
+//       1. Regime turns on (fresh trend), or
+//       2. While in regime: price dipped below EMA20, then closes back above
+//          (pullback-resumption)
+//   Trade management (your rules, validated):
+//       - Initial stop  = entry − 2.5 × ATR(14)
+//       - TP1 at 1R     → sell 40%, move stop to breakeven (entry)
+//       - Runner trails at highest-high − 4 × ATR (ratchets up only)
+//       - Hard exit everything if the regime flips off
+//
+//  USE: 4h chart, BTCUSDT (Binance). Add as STRATEGY to verify the backtest
+//  in TradingView's Strategy Tester, and create alerts on this script
+//  ("Order fills and alert() function calls") for live signals.
+// ═══════════════════════════════════════════════════════════════════════════
+strategy("BTC Trend Rider v5.2 (4h)", overlay=true,
+     initial_capital=10000,
+     default_qty_type=strategy.percent_of_equity, default_qty_value=100,
+     commission_type=strategy.commission.percent, commission_value=0.04,
+     pyramiding=0, calc_on_every_tick=false,
+     max_labels_count=500)
+
+// ════════════════════════════ INPUTS ════════════════════════════
+grpR = "═══ Regime Filter (the edge — don't over-tune) ═══"
+smaLen     = input.int(200, "Regime SMA", group=grpR)
+emaFastLen = input.int(50,  "Regime EMA Fast", group=grpR)
+emaSlowLen = input.int(200, "Regime EMA Slow", group=grpR)
+
+grpE = "═══ Entries ═══"
+pullEmaLen = input.int(20, "Pullback EMA", group=grpE)
+takeFresh  = input.bool(true, "Enter when regime turns on", group=grpE)
+takePull   = input.bool(true, "Enter on pullback-resumption", group=grpE)
+
+grpM = "═══ Trade Management (validated defaults) ═══"
+atrLen    = input.int(14, "ATR Length", group=grpM)
+stopAtr   = input.float(2.5, "Initial Stop (×ATR)", step=0.1, group=grpM)
+tp1R      = input.float(1.0, "TP1 distance (R multiples)", step=0.25, group=grpM)
+tp1Pct    = input.float(40, "TP1 size (% of position)", minval=10, maxval=90, group=grpM)
+trailAtr  = input.float(4.0, "Runner Trail (×ATR)", step=0.5, group=grpM)
+
+grpB = "═══ Monthly Circuit Breaker (validated) ═══"
+useBreaker = input.bool(true, "Halt month after equity loss", group=grpB,
+     tooltip="If equity falls this % within a calendar month, close all and stand aside until next month. Validated: improves return, Sharpe, DD and worst month.")
+breakerPct = input.float(4.0, "Monthly loss cap (%)", minval=1, maxval=15, step=0.5, group=grpB)
+
+grpV = "═══ Visuals ═══"
+showLines = input.bool(true, "Show Entry/SL/TP lines", group=grpV)
+showTable = input.bool(true, "Show status table", group=grpV)
+
+// ════════════════════════ CALCULATIONS ══════════════════════════
+sma200  = ta.sma(close, smaLen)
+emaF    = ta.ema(close, emaFastLen)
+emaS    = ta.ema(close, emaSlowLen)
+ema20   = ta.ema(close, pullEmaLen)
+atr     = ta.atr(atrLen)
+
+regime  = close > sma200 and emaF > emaS
+freshRegime = regime and not regime[1]
+
+// pullback state: dipped below EMA20 while flat/in-regime, then closed back above
+var bool wasBelow = false
+if close < ema20
+    wasBelow := true
+pullResume = wasBelow and close > ema20 and regime
+
+// ---- monthly circuit breaker ----
+var float monthStartEq = na
+var bool  halted = false
+newMonth = month != month[1] or year != year[1]
+if newMonth or na(monthStartEq)
+    monthStartEq := strategy.equity
+    halted := false
+if useBreaker and not halted and strategy.equity < monthStartEq * (1 - breakerPct / 100)
+    halted := true
+    if strategy.position_size > 0
+        strategy.close_all(comment="Month breaker",
+             alert_message="BTC Trend Rider: monthly loss cap hit — closed all, standing aside until next month.")
+
+flat = strategy.position_size == 0
+longSignal = flat and not halted and regime and ((takeFresh and freshRegime) or (takePull and pullResume))
+
+// ═══════════════════════ ORDERS & MANAGEMENT ════════════════════
+var float entryPx  = na
+var float slPx     = na
+var float tp1Px    = na
+var float highestH = na
+var bool  tp1Done  = false
+var float sizeAtEntry = na
+
+if longSignal
+    strategy.entry("L", strategy.long,
+         alert_message="BTC Trend Rider v5.2: BUY signal (4h). Stop=2.5xATR, TP1=1R sell 40%, then trail.")
+    entryPx  := close                       // provisional; refined on fill bar
+    slPx     := close - stopAtr * atr
+    tp1Px    := close + tp1R * (stopAtr * atr)
+    tp1Done  := false
+    highestH := high
+    wasBelow := false
+    sizeAtEntry := na
+
+inPos = strategy.position_size > 0
+
+if inPos
+    // refine anchors to the actual fill price on the first bar in position
+    if na(sizeAtEntry)
+        sizeAtEntry := strategy.position_size
+        entryPx  := strategy.position_avg_price
+        stopDist = stopAtr * atr[1]
+        slPx     := entryPx - stopDist
+        tp1Px    := entryPx + tp1R * stopDist
+    // detect TP1 fill -> breakeven
+    if not tp1Done and strategy.position_size < sizeAtEntry
+        tp1Done := true
+        slPx := entryPx
+    // trail the runner after TP1 (ratchet only upward)
+    highestH := math.max(highestH, high)
+    if tp1Done
+        slPx := math.max(slPx, highestH - trailAtr * atr)
+    // regime death -> exit everything
+    if not regime
+        strategy.close_all(comment="Regime off",
+             alert_message="BTC Trend Rider v5: EXIT ALL — trend regime turned off.")
+    else
+        if not tp1Done
+            strategy.exit("TP1", "L", qty_percent=tp1Pct, limit=tp1Px, stop=slPx,
+                 alert_message="BTC Trend Rider v5.2: TP1 hit — sold 40%, stop moved to breakeven.")
+        strategy.exit("Runner", "L", qty_percent=100, stop=slPx,
+             alert_message="BTC Trend Rider v5: Runner stopped out (breakeven/trailing stop).")
+
+if not inPos and not longSignal
+    sizeAtEntry := na
+
+// ════════════════════════════ VISUALS ═══════════════════════════
+plot(sma200, "SMA200 (regime)", color=color.new(color.red, 0), linewidth=2)
+plot(emaF,   "EMA50",  color=color.new(color.orange, 30))
+plot(emaS,   "EMA200", color=color.new(color.maroon, 30))
+plot(ema20,  "EMA20 (pullback)", color=color.new(color.blue, 40))
+bgcolor(regime ? color.new(color.green, 94) : color.new(color.red, 96), title="Regime")
+
+plotshape(longSignal, "BUY", shape.triangleup, location.belowbar,
+     color=color.new(color.green, 0), size=size.small, text="BUY")
+
+pSL  = plot(showLines and inPos ? slPx : na, "Stop",  color=color.new(color.red, 0),   style=plot.style_linebr, linewidth=2)
+pTP  = plot(showLines and inPos and not tp1Done ? tp1Px : na, "TP1", color=color.new(color.green, 0), style=plot.style_linebr, linewidth=2)
+pEnt = plot(showLines and inPos ? entryPx : na, "Entry", color=color.new(color.blue, 0), style=plot.style_linebr)
+
+var table t = table.new(position.top_right, 2, 6, bgcolor=color.new(color.gray, 85), border_width=1, border_color=color.new(color.gray, 70))
+if showTable and barstate.islast
+    table.cell(t, 0, 0, "TREND RIDER v5.2", text_color=color.white, bgcolor=color.new(color.blue, 40))
+    table.cell(t, 1, 0, regime ? "REGIME ON ✓" : "REGIME OFF", text_color=regime ? color.green : color.red, bgcolor=color.new(color.blue, 40))
+    table.cell(t, 0, 1, "Position", text_color=color.white, text_size=size.small)
+    table.cell(t, 1, 1, halted ? "HALTED (month cap)" : inPos ? (tp1Done ? "RUNNER (BE locked)" : "OPEN → TP1") : "FLAT", text_color=halted ? color.orange : inPos ? color.green : color.gray, text_size=size.small)
+    table.cell(t, 0, 2, "Entry", text_color=color.white, text_size=size.small)
+    table.cell(t, 1, 2, inPos ? str.tostring(entryPx, "#,###") : "—", text_color=color.aqua, text_size=size.small)
+    table.cell(t, 0, 3, "Stop now", text_color=color.white, text_size=size.small)
+    table.cell(t, 1, 3, inPos ? str.tostring(slPx, "#,###") : "—", text_color=color.red, text_size=size.small)
+    table.cell(t, 0, 4, "TP1 (1R)", text_color=color.white, text_size=size.small)
+    table.cell(t, 1, 4, inPos and not tp1Done ? str.tostring(tp1Px, "#,###") : "done/—", text_color=color.green, text_size=size.small)
+    table.cell(t, 0, 5, "Rules", text_color=color.white, text_size=size.small)
+    table.cell(t, 1, 5, "4h · long-only · 2.5ATR stop\nTP1@1R 40% → BE → 4ATR trail", text_color=color.silver, text_size=size.small)

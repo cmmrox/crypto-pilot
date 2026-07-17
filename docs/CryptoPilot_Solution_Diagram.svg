@@ -1,0 +1,139 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="1050" viewBox="0 0 1440 1050" font-family="Helvetica,Arial,sans-serif">
+<defs><marker id="ah" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto"><polygon points="0 0, 9 3.5, 0 7" fill="#5a6b7a"/></marker></defs>
+<rect x="0" y="0" width="1440" height="1050" rx="0" fill="#ffffff" stroke="#ffffff" stroke-width="1.5"/>
+<text x="40" y="42" font-family="Helvetica,Arial,sans-serif" font-size="26" fill="#0c2a45" font-weight="bold" text-anchor="start">CryptoPilot — Business Solution Diagram</text>
+<text x="40" y="66" font-family="Helvetica,Arial,sans-serif" font-size="13" fill="#5a6b7a" font-weight="normal" text-anchor="start">Automated BTCUSDT trading of Trend Rider v6 (long + short sleeve) on Binance USDT-M · Python + FastAPI + PostgreSQL · v1.1 · 17 Jul 2026</text>
+<rect x="40" y="92" width="320" height="78" rx="8" fill="#e8f0fa" stroke="#2a78d6" stroke-width="1.5"/>
+<text x="54" y="116" font-family="Helvetica,Arial,sans-serif" font-size="14" fill="#0c447c" font-weight="bold" text-anchor="start">Owner — web browser</text>
+<text x="54" y="136" font-family="Helvetica,Arial,sans-serif" font-size="11.5" fill="#185fa5" font-weight="normal" text-anchor="start">Controls and monitors everything</text>
+<text x="54" y="152" font-family="Helvetica,Arial,sans-serif" font-size="11.5" fill="#185fa5" font-weight="normal" text-anchor="start">from the dashboard (HTTPS + JWT)</text>
+<rect x="1080" y="92" width="320" height="78" rx="8" fill="#fdf3e2" stroke="#eda100" stroke-width="1.5"/>
+<text x="1094" y="116" font-family="Helvetica,Arial,sans-serif" font-size="14" fill="#633806" font-weight="bold" text-anchor="start">Owner — phone (SMS)</text>
+<text x="1094" y="136" font-family="Helvetica,Arial,sans-serif" font-size="11.5" fill="#854f0b" font-weight="normal" text-anchor="start">Receives every event: trade open /</text>
+<text x="1094" y="152" font-family="Helvetica,Arial,sans-serif" font-size="11.5" fill="#854f0b" font-weight="normal" text-anchor="start">close, bot start / stop, breaker, errors</text>
+<rect x="40" y="210" width="320" height="110" rx="8" fill="#e8f0fa" stroke="#2a78d6" stroke-width="1.5"/>
+<text x="54" y="234" font-family="Helvetica,Arial,sans-serif" font-size="14" fill="#0c447c" font-weight="bold" text-anchor="start">React dashboard</text>
+<text x="54" y="254" font-family="Helvetica,Arial,sans-serif" font-size="11.5" fill="#185fa5" font-weight="normal" text-anchor="start">Start / Stop / kill-switch button</text>
+<text x="54" y="270" font-family="Helvetica,Arial,sans-serif" font-size="11.5" fill="#185fa5" font-weight="normal" text-anchor="start">Settings: DEMO or LIVE account, risk %</text>
+<text x="54" y="286" font-family="Helvetica,Arial,sans-serif" font-size="11.5" fill="#185fa5" font-weight="normal" text-anchor="start">Live position, equity curve, trade history</text>
+<text x="54" y="302" font-family="Helvetica,Arial,sans-serif" font-size="11.5" fill="#185fa5" font-weight="normal" text-anchor="start">Monthly P&amp;L + daily news briefing</text>
+<rect x="420" y="210" width="300" height="110" rx="8" fill="#e8f0fa" stroke="#2a78d6" stroke-width="1.5"/>
+<text x="434" y="234" font-family="Helvetica,Arial,sans-serif" font-size="14" fill="#0c447c" font-weight="bold" text-anchor="start">FastAPI backend</text>
+<text x="434" y="254" font-family="Helvetica,Arial,sans-serif" font-size="11.5" fill="#185fa5" font-weight="normal" text-anchor="start">JWT auth · REST + WebSocket push</text>
+<text x="434" y="270" font-family="Helvetica,Arial,sans-serif" font-size="11.5" fill="#185fa5" font-weight="normal" text-anchor="start">Bot lifecycle commands (start / stop)</text>
+<text x="434" y="286" font-family="Helvetica,Arial,sans-serif" font-size="11.5" fill="#185fa5" font-weight="normal" text-anchor="start">Environment switch guard (bot must</text>
+<text x="434" y="302" font-family="Helvetica,Arial,sans-serif" font-size="11.5" fill="#185fa5" font-weight="normal" text-anchor="start">be stopped + confirmation dialog)</text>
+<rect x="1080" y="210" width="320" height="88" rx="8" fill="#fdf3e2" stroke="#eda100" stroke-width="1.5"/>
+<text x="1094" y="234" font-family="Helvetica,Arial,sans-serif" font-size="14" fill="#633806" font-weight="bold" text-anchor="start">Notifier service</text>
+<text x="1094" y="254" font-family="Helvetica,Arial,sans-serif" font-size="11.5" fill="#854f0b" font-weight="normal" text-anchor="start">Sends SMS through notify.lk gateway</text>
+<text x="1094" y="270" font-family="Helvetica,Arial,sans-serif" font-size="11.5" fill="#854f0b" font-weight="normal" text-anchor="start">Template per event type; every SMS</text>
+<text x="1094" y="286" font-family="Helvetica,Arial,sans-serif" font-size="11.5" fill="#854f0b" font-weight="normal" text-anchor="start">also logged to the events table</text>
+<line x1="200" y1="170" x2="200" y2="210" stroke="#5a6b7a" stroke-width="2" marker-end="url(#ah)"/>
+<line x1="360" y1="265" x2="420" y2="265" stroke="#5a6b7a" stroke-width="2" marker-end="url(#ah)"/>
+<line x1="1240" y1="210" x2="1240" y2="170" stroke="#ba7517" stroke-width="2" marker-end="url(#ah)"/>
+<text x="1258" y="194" font-family="Helvetica,Arial,sans-serif" font-size="11" fill="#5a6b7a" font-weight="normal" text-anchor="middle">SMS</text>
+<rect x="40" y="360" width="1000" height="300" rx="12" fill="#f4f8f6" stroke="#1d9e75" stroke-width="2" stroke-dasharray="7 5"/>
+<text x="56" y="386" font-family="Helvetica,Arial,sans-serif" font-size="15" fill="#085041" font-weight="bold" text-anchor="start">Trading core — 24/7 bot service (runs while started; state survives restarts)</text>
+<rect x="64" y="410" width="180" height="120" rx="8" fill="#ffffff" stroke="#1d9e75" stroke-width="1.5"/>
+<text x="78" y="434" font-family="Helvetica,Arial,sans-serif" font-size="14" fill="#085041" font-weight="bold" text-anchor="start">Scheduler</text>
+<text x="78" y="454" font-family="Helvetica,Arial,sans-serif" font-size="11.5" fill="#0f6e56" font-weight="normal" text-anchor="start">Wakes on every 4h</text>
+<text x="78" y="470" font-family="Helvetica,Arial,sans-serif" font-size="11.5" fill="#0f6e56" font-weight="normal" text-anchor="start">candle close (UTC)</text>
+<text x="78" y="486" font-family="Helvetica,Arial,sans-serif" font-size="11.5" fill="#0f6e56" font-weight="normal" text-anchor="start">News cron · health</text>
+<text x="78" y="502" font-family="Helvetica,Arial,sans-serif" font-size="11.5" fill="#0f6e56" font-weight="normal" text-anchor="start">checks · reconnects</text>
+<rect x="282" y="402" width="260" height="140" rx="8" fill="#eeedfe" stroke="#534ab7" stroke-width="1.5"/>
+<text x="296" y="426" font-family="Helvetica,Arial,sans-serif" font-size="14" fill="#26215c" font-weight="bold" text-anchor="start">Strategy plugin  (swappable)</text>
+<text x="296" y="446" font-family="Helvetica,Arial,sans-serif" font-size="11.5" fill="#3c3489" font-weight="normal" text-anchor="start">Active: Trend Rider v6</text>
+<text x="296" y="462" font-family="Helvetica,Arial,sans-serif" font-size="11.5" fill="#3c3489" font-weight="normal" text-anchor="start">· Long engine (v5.2 rules)</text>
+<text x="296" y="478" font-family="Helvetica,Arial,sans-serif" font-size="11.5" fill="#3c3489" font-weight="normal" text-anchor="start">· Short sleeve (deep bear, vol-sized)</text>
+<text x="296" y="494" font-family="Helvetica,Arial,sans-serif" font-size="11.5" fill="#3c3489" font-weight="normal" text-anchor="start">Speaks only Intents: EnterLong,</text>
+<text x="296" y="510" font-family="Helvetica,Arial,sans-serif" font-size="11.5" fill="#3c3489" font-weight="normal" text-anchor="start">EnterShort, MoveStop, ExitAll, Halt</text>
+<text x="292" y="556" font-family="Helvetica,Arial,sans-serif" font-size="10.5" fill="#534ab7" font-weight="normal" text-anchor="start">Also registered: v5.2 long-only · any future strategy — zero changes elsewhere</text>
+<rect x="580" y="410" width="210" height="120" rx="8" fill="#ffffff" stroke="#1d9e75" stroke-width="1.5"/>
+<text x="594" y="434" font-family="Helvetica,Arial,sans-serif" font-size="14" fill="#085041" font-weight="bold" text-anchor="start">Risk &amp; sizing engine</text>
+<text x="594" y="454" font-family="Helvetica,Arial,sans-serif" font-size="11.5" fill="#0f6e56" font-weight="normal" text-anchor="start">Risk % of equity · vol targeting</text>
+<text x="594" y="470" font-family="Helvetica,Arial,sans-serif" font-size="11.5" fill="#0f6e56" font-weight="normal" text-anchor="start">Leverage cap (hard max 3x)</text>
+<text x="594" y="486" font-family="Helvetica,Arial,sans-serif" font-size="11.5" fill="#0f6e56" font-weight="normal" text-anchor="start">4% monthly breakers (long</text>
+<text x="594" y="502" font-family="Helvetica,Arial,sans-serif" font-size="11.5" fill="#0f6e56" font-weight="normal" text-anchor="start">and short sleeve, separate)</text>
+<rect x="828" y="410" width="190" height="120" rx="8" fill="#ffffff" stroke="#1d9e75" stroke-width="1.5"/>
+<text x="842" y="434" font-family="Helvetica,Arial,sans-serif" font-size="14" fill="#085041" font-weight="bold" text-anchor="start">Execution engine</text>
+<text x="842" y="454" font-family="Helvetica,Arial,sans-serif" font-size="11.5" fill="#0f6e56" font-weight="normal" text-anchor="start">Order placement, fills,</text>
+<text x="842" y="470" font-family="Helvetica,Arial,sans-serif" font-size="11.5" fill="#0f6e56" font-weight="normal" text-anchor="start">lot-size / min-notional</text>
+<text x="842" y="486" font-family="Helvetica,Arial,sans-serif" font-size="11.5" fill="#0f6e56" font-weight="normal" text-anchor="start">rounding, retries,</text>
+<text x="842" y="502" font-family="Helvetica,Arial,sans-serif" font-size="11.5" fill="#0f6e56" font-weight="normal" text-anchor="start">account reconciliation</text>
+<line x1="244" y1="470" x2="282" y2="470" stroke="#5a6b7a" stroke-width="2" marker-end="url(#ah)"/>
+<line x1="542" y1="470" x2="580" y2="470" stroke="#5a6b7a" stroke-width="2" marker-end="url(#ah)"/>
+<text x="561" y="458" font-family="Helvetica,Arial,sans-serif" font-size="11" fill="#5a6b7a" font-weight="normal" text-anchor="middle">intents</text>
+<line x1="790" y1="470" x2="828" y2="470" stroke="#5a6b7a" stroke-width="2" marker-end="url(#ah)"/>
+<text x="809" y="458" font-family="Helvetica,Arial,sans-serif" font-size="11" fill="#5a6b7a" font-weight="normal" text-anchor="middle">orders</text>
+<line x1="570" y1="320" x2="570" y2="360" stroke="#5a6b7a" stroke-width="2" marker-end="url(#ah)"/>
+<text x="650" y="344" font-family="Helvetica,Arial,sans-serif" font-size="11" fill="#5a6b7a" font-weight="normal" text-anchor="middle">start / stop / status</text>
+<line x1="1040" y1="470" x2="1080" y2="300" stroke="#ba7517" stroke-width="2" marker-end="url(#ah)"/>
+<text x="945" y="336" font-family="Helvetica,Arial,sans-serif" font-size="11" fill="#854f0b" font-weight="normal" text-anchor="end">events: trade open / close · start / stop · breaker · error</text>
+<rect x="1080" y="360" width="320" height="300" rx="12" fill="#f7f0f5" stroke="#d4537e" stroke-width="2" stroke-dasharray="7 5"/>
+<text x="1096" y="386" font-family="Helvetica,Arial,sans-serif" font-size="15" fill="#72243e" font-weight="bold" text-anchor="start">AI news agent — isolated module</text>
+<text x="1096" y="404" font-family="Helvetica,Arial,sans-serif" font-size="11" fill="#993556" font-weight="normal" text-anchor="start">(read-only context; no access to trading or keys)</text>
+<rect x="1100" y="418" width="280" height="64" rx="8" fill="#ffffff" stroke="#d4537e" stroke-width="1.5"/>
+<text x="1114" y="442" font-family="Helvetica,Arial,sans-serif" font-size="14" fill="#72243e" font-weight="bold" text-anchor="start">1 · Collect</text>
+<text x="1114" y="462" font-family="Helvetica,Arial,sans-serif" font-size="11.5" fill="#993556" font-weight="normal" text-anchor="start">Crypto RSS + macro headlines +</text>
+<text x="1114" y="478" font-family="Helvetica,Arial,sans-serif" font-size="11.5" fill="#993556" font-weight="normal" text-anchor="start">FOMC / CPI economic calendar</text>
+<rect x="1100" y="500" width="280" height="64" rx="8" fill="#ffffff" stroke="#d4537e" stroke-width="1.5"/>
+<text x="1114" y="524" font-family="Helvetica,Arial,sans-serif" font-size="14" fill="#72243e" font-weight="bold" text-anchor="start">2 · Summarise (Claude API)</text>
+<text x="1114" y="544" font-family="Helvetica,Arial,sans-serif" font-size="11.5" fill="#993556" font-weight="normal" text-anchor="start">Daily briefing: 5–8 market-relevant</text>
+<text x="1114" y="560" font-family="Helvetica,Arial,sans-serif" font-size="11.5" fill="#993556" font-weight="normal" text-anchor="start">bullets, BTC-volatility flags</text>
+<rect x="1100" y="582" width="280" height="64" rx="8" fill="#ffffff" stroke="#d4537e" stroke-width="1.5"/>
+<text x="1114" y="606" font-family="Helvetica,Arial,sans-serif" font-size="14" fill="#72243e" font-weight="bold" text-anchor="start">3 · Publish briefing</text>
+<text x="1114" y="626" font-family="Helvetica,Arial,sans-serif" font-size="11.5" fill="#993556" font-weight="normal" text-anchor="start">Stored in DB → shown on dashboard</text>
+<text x="1114" y="642" font-family="Helvetica,Arial,sans-serif" font-size="11.5" fill="#993556" font-weight="normal" text-anchor="start">with source links + event dates panel</text>
+<line x1="1240" y1="482" x2="1240" y2="500" stroke="#5a6b7a" stroke-width="2" marker-end="url(#ah)"/>
+<line x1="1240" y1="564" x2="1240" y2="582" stroke="#5a6b7a" stroke-width="2" marker-end="url(#ah)"/>
+<rect x="40" y="700" width="1000" height="96" rx="8" fill="#f1efe8" stroke="#5f5e5a" stroke-width="1.5"/>
+<text x="54" y="724" font-family="Helvetica,Arial,sans-serif" font-size="14" fill="#2c2c2a" font-weight="bold" text-anchor="start">PostgreSQL — single source of truth</text>
+<text x="54" y="744" font-family="Helvetica,Arial,sans-serif" font-size="11.5" fill="#444441" font-weight="normal" text-anchor="start">settings (active environment DEMO | LIVE, active strategy, risk %) · api_credentials (AES-GCM encrypted) · strategies · bot_runs</text>
+<text x="54" y="760" font-family="Helvetica,Arial,sans-serif" font-size="11.5" fill="#444441" font-weight="normal" text-anchor="start">candles · trades · orders · equity snapshots · events (full audit incl. every SMS) · news_items · briefings   — all timestamps UTC, numeric(20,8)</text>
+<line x1="540" y1="660" x2="540" y2="700" stroke="#5a6b7a" stroke-width="2" marker-end="url(#ah)"/>
+<text x="700" y="684" font-family="Helvetica,Arial,sans-serif" font-size="11" fill="#5a6b7a" font-weight="normal" text-anchor="middle">every decision, order, fill, event persisted</text>
+<line x1="1150" y1="660" x2="1060" y2="736" stroke="#993556" stroke-width="2" marker-end="url(#ah)"/>
+<text x="1122" y="690" font-family="Helvetica,Arial,sans-serif" font-size="11" fill="#993556" font-weight="normal" text-anchor="middle">briefings</text>
+<line x1="200" y1="320" x2="200" y2="700" stroke="#2a78d6" stroke-width="1.5" stroke-dasharray="3 5" marker-end="url(#ah)"/>
+<text x="72" y="648" font-family="Helvetica,Arial,sans-serif" font-size="10.5" fill="#2a78d6" font-weight="normal" text-anchor="start">dashboard reads history / equity / news</text>
+<text x="40" y="848" font-family="Helvetica,Arial,sans-serif" font-size="15" fill="#0c2a45" font-weight="bold" text-anchor="start">External services</text>
+<rect x="40" y="862" width="300" height="92" rx="8" fill="#e8f0fa" stroke="#2a78d6" stroke-width="1.5"/>
+<text x="54" y="886" font-family="Helvetica,Arial,sans-serif" font-size="14" fill="#0c447c" font-weight="bold" text-anchor="start">Binance USDT-M — DEMO (testnet)</text>
+<text x="54" y="906" font-family="Helvetica,Arial,sans-serif" font-size="11.5" fill="#185fa5" font-weight="normal" text-anchor="start">Phase 1: all trading validated here first.</text>
+<text x="54" y="922" font-family="Helvetica,Arial,sans-serif" font-size="11.5" fill="#185fa5" font-weight="normal" text-anchor="start">Own API key pair, stored per environment.</text>
+<rect x="380" y="862" width="300" height="92" rx="8" fill="#fcebeb" stroke="#e24b4a" stroke-width="1.5"/>
+<text x="394" y="886" font-family="Helvetica,Arial,sans-serif" font-size="14" fill="#791f1f" font-weight="bold" text-anchor="start">Binance USDT-M — LIVE</text>
+<text x="394" y="906" font-family="Helvetica,Arial,sans-serif" font-size="11.5" fill="#a32d2d" font-weight="normal" text-anchor="start">Phase 2: enabled from Settings only after</text>
+<text x="394" y="922" font-family="Helvetica,Arial,sans-serif" font-size="11.5" fill="#a32d2d" font-weight="normal" text-anchor="start">DEMO sign-off. Withdrawal permission is</text>
+<text x="394" y="938" font-family="Helvetica,Arial,sans-serif" font-size="11.5" fill="#a32d2d" font-weight="normal" text-anchor="start">NEVER granted to the API key.</text>
+<rect x="720" y="862" width="210" height="92" rx="8" fill="#fdf3e2" stroke="#eda100" stroke-width="1.5"/>
+<text x="734" y="886" font-family="Helvetica,Arial,sans-serif" font-size="14" fill="#633806" font-weight="bold" text-anchor="start">notify.lk</text>
+<text x="734" y="906" font-family="Helvetica,Arial,sans-serif" font-size="11.5" fill="#854f0b" font-weight="normal" text-anchor="start">SMS gateway (Sri Lanka).</text>
+<text x="734" y="922" font-family="Helvetica,Arial,sans-serif" font-size="11.5" fill="#854f0b" font-weight="normal" text-anchor="start">HTTP API, sender ID,</text>
+<text x="734" y="938" font-family="Helvetica,Arial,sans-serif" font-size="11.5" fill="#854f0b" font-weight="normal" text-anchor="start">delivery status logged.</text>
+<rect x="970" y="862" width="200" height="92" rx="8" fill="#f7f0f5" stroke="#d4537e" stroke-width="1.5"/>
+<text x="984" y="886" font-family="Helvetica,Arial,sans-serif" font-size="14" fill="#72243e" font-weight="bold" text-anchor="start">Claude API</text>
+<text x="984" y="906" font-family="Helvetica,Arial,sans-serif" font-size="11.5" fill="#993556" font-weight="normal" text-anchor="start">News summarisation</text>
+<text x="984" y="922" font-family="Helvetica,Arial,sans-serif" font-size="11.5" fill="#993556" font-weight="normal" text-anchor="start">(claude-haiku-4-5;</text>
+<text x="984" y="938" font-family="Helvetica,Arial,sans-serif" font-size="11.5" fill="#993556" font-weight="normal" text-anchor="start">sonnet configurable).</text>
+<rect x="1210" y="862" width="190" height="92" rx="8" fill="#f7f0f5" stroke="#d4537e" stroke-width="1.5"/>
+<text x="1224" y="886" font-family="Helvetica,Arial,sans-serif" font-size="14" fill="#72243e" font-weight="bold" text-anchor="start">RSS / calendar feeds</text>
+<text x="1224" y="906" font-family="Helvetica,Arial,sans-serif" font-size="11.5" fill="#993556" font-weight="normal" text-anchor="start">CoinDesk, CoinTelegraph,</text>
+<text x="1224" y="922" font-family="Helvetica,Arial,sans-serif" font-size="11.5" fill="#993556" font-weight="normal" text-anchor="start">macro headlines,</text>
+<text x="1224" y="938" font-family="Helvetica,Arial,sans-serif" font-size="11.5" fill="#993556" font-weight="normal" text-anchor="start">FOMC / CPI dates.</text>
+<line x1="900" y1="530" x2="900" y2="560" stroke="#5a6b7a" stroke-width="2" marker-end="url(#ah)"/>
+<line x1="900" y1="560" x2="900" y2="620" stroke="#5a6b7a" stroke-width="2"/>
+<line x1="900" y1="620" x2="220" y2="620" stroke="#5a6b7a" stroke-width="2" stroke-dasharray="4 4"/>
+<line x1="220" y1="620" x2="190" y2="862" stroke="#5a6b7a" stroke-width="2" marker-end="url(#ah)"/>
+<text x="420" y="642" font-family="Helvetica,Arial,sans-serif" font-size="11" fill="#5a6b7a" font-weight="normal" text-anchor="middle">account data + orders (active environment only)</text>
+<line x1="900" y1="620" x2="530" y2="862" stroke="#5a6b7a" stroke-width="2" marker-end="url(#ah)" stroke-dasharray="4 4"/>
+<line x1="1150" y1="298" x2="1060" y2="340" stroke="#ba7517" stroke-width="2"/>
+<line x1="1060" y1="340" x2="1060" y2="838" stroke="#ba7517" stroke-width="2"/>
+<line x1="1060" y1="838" x2="900" y2="862" stroke="#ba7517" stroke-width="2" marker-end="url(#ah)"/>
+<line x1="1100" y1="545" x2="1050" y2="862" stroke="#993556" stroke-width="2" marker-end="url(#ah)"/>
+<line x1="1330" y1="862" x2="1330" y2="665" stroke="#993556" stroke-width="2" marker-end="url(#ah)"/>
+<text x="1352" y="770" font-family="Helvetica,Arial,sans-serif" font-size="11" fill="#993556" font-weight="normal" text-anchor="middle">fetch</text>
+<rect x="40" y="970" width="1360" height="64" rx="8" fill="#eaf3de" stroke="#639922" stroke-width="1.5"/>
+<text x="60" y="996" font-family="Helvetica,Arial,sans-serif" font-size="12.5" fill="#27500a" font-weight="normal" text-anchor="start">Rollout: 1) DEMO (testnet) account for 4+ weeks — results must match backtest behaviour  →  2) owner sign-off  →  3) switch to LIVE in Settings (bot stopped, confirmed, small risk % first).</text>
+<text x="60" y="1016" font-family="Helvetica,Arial,sans-serif" font-size="12.5" fill="#27500a" font-weight="normal" text-anchor="start">Start / Stop is available at any moment from the dashboard; the kill-switch flattens all positions and halts the bot instantly. Withdrawal permission is never granted to any API key.</text>
+</svg>

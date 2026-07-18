@@ -48,7 +48,10 @@ test("QA-0.05 no secrets exposed to the client", async ({ page }) => {
   await page.goto("/");
   await page.waitForLoadState("networkidle");
   const blob = responses.join("\n").toLowerCase();
-  for (const forbidden of ["master_key", "jwt_secret", "postgres_password", "api_secret"]) {
+  // Server-side secrets that must never reach the client. ("api_secret" is a
+  // legitimate write-only *field name* in the client code — actual secret values
+  // never being exposed is verified by QA-2.06.)
+  for (const forbidden of ["master_key", "jwt_secret", "postgres_password"]) {
     expect(blob).not.toContain(forbidden);
   }
 });

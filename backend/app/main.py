@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import auth, health
+from app.api import auth, events, health, market, settings_api
 from app.core.config import get_settings
 from app.core.logging import configure_logging, get_logger
 
@@ -19,7 +19,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     configure_logging(level=settings.log_level, json_output=settings.log_json)
     log = get_logger("app")
     log.info("app_starting", version=settings.version, environment=settings.environment)
+
+    from app.bot.ingest import ingest_service
+
+    if settings.environment != "test":
+        await ingest_service.start()
+
     yield
+
+    if settings.environment != "test":
+        await ingest_service.stop()
     from app.db.session import dispose_engine
 
     await dispose_engine()
@@ -42,6 +51,9 @@ def create_app() -> FastAPI:
     )
     app.include_router(health.router)
     app.include_router(auth.router)
+    app.include_router(events.router)
+    app.include_router(market.router)
+    app.include_router(settings_api.router)
     return app
 
 

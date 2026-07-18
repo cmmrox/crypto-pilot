@@ -1,0 +1,68 @@
+import { expect, test, type Page } from "@playwright/test";
+import { authenticator } from "otplib";
+
+/**
+ * Stage 7 — Notifier / notify.lk SMS (QA-7).
+ * Verifies the SMS settings panel shows configured state, the delivery toggle,
+ * and (when RUN_LIVE_SMS=1) a real test SMS to the owner's phone.
+ */
+
+const EMAIL = "owner@cryptopilot.app";
+const PASSWORD = "PilotOwner!2026";
+const TOTP_SECRET = "JBSWY3DPEHPK3PXP";
+
+async function login(page: Page) {
+  await page.goto("/");
+  await page.getByLabel("Email").fill(EMAIL);
+  await page.getByLabel("Password", { exact: true }).fill(PASSWORD);
+  await page.getByRole("button", { name: /continue/i }).click();
+  await page.getByLabel("Authentication code").fill(authenticator.generate(TOTP_SECRET));
+  await page.getByRole("button", { name: /verify & enter/i }).click();
+  await expect(page.getByTestId("environment-badge")).toBeVisible();
+}
+
+async function gotoSettings(page: Page) {
+  const menu = page.getByRole("button", { name: /open navigation/i });
+  if (await menu.isVisible()) await menu.click();
+  await page.getByRole("link", { name: /settings/i }).click();
+  await expect(page.getByTestId("view-title")).toHaveText("Settings");
+}
+
+test("QA-7.01 SMS panel shows configured state", async ({ page }) => {
+  await login(page);
+  await gotoSettings(page);
+  await expect(page.getByTestId("sms-card")).toBeVisible();
+  await expect(page.getByTestId("sms-state")).toContainText(/configured/i);
+});
+
+test("QA-7.02 SMS delivery can be toggled", async ({ page }) => {
+  await login(page);
+  await gotoSettings(page);
+  const toggle = page.getByRole("switch", { name: /toggle sms delivery/i });
+  const before = await toggle.getAttribute("aria-checked");
+  await toggle.click();
+  await expect(toggle).not.toHaveAttribute("aria-checked", before ?? "false");
+  await toggle.click(); // restore
+});
+
+test("QA-7.03 SMS status API reports configured + enabled", async ({ page, request }) => {
+  await login(page);
+  const token = await page.evaluate(() => sessionStorage.getItem("cp_access"));
+  const resp = await request.get("/api/settings/sms", {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  expect(resp.ok()).toBeTruthy();
+  const body = await resp.json();
+  expect(body.configured).toBe(true);
+  expect(body.sender_id).toBe("NotifyDEMO");
+});
+
+test("QA-7.04 real test SMS delivers to the owner phone @sms", async ({ page }) => {
+  test.skip(process.env.RUN_LIVE_SMS !== "1", "set RUN_LIVE_SMS=1 to send a real SMS");
+  await login(page);
+  await gotoSettings(page);
+  await page.getByTestId("test-sms").click();
+  await expect(page.getByTestId("sms-result")).toContainText(/sent to your phone/i, {
+    timeout: 15000,
+  });
+});

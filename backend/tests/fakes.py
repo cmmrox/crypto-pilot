@@ -88,3 +88,22 @@ class FakeExchange:
 
     async def set_leverage(self, symbol, leverage) -> None:
         self.leverage = leverage
+
+
+class FakeSmsGateway:
+    """In-memory SMS gateway. `fail_times` first sends fail, then succeed."""
+
+    def __init__(self, *, fail_times: int = 0, always_fail: bool = False) -> None:
+        self.sent: list[tuple[str, str]] = []
+        self._fail_times = fail_times
+        self._always_fail = always_fail
+        self.attempts = 0
+
+    async def send(self, to: str, message: str):  # type: ignore[no-untyped-def]
+        from app.notifier.gateway import SmsResult
+
+        self.attempts += 1
+        if self._always_fail or self.attempts <= self._fail_times:
+            return SmsResult(False, "simulated failure")
+        self.sent.append((to, message))
+        return SmsResult(True, "delivered")

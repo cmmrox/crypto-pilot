@@ -76,6 +76,19 @@ class OrderManager:
             payload={"qty": str(sizing.qty), "entry": str(entry.avg_price),
                      "stop": str(stop_price), "tp1": str(tp1_price)},
         )
+        from app.services.notify_config import notify_event
+
+        await notify_event(
+            session,
+            kind="trade_opened",
+            payload={
+                "side": "LONG",
+                "qty": str(sizing.qty),
+                "price": str(entry.avg_price),
+                "risk_context": f"Stop {stop_price}, TP1 {tp1_price}",
+                "environment": self._env,
+            },
+        )
         return trade
 
     async def open_short(
@@ -99,6 +112,13 @@ class OrderManager:
             ref=f"trade:{trade.id}",
             payload={"qty": str(sizing.qty), "entry": str(entry.avg_price),
                      "leverage": str(sizing.leverage), "price_stop": None},
+        )
+        from app.services.notify_config import notify_event
+
+        await notify_event(
+            session, kind="short_opened",
+            payload={"qty": str(sizing.qty), "price": str(entry.avg_price),
+                     "weight": f"{sizing.leverage:.0%}"},
         )
         return trade
 

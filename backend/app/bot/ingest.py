@@ -11,6 +11,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.bot.scheduler import DeadMan, seconds_until_next_close, utc_now
 from app.core.logging import get_logger
 from app.db.session import get_sessionmaker
@@ -79,8 +81,49 @@ class CandleIngestService:
                     payload={"reason": reason, "gaps": len(gaps), "environment": env},
                 )
                 await session.commit()
+                # Drive the bot on a real candle close (not on startup catch-up).
+                if reason == "candle_close":
+                    await self._drive_bot(session)
         except Exception as exc:
             _log.error("ingest_failed", reason=reason, error=str(exc))
+
+    async def _drive_bot(self, session: AsyncSession) -> None:
+        """If the bot is running and credentials exist, evaluate the closed candle."""
+        from sqlalchemy import select
+
+        from app.bot.service import bot_service
+        from app.bot.state import BotStatus
+        from app.db.models import Candle
+        from app.services.execution_service import NotConfiguredError, execution_context
+
+        snap = await bot_service.status(session)
+        if snap.status != BotStatus.RUNNING:
+            return
+        candles = (
+            (
+                await session.execute(
+                    select(Candle)
+                    .where(Candle.symbol == SYMBOL, Candle.interval == INTERVAL)
+                    .order_by(Candle.open_time.desc())
+                    .limit(400)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        candles = list(reversed(candles))
+        try:
+            async with execution_context(session) as ctx:
+                actions = await bot_service.evaluate_once(
+                    session, ctx.exchange, ctx.orders, candles=candles
+                )
+                if actions:
+                    _log.info("bot_actions", actions=actions)
+                await session.commit()
+        except NotConfiguredError:
+            return
+        except Exception as exc:
+            _log.error("bot_drive_failed", error=str(exc))
 
 
 ingest_service = CandleIngestService()

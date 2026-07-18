@@ -16,6 +16,7 @@ import {
 import { useAuth } from "../auth/store";
 import { PlaceholderView } from "./PlaceholderView";
 import { Events } from "../views/Events";
+import { Overview } from "../views/Overview";
 import { Settings as SettingsView } from "../views/Settings";
 
 const NAV = [
@@ -119,9 +120,12 @@ export function Shell() {
         <main className="content">
           <Routes>
             <Route path="/" element={<Navigate to="/overview" replace />} />
+            <Route path="/overview" element={<Overview />} />
             <Route path="/events" element={<Events />} />
             <Route path="/settings" element={<SettingsView />} />
-            {NAV.filter((i) => i.to !== "/events" && i.to !== "/settings").map((item) => (
+            {NAV.filter(
+              (i) => !["/overview", "/events", "/settings"].includes(i.to),
+            ).map((item) => (
               <Route
                 key={item.to}
                 path={item.to}

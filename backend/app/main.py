@@ -14,10 +14,12 @@ from app.api import (
     events,
     health,
     market,
+    monthly,
     ops,
     overview,
     settings_api,
     strategies_api,
+    trades,
 )
 from app.core.config import get_settings
 from app.core.logging import configure_logging, get_logger
@@ -68,6 +70,8 @@ def create_app() -> FastAPI:
     app.include_router(ops.router)
     app.include_router(bot.router)
     app.include_router(overview.router)
+    app.include_router(trades.router)
+    app.include_router(monthly.router)
     return app
 
 

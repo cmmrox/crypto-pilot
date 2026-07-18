@@ -49,6 +49,8 @@ jobs:
           alembic upgrade head
           alembic downgrade base
           alembic upgrade head
+      - name: Strategy parity gate (must be zero mismatches — BSD G1)
+        run: source .venv/bin/activate && pytest -q -m parity
       - name: Unit + integration tests
         run: source .venv/bin/activate && pytest -q --cov=app --cov-report=term-missing
 

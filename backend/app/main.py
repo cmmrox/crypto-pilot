@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import auth, events, health, market, settings_api
+from app.api import auth, events, health, market, settings_api, strategies_api
 from app.core.config import get_settings
 from app.core.logging import configure_logging, get_logger
 
@@ -54,6 +54,7 @@ def create_app() -> FastAPI:
     app.include_router(events.router)
     app.include_router(market.router)
     app.include_router(settings_api.router)
+    app.include_router(strategies_api.router)
     return app
 
 

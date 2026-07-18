@@ -56,13 +56,13 @@ test("QA-2.03 event ledger lists ingest events and opens payload drawer", async 
   await login(page);
   await gotoEvents(page);
   const table = page.getByTestId("events-table");
-  await page.getByLabel("Filter category").selectOption("system");
-  // Wait for the filtered reload to settle before interacting.
+  // Search for the ingest event specifically (robust to other system events).
+  await page.getByLabel("Search events").fill("candle ingest");
   await expect(table.locator(".category").first()).toHaveText("system");
   await table.getByRole("button").first().click();
-  // Drawer shows the reconstructable payload JSON.
+  // Drawer shows the reconstructable ingest payload JSON.
   await expect(page.getByTestId("payload-json")).toBeVisible();
-  await expect(page.getByTestId("payload-json")).toContainText(/reason|environment|gaps/);
+  await expect(page.getByTestId("payload-json")).toContainText(/reason|gaps/);
 });
 
 test("QA-2.04 event filters narrow the list", async ({ page }) => {

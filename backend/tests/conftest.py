@@ -14,9 +14,20 @@ import pytest
 
 @pytest.fixture(scope="session")
 def postgres_url() -> Iterator[str]:
-    """Yield an async DSN for a throwaway Postgres (env override or testcontainers)."""
+    """Yield an async DSN for a throwaway Postgres (env override or testcontainers).
+
+    Safety guard: tests drop/recreate all tables, so refuse to run against a
+    database literally named 'cryptopilot' (the application database) to avoid
+    wiping live/dev data. Use 'cryptopilot_test' or leave the env var unset
+    (testcontainers).
+    """
     env_url = os.environ.get("CP_TEST_DATABASE_URL")
     if env_url:
+        if env_url.rstrip("/").endswith("/cryptopilot"):
+            raise RuntimeError(
+                "Refusing to run tests against the app database 'cryptopilot' — "
+                "point CP_TEST_DATABASE_URL at 'cryptopilot_test' instead."
+            )
         yield env_url
         return
     from testcontainers.postgres import PostgresContainer
@@ -126,6 +137,6 @@ async def db_session(postgres_url: str) -> AsyncIterator[object]:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
-    async with AsyncSession(engine) as session:
+    async with AsyncSession(engine, expire_on_commit=False) as session:
         yield session
     await engine.dispose()

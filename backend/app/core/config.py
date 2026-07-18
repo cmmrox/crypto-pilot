@@ -51,6 +51,10 @@ class Settings(BaseSettings):
     # --- CORS / frontend ---
     frontend_origin: str = "http://localhost:5173"
 
+    # --- Codex (news LLM) ---
+    codex_home: str = "/data/codex"  # persisted auth dir (CODEX_HOME)
+    news_model: str = "gpt-5.5"
+
     # --- Logging ---
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     log_json: bool = True

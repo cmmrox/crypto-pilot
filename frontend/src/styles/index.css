@@ -1385,3 +1385,40 @@ a {
 }
 .toggle.on { background: rgb(45 219 145 / 25%); border-color: rgb(45 219 145 / 50%); }
 .toggle.on i { transform: translateX(20px); background: var(--green); }
+
+/* --- Stage 8: news + codex device-code --- */
+.news-grid { display: grid; grid-template-columns: 1.5fr 1fr; gap: 16px; }
+.news-sidebar { display: grid; gap: 16px; align-content: start; }
+.briefing-bullets { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 10px; }
+.briefing-bullets li { display: flex; gap: 10px; }
+.briefing-bullets li span { color: var(--green); margin-top: 2px; }
+.briefing-bullets p { margin: 0; color: var(--text-soft); font-size: 0.9rem; }
+.briefing-bullets small { color: var(--subtle); font-size: 0.72rem; }
+.ai-boundary {
+  display: flex; gap: 10px; align-items: flex-start; margin-top: 16px;
+  padding: 12px; border-radius: 10px; border: 1px solid rgb(45 219 145 / 25%);
+  background: rgb(45 219 145 / 6%); color: var(--green);
+}
+.ai-boundary p { margin: 0; color: var(--text-soft); font-size: 0.8rem; }
+.calendar-event { display: flex; gap: 12px; align-items: center; padding: 9px 0; border-bottom: 1px solid var(--border-soft); }
+.calendar-event time { color: var(--amber); font-weight: 700; font-size: 0.8rem; min-width: 44px; }
+.calendar-event strong { display: block; font-size: 0.85rem; }
+.calendar-event small { color: var(--muted); font-size: 0.72rem; }
+.archive-list { display: grid; gap: 6px; margin-top: 8px; }
+.archive-item { display: flex; justify-content: space-between; font-size: 0.82rem; color: var(--text-soft); }
+.source-tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.source-tags span { border: 1px solid var(--border); border-radius: 999px; padding: 4px 10px; font-size: 0.72rem; color: var(--muted); }
+.sources-panel a { display: inline-flex; align-items: center; gap: 5px; color: var(--amber); font-size: 0.8rem; }
+.device-code {
+  border: 1px solid rgb(245 166 35 / 35%); background: rgb(245 166 35 / 6%);
+  border-radius: 10px; padding: 14px; display: grid; gap: 8px;
+}
+.device-code p { margin: 0; font-size: 0.85rem; }
+.device-url { color: var(--amber); display: inline-flex; align-items: center; gap: 6px; word-break: break-all; }
+.device-code-box { display: flex; align-items: center; gap: 10px; }
+.device-code-box code {
+  font-size: 1.4rem; letter-spacing: 0.15em; background: var(--panel-2);
+  border: 1px solid var(--border); border-radius: 8px; padding: 8px 14px; color: var(--text);
+}
+.device-code small { color: var(--muted); font-size: 0.72rem; }
+@media (max-width: 860px) { .news-grid { grid-template-columns: 1fr; } }

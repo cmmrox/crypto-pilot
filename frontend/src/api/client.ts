@@ -414,3 +414,41 @@ export const toggleSms = (enabled: boolean) =>
   });
 export const testSms = () =>
   apiRequest<{ ok: boolean; detail: string }>("/api/settings/sms/test", { method: "POST" });
+
+// --- News + Codex ---
+
+export interface NewsBriefing {
+  briefing_date: string | null;
+  model: string | null;
+  sentiment: string | null;
+  bullets: { text: string; source: string }[];
+  generated_at: string | null;
+  macro_calendar: { date: string; event: string; impact: string }[];
+  isolation_notice: string;
+}
+
+export interface ArchiveItem {
+  briefing_date: string;
+  sentiment: string | null;
+  model: string | null;
+}
+
+export const getLatestBriefing = () => apiRequest<NewsBriefing>("/api/news/latest");
+export const getNewsArchive = () => apiRequest<ArchiveItem[]>("/api/news/archive");
+export const refreshBriefing = () =>
+  apiRequest<{ ok: boolean; detail: string }>("/api/news/refresh", { method: "POST" });
+
+export interface CodexLoginStart {
+  login_id: string;
+  verification_url: string;
+  user_code: string;
+}
+
+export const getCodexStatus = () =>
+  apiRequest<{ authenticated: boolean }>("/api/settings/codex/status");
+export const startCodexLogin = () =>
+  apiRequest<CodexLoginStart>("/api/settings/codex/login", { method: "POST" });
+export const getCodexLoginStatus = (loginId: string) =>
+  apiRequest<{ status: string; detail: string }>(`/api/settings/codex/login/${loginId}`);
+export const codexLogout = () =>
+  apiRequest<{ message: string }>("/api/settings/codex/logout", { method: "POST" });

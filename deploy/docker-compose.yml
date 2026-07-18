@@ -35,6 +35,9 @@ services:
       CP_FRONTEND_ORIGIN: ${CP_FRONTEND_ORIGIN}
       CP_LOG_LEVEL: ${CP_LOG_LEVEL}
       CP_LOG_JSON: ${CP_LOG_JSON}
+      CP_CODEX_HOME: /data/codex
+    volumes:
+      - codex_data:/data/codex
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 10s
@@ -64,5 +67,6 @@ services:
 
 volumes:
   pgdata:
+  codex_data:
   caddy_data:
   caddy_config:

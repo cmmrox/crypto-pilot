@@ -83,6 +83,12 @@ class BotService:
             payload={"environment": run.environment, "strategy": run.strategy,
                      "reconciled": rec.matched, "detail": rec.detail},
         )
+        from app.services.notify_config import notify_event
+
+        await notify_event(
+            session, kind="bot_started",
+            payload={"environment": run.environment, "strategy": run.strategy, "equity": "—"},
+        )
         return run
 
     async def stop(self, session: AsyncSession, *, reason: str = "user") -> None:
@@ -97,6 +103,9 @@ class BotService:
             message="Bot stopped — open position left with its exchange stops",
             ref=f"bot_run:{run.id}", payload={"reason": reason},
         )
+        from app.services.notify_config import notify_event
+
+        await notify_event(session, kind="bot_stopped", payload={"actor": reason})
 
     async def stop_and_close(
         self, session: AsyncSession, exchange: Exchange, orders: OrderManager

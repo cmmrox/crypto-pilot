@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUserDep
@@ -17,7 +18,9 @@ from app.api.schemas import (
 from app.db.session import get_session
 from app.execution.binance_client import BinanceClient, BinanceError
 from app.services import credentials as cred_svc
+from app.services import notify_config as notify_svc
 from app.services.events import record_event
+from app.services.settings_store import get_settings_row
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -93,3 +96,76 @@ async def test_binance_connection(
             )
     except BinanceError as exc:
         return ConnectionTestOut(ok=False, detail=f"Connection failed: {exc}")
+
+
+# --- notify.lk SMS ---
+
+
+class SmsConfigIn(BaseModel):
+    user_id: str = Field(min_length=1, max_length=64)
+    api_key: str = Field(min_length=1, max_length=256)
+    sender_id: str = Field(min_length=1, max_length=32)
+    phone: str = Field(min_length=9, max_length=15)
+
+
+class SmsStatusOut(BaseModel):
+    configured: bool
+    sender_id: str | None
+    phone_hint: str | None
+    sms_enabled: bool
+
+
+class SmsToggleIn(BaseModel):
+    enabled: bool
+
+
+@router.get("/sms", response_model=SmsStatusOut)
+async def sms_status(_current: CurrentUserDep, session: SessionDep) -> SmsStatusOut:
+    st = await notify_svc.config_status(session)
+    return SmsStatusOut(
+        configured=bool(st["configured"]),
+        sender_id=st["sender_id"],
+        phone_hint=st["phone_hint"],
+        sms_enabled=bool(st["sms_enabled"]),
+    )
+
+
+@router.put("/sms", response_model=MessageResponse)
+async def save_sms(
+    body: SmsConfigIn, current: CurrentUserDep, session: SessionDep
+) -> MessageResponse:
+    await notify_svc.save_notify_config(
+        session, user_id=body.user_id, api_key=body.api_key,
+        sender_id=body.sender_id, phone=body.phone,
+    )
+    await record_event(
+        session, level="INFO", category="security",
+        message="notify.lk SMS credentials updated", ref="sms_config",
+        payload={"sender_id": body.sender_id},
+    )
+    return MessageResponse(message="SMS credentials stored")
+
+
+@router.post("/sms/toggle", response_model=MessageResponse)
+async def toggle_sms(
+    body: SmsToggleIn, current: CurrentUserDep, session: SessionDep
+) -> MessageResponse:
+    row = await get_settings_row(session)
+    row.sms_enabled = body.enabled
+    return MessageResponse(message=f"SMS {'enabled' if body.enabled else 'disabled'}")
+
+
+@router.post("/sms/test", response_model=ConnectionTestOut)
+async def test_sms(_current: CurrentUserDep, session: SessionDep) -> ConnectionTestOut:
+    """Send a real test SMS to the configured phone."""
+    cfg = await notify_svc.get_notify_config(session)
+    if cfg is None:
+        return ConnectionTestOut(ok=False, detail="No SMS credentials configured.")
+    from app.notifier.gateway import NotifyLkGateway
+
+    gw = NotifyLkGateway(cfg.user_id, cfg.api_key, cfg.sender_id)
+    try:
+        result = await gw.send(cfg.phone, "CryptoPilot: test SMS — notifications are working.")
+    finally:
+        await gw.close()
+    return ConnectionTestOut(ok=result.ok, detail=result.detail)

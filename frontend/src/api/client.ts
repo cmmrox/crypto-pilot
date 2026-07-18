@@ -390,3 +390,27 @@ export const markWithdrawn = (month: string) =>
     method: "POST",
     body: JSON.stringify({ month }),
   });
+
+// --- SMS (notify.lk) ---
+
+export interface SmsStatus {
+  configured: boolean;
+  sender_id: string | null;
+  phone_hint: string | null;
+  sms_enabled: boolean;
+}
+
+export const getSmsStatus = () => apiRequest<SmsStatus>("/api/settings/sms");
+export const saveSmsConfig = (body: {
+  user_id: string;
+  api_key: string;
+  sender_id: string;
+  phone: string;
+}) => apiRequest<{ message: string }>("/api/settings/sms", { method: "PUT", body: JSON.stringify(body) });
+export const toggleSms = (enabled: boolean) =>
+  apiRequest<{ message: string }>("/api/settings/sms/toggle", {
+    method: "POST",
+    body: JSON.stringify({ enabled }),
+  });
+export const testSms = () =>
+  apiRequest<{ ok: boolean; detail: string }>("/api/settings/sms/test", { method: "POST" });

@@ -1362,3 +1362,26 @@ a {
   .trade-head { display: none; }
   .trade-row { grid-template-columns: 1fr 1fr; gap: 4px; }
 }
+
+/* --- Stage 7: SMS toggle + setting row --- */
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 0;
+  border-top: 1px solid var(--border-soft);
+  border-bottom: 1px solid var(--border-soft);
+}
+.setting-row strong { display: block; font-size: 0.9rem; }
+.setting-row small { color: var(--muted); font-size: 0.75rem; }
+.toggle {
+  width: 44px; height: 24px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--panel-2);
+  position: relative; transition: background 120ms;
+}
+.toggle i {
+  position: absolute; top: 2px; left: 2px; width: 18px; height: 18px;
+  border-radius: 50%; background: var(--muted); transition: transform 120ms, background 120ms;
+}
+.toggle.on { background: rgb(45 219 145 / 25%); border-color: rgb(45 219 145 / 50%); }
+.toggle.on i { transform: translateX(20px); background: var(--green); }

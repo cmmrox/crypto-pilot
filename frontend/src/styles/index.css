@@ -927,3 +927,49 @@ a {
     grid-template-columns: 1fr;
   }
 }
+
+/* --- Stage 3: strategy library --- */
+.strategy-list {
+  display: grid;
+  gap: 10px;
+}
+.strategy-list article {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  background: var(--panel-2);
+}
+.strategy-list article.active {
+  border-color: rgb(245 166 35 / 40%);
+}
+.strategy-list strong {
+  display: block;
+}
+.strategy-list code {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+.strategy-dir {
+  color: var(--text-soft);
+  font-size: 0.8rem;
+}
+.strategy-badges {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.pill.ok svg,
+.pill.warn svg {
+  vertical-align: -2px;
+  margin-right: 3px;
+}
+@media (max-width: 860px) {
+  .strategy-list article {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+}

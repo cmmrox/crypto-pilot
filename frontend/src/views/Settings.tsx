@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
-import { CheckCircle2, KeyRound, PlugZap, ShieldCheck } from "lucide-react";
+import { CheckCircle2, KeyRound, PlugZap, ShieldCheck, Waypoints } from "lucide-react";
 import {
   getCredentialStatus,
+  getStrategies,
   saveCredential,
   testBinanceConnection,
   type CredentialStatus,
+  type StrategyInfo,
 } from "../api/client";
 
 /** Stage 2 Settings: Binance API credentials (write-only) + connection test. */
@@ -18,6 +20,7 @@ export function Settings() {
           <p>API credentials are write-only and encrypted at rest (AES-GCM).</p>
         </div>
       </div>
+      <StrategyLibrary />
       <CredentialCard environment="DEMO" />
       <CredentialCard environment="LIVE" />
       <div className="panel key-permissions">
@@ -46,6 +49,48 @@ export function Settings() {
             </span>
           ))}
         </div>
+      </div>
+    </div>
+  );
+}
+
+function StrategyLibrary() {
+  const [strategies, setStrategies] = useState<StrategyInfo[]>([]);
+  useEffect(() => {
+    void getStrategies().then(setStrategies).catch(() => setStrategies([]));
+  }, []);
+  return (
+    <div className="panel" data-testid="strategy-library">
+      <div className="settings-heading">
+        <span className="settings-icon">
+          <Waypoints size={18} />
+        </span>
+        <div>
+          <p className="kicker">REGISTERED PLUGINS</p>
+          <h2>Strategy library</h2>
+          <p>Deployed configuration is read-only; changes ship as validated releases.</p>
+        </div>
+      </div>
+      <div className="strategy-list">
+        {strategies.map((s) => (
+          <article key={s.name} className={s.active ? "active" : ""} data-testid={`strategy-${s.name}`}>
+            <div>
+              <strong>{s.name}</strong>
+              <code>release {s.validated_release}</code>
+            </div>
+            <span className="strategy-dir">{s.direction}</span>
+            <div className="strategy-badges">
+              {s.parity_verified && (
+                <span className="pill ok" data-testid={`parity-${s.name}`}>
+                  <CheckCircle2 size={12} /> Parity verified
+                </span>
+              )}
+              <span className={`pill ${s.active ? "ok" : "warn"}`}>
+                {s.active ? "Active" : "Inactive"}
+              </span>
+            </div>
+          </article>
+        ))}
       </div>
     </div>
   );

@@ -234,3 +234,19 @@ export function testBinanceConnection(
     method: "POST",
   });
 }
+
+// --- Strategies ---
+
+export interface StrategyInfo {
+  name: string;
+  validated_release: string;
+  direction: string;
+  warmup_bars: number;
+  params: Record<string, number>;
+  parity_verified: boolean;
+  active: boolean;
+}
+
+export function getStrategies(): Promise<StrategyInfo[]> {
+  return apiRequest<StrategyInfo[]>("/api/strategies");
+}

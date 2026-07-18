@@ -37,3 +37,44 @@ async def health(
         version=settings.version,
         database=db_status,
     )
+
+
+class DeepHealthResponse(BaseModel):
+    status: str
+    version: str
+    database: str
+    ingest_last_tick: str | None
+    ingest_overdue: bool
+    scheduler_alive: bool
+
+
+@router.get("/health/deep", response_model=DeepHealthResponse)
+async def deep_health(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> DeepHealthResponse:
+    """Deeper health for the dead-man's-switch cron and ops page."""
+    import datetime as dt
+
+    try:
+        await session.execute(text("SELECT 1"))
+        db_status = "ok"
+    except Exception:  # pragma: no cover
+        db_status = "error"
+
+    from app.bot.ingest import ingest_service
+
+    dm = ingest_service.dead_man
+    now = dt.datetime.now(dt.UTC)
+    last_tick = dm.last_tick
+    overdue = dm.is_overdue(now)
+    scheduler_alive = ingest_service.is_running
+    healthy = db_status == "ok" and not overdue and scheduler_alive
+    return DeepHealthResponse(
+        status="ok" if healthy else "degraded",
+        version=settings.version,
+        database=db_status,
+        ingest_last_tick=last_tick.isoformat() if last_tick else None,
+        ingest_overdue=overdue,
+        scheduler_alive=scheduler_alive,
+    )

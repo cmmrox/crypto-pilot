@@ -40,6 +40,10 @@ class CandleIngestService:
     def dead_man(self) -> DeadMan:
         return self._dead_man
 
+    @property
+    def is_running(self) -> bool:
+        return self._task is not None and not self._task.done()
+
     async def start(self) -> None:
         self._stop.clear()
         await self._ingest_once(reason="startup")
@@ -62,6 +66,28 @@ class CandleIngestService:
             except TimeoutError:
                 pass  # a candle just closed
             await self._ingest_once(reason="candle_close")
+            await self._dead_man_check()
+
+    async def _dead_man_check(self) -> None:
+        """If a 4h tick was missed past grace, alert the owner by SMS (once)."""
+        if not self._dead_man.is_overdue(utc_now()):
+            return
+        try:
+            async with get_sessionmaker()() as session:
+                from app.services.notify_config import notify_event
+
+                await record_event(
+                    session, level="ERROR", category="error",
+                    message="Dead-man's switch: missed 4h candle tick",
+                    ref="dead_man", payload={"last_tick": str(self._dead_man.last_tick)},
+                )
+                await notify_event(
+                    session, kind="error",
+                    payload={"error": "missed 4h candle tick (dead-man)"},
+                )
+                await session.commit()
+        except Exception as exc:
+            _log.error("dead_man_alert_failed", error=str(exc))
 
     async def _ingest_once(self, *, reason: str) -> None:
         try:

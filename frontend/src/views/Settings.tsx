@@ -33,7 +33,8 @@ import {
   type StrategyInfo,
 } from "../api/client";
 import { ConfirmModal, type ModalSpec } from "../components/ConfirmModal";
-import { Server } from "lucide-react";
+import { Activity, Database, RadioTower, RefreshCw, Server, Wifi } from "lucide-react";
+import { getDeepHealth, type DeepHealth } from "../api/client";
 
 /** Stage 2 Settings: Binance API credentials (write-only) + connection test. */
 export function Settings() {
@@ -52,6 +53,7 @@ export function Settings() {
       <CredentialCard environment="DEMO" />
       <CredentialCard environment="LIVE" />
       <SmsCard />
+      <OperationsCard />
       <div className="panel key-permissions">
         <div className="settings-heading">
           <span className="settings-icon">
@@ -79,6 +81,41 @@ export function Settings() {
           ))}
         </div>
       </div>
+    </div>
+  );
+}
+
+function OperationsCard() {
+  const [h, setH] = useState<DeepHealth | null>(null);
+  const load = () => getDeepHealth().then(setH).catch(() => setH(null));
+  useEffect(() => {
+    void load();
+    const t = setInterval(() => void load(), 10000);
+    return () => clearInterval(t);
+  }, []);
+  const tick = h?.ingest_last_tick ? h.ingest_last_tick.slice(11, 19) + " UTC" : "—";
+  return (
+    <div className="panel" data-testid="operations-card">
+      <div className="settings-heading">
+        <span className="settings-icon"><Activity size={18} /></span>
+        <div>
+          <p className="kicker">RELIABILITY</p>
+          <h2>Operations & health</h2>
+          <p>Live service health, scheduler heartbeat and the dead-man's switch.</p>
+        </div>
+        <span className={`pill ${h?.status === "ok" ? "ok" : "warn"}`} data-testid="ops-status">
+          {h?.status === "ok" ? "All healthy" : "Degraded"}
+        </span>
+      </div>
+      <div className="operations-grid">
+        <span><Database size={16} /><div><small>Database</small><strong>{h?.database ?? "—"}</strong></div></span>
+        <span><RadioTower size={16} /><div><small>Scheduler</small><strong>{h?.scheduler_alive ? "Alive" : "Down"}</strong></div></span>
+        <span><Wifi size={16} /><div><small>Last candle tick</small><strong>{tick}</strong></div></span>
+        <span><Activity size={16} /><div><small>Dead-man switch</small><strong>{h?.ingest_overdue ? "OVERDUE" : "Armed"}</strong></div></span>
+      </div>
+      <button className="button secondary" data-testid="ops-refresh" onClick={() => void load()}>
+        <RefreshCw size={14} /> Run health check
+      </button>
     </div>
   );
 }

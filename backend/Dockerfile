@@ -5,6 +5,10 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1
 
+# gosu lets the entrypoint fix volume ownership as root then drop to the app user.
+RUN apt-get update && apt-get install -y --no-install-recommends gosu \
+    && rm -rf /var/lib/apt/lists/*
+
 # Non-root runtime user (SECURITY_GUIDELINES.md)
 RUN groupadd -r app && useradd -r -g app app
 
@@ -18,17 +22,21 @@ RUN pip install --upgrade pip && pip install .
 COPY alembic.ini ./
 COPY app ./app
 
-# Entrypoint: apply migrations, then serve
+# Entrypoint: fix CODEX_HOME volume ownership (as root), then run as app.
 COPY <<'EOF' /app/entrypoint.sh
 #!/bin/sh
 set -e
+# Ensure the mounted CODEX_HOME volume is writable by the app user.
+CODEX_DIR="${CP_CODEX_HOME:-/data/codex}"
+mkdir -p "$CODEX_DIR"
+chown -R app:app "$CODEX_DIR" 2>/dev/null || true
 echo "Applying database migrations..."
-alembic upgrade head
+gosu app alembic upgrade head
 echo "Starting API..."
-exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1
+exec gosu app uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1
 EOF
 RUN chmod +x /app/entrypoint.sh && chown -R app:app /app
 
-USER app
+# Entrypoint starts as root to chown the volume, then drops to app via gosu.
 EXPOSE 8000
 CMD ["/app/entrypoint.sh"]

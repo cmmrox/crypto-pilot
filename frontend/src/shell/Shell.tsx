@@ -17,6 +17,7 @@ import { useAuth } from "../auth/store";
 import { PlaceholderView } from "./PlaceholderView";
 import { Events } from "../views/Events";
 import { Monthly } from "../views/Monthly";
+import { News } from "../views/News";
 import { Overview } from "../views/Overview";
 import { Settings as SettingsView } from "../views/Settings";
 import { Trades } from "../views/Trades";
@@ -125,10 +126,14 @@ export function Shell() {
             <Route path="/overview" element={<Overview />} />
             <Route path="/trades" element={<Trades />} />
             <Route path="/monthly" element={<Monthly />} />
+            <Route path="/news" element={<News />} />
             <Route path="/events" element={<Events />} />
             <Route path="/settings" element={<SettingsView />} />
             {NAV.filter(
-              (i) => !["/overview", "/trades", "/monthly", "/events", "/settings"].includes(i.to),
+              (i) =>
+                !["/overview", "/trades", "/monthly", "/news", "/events", "/settings"].includes(
+                  i.to,
+                ),
             ).map((item) => (
               <Route
                 key={item.to}

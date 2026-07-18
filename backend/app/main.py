@@ -15,6 +15,7 @@ from app.api import (
     health,
     market,
     monthly,
+    news,
     ops,
     overview,
     settings_api,
@@ -30,17 +31,23 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     configure_logging(level=settings.log_level, json_output=settings.log_json)
     log = get_logger("app")
+    import os
+    os.environ.setdefault("CODEX_HOME", settings.codex_home)
     log.info("app_starting", version=settings.version, environment=settings.environment)
 
     from app.bot.ingest import ingest_service
 
     if settings.environment != "test":
         await ingest_service.start()
+        from app.news.scheduler import news_scheduler
+        await news_scheduler.start()
 
     yield
 
     if settings.environment != "test":
         await ingest_service.stop()
+        from app.news.scheduler import news_scheduler
+        await news_scheduler.stop()
     from app.db.session import dispose_engine
 
     await dispose_engine()
@@ -72,6 +79,8 @@ def create_app() -> FastAPI:
     app.include_router(overview.router)
     app.include_router(trades.router)
     app.include_router(monthly.router)
+    app.include_router(news.router)
+    app.include_router(news.codex_router)
     return app
 
 

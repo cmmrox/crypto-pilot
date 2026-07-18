@@ -107,3 +107,18 @@ class FakeSmsGateway:
             return SmsResult(False, "simulated failure")
         self.sent.append((to, message))
         return SmsResult(True, "delivered")
+
+
+class FakeSummaryProvider:
+    """Deterministic summary provider for testing the news pipeline."""
+
+    def __init__(self, sentiment: str = "Neutral-positive") -> None:
+        self._sentiment = sentiment
+
+    async def summarize(self, items):  # type: ignore[no-untyped-def]
+        from app.news.provider import Briefing
+
+        bullets = [{"text": f"Summary of {i['title']}", "source": i["source"]} for i in items[:5]]
+        if not bullets:
+            bullets = [{"text": "No items", "source": ""}]
+        return Briefing(self._sentiment, bullets, "gpt-5.5")

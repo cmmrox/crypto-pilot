@@ -1422,3 +1422,15 @@ a {
 }
 .device-code small { color: var(--muted); font-size: 0.72rem; }
 @media (max-width: 860px) { .news-grid { grid-template-columns: 1fr; } }
+
+/* --- Stage 9: environment options --- */
+.env-options { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.env-options button {
+  text-align: left; border: 1px solid var(--border); background: var(--panel-2);
+  border-radius: 11px; padding: 14px; display: grid; gap: 3px; color: var(--text);
+}
+.env-options button strong { font-size: 0.95rem; }
+.env-options button small { color: var(--muted); font-size: 0.72rem; }
+.env-options button.active { border-color: rgb(45 219 145 / 50%); background: rgb(45 219 145 / 8%); }
+.env-options button.live.active { border-color: rgb(255 92 92 / 50%); background: rgb(255 92 92 / 8%); }
+@media (max-width: 860px) { .env-options { grid-template-columns: 1fr; } }

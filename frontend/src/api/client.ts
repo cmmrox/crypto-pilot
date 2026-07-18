@@ -452,3 +452,16 @@ export const getCodexLoginStatus = (loginId: string) =>
   apiRequest<{ status: string; detail: string }>(`/api/settings/codex/login/${loginId}`);
 export const codexLogout = () =>
   apiRequest<{ message: string }>("/api/settings/codex/logout", { method: "POST" });
+
+// --- Guarded settings ---
+
+export const switchEnvironment = (environment: string, confirm?: string) =>
+  apiRequest<{ message: string }>("/api/settings/environment", {
+    method: "PUT",
+    body: JSON.stringify({ environment, confirm }),
+  });
+export const switchStrategy = (name: string) =>
+  apiRequest<{ message: string }>("/api/settings/strategy", {
+    method: "PUT",
+    body: JSON.stringify({ name }),
+  });

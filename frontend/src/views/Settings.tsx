@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import {
   codexLogout,
+  getBotStatus,
   getCodexLoginStatus,
   getCodexStatus,
   getCredentialStatus,
@@ -21,6 +22,8 @@ import {
   saveCredential,
   saveSmsConfig,
   startCodexLogin,
+  switchEnvironment,
+  switchStrategy,
   testBinanceConnection,
   testSms,
   toggleSms,
@@ -29,6 +32,8 @@ import {
   type SmsStatus,
   type StrategyInfo,
 } from "../api/client";
+import { ConfirmModal, type ModalSpec } from "../components/ConfirmModal";
+import { Server } from "lucide-react";
 
 /** Stage 2 Settings: Binance API credentials (write-only) + connection test. */
 export function Settings() {
@@ -41,6 +46,7 @@ export function Settings() {
           <p>API credentials are write-only and encrypted at rest (AES-GCM).</p>
         </div>
       </div>
+      <EnvironmentCard />
       <StrategyLibrary />
       <CodexCard />
       <CredentialCard environment="DEMO" />
@@ -77,11 +83,109 @@ export function Settings() {
   );
 }
 
+function EnvironmentCard() {
+  const [env, setEnv] = useState<string>("DEMO");
+  const [botRunning, setBotRunning] = useState(false);
+  const [modal, setModal] = useState<ModalSpec | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  const refresh = () =>
+    getBotStatus()
+      .then((s) => {
+        setEnv(s.environment);
+        setBotRunning(s.status !== "stopped");
+      })
+      .catch(() => {});
+  useEffect(() => {
+    void refresh();
+  }, []);
+
+  const request = (target: string) => {
+    if (target === env) return;
+    if (botRunning) {
+      setModal({
+        tone: "warning",
+        kicker: "ENVIRONMENT SWITCH BLOCKED",
+        title: "Stop the bot before switching accounts",
+        body: "The running loop is bound to the current Binance account. Stop the bot, then switch.",
+        confirmLabel: "Understood",
+      });
+      return;
+    }
+    setModal({
+      tone: target === "LIVE" ? "danger" : "warning",
+      kicker: "GUARDED ENVIRONMENT CHANGE",
+      title: `Switch from ${env} to ${target}?`,
+      body:
+        target === "LIVE"
+          ? "LIVE uses real funds. The next start reconciles the LIVE account. Type LIVE to confirm."
+          : "DEMO uses Binance testnet funds and a separate write-only credential pair.",
+      confirmWord: target === "LIVE" ? "LIVE" : undefined,
+      confirmLabel: `Switch to ${target}`,
+      onConfirm: async () => {
+        await switchEnvironment(target, target === "LIVE" ? "LIVE" : undefined);
+        setMsg(`Environment set to ${target}.`);
+        await refresh();
+      },
+    });
+  };
+
+  return (
+    <div className="panel credential-card" data-testid="environment-card">
+      <div className="settings-heading">
+        <span className="settings-icon"><Server size={18} /></span>
+        <div>
+          <p className="kicker">TRADING VENUE</p>
+          <h2>Environment</h2>
+          <p>DEMO and LIVE share one code path with separate write-only credentials.</p>
+        </div>
+        <span className={`pill ${env === "LIVE" ? "warn" : "ok"}`} data-testid="active-env">
+          {env} active
+        </span>
+      </div>
+      <div className="env-options">
+        <button
+          className={env === "DEMO" ? "active" : ""}
+          data-testid="env-demo"
+          onClick={() => request("DEMO")}
+        >
+          <strong>DEMO / Testnet</strong>
+          <small>Fake funds · safe testing</small>
+        </button>
+        <button
+          className={`live ${env === "LIVE" ? "active" : ""}`}
+          data-testid="env-live"
+          onClick={() => request("LIVE")}
+        >
+          <strong>LIVE trading</strong>
+          <small>Real funds · production</small>
+        </button>
+      </div>
+      {msg && <div className="inline-msg ok" role="status">{msg}</div>}
+      {modal && <ConfirmModal modal={modal} onClose={() => setModal(null)} />}
+    </div>
+  );
+}
+
 function StrategyLibrary() {
   const [strategies, setStrategies] = useState<StrategyInfo[]>([]);
+  const [modal, setModal] = useState<ModalSpec | null>(null);
+  const load = () => getStrategies().then(setStrategies).catch(() => setStrategies([]));
   useEffect(() => {
-    void getStrategies().then(setStrategies).catch(() => setStrategies([]));
+    void load();
   }, []);
+  const selectStrategy = (name: string) =>
+    setModal({
+      tone: "warning",
+      kicker: "VALIDATED RELEASE CHANGE",
+      title: `Select ${name}?`,
+      body: "Audit-logged; applies at the next reconciled start. The bot must be stopped.",
+      confirmLabel: "Select release",
+      onConfirm: async () => {
+        await switchStrategy(name);
+        await load();
+      },
+    });
   return (
     <div className="panel" data-testid="strategy-library">
       <div className="settings-heading">
@@ -111,10 +215,20 @@ function StrategyLibrary() {
               <span className={`pill ${s.active ? "ok" : "warn"}`}>
                 {s.active ? "Active" : "Inactive"}
               </span>
+              {!s.active && (
+                <button
+                  className="button ghost small"
+                  data-testid={`select-${s.name}`}
+                  onClick={() => selectStrategy(s.name)}
+                >
+                  Select
+                </button>
+              )}
             </div>
           </article>
         ))}
       </div>
+      {modal && <ConfirmModal modal={modal} onClose={() => setModal(null)} />}
     </div>
   );
 }

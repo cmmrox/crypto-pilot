@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import (
+    admin_settings,
     auth,
     bot,
     events,
@@ -61,6 +62,10 @@ def create_app() -> FastAPI:
         version=settings.version,
         lifespan=lifespan,
     )
+    from app.core.middleware import BodySizeLimitMiddleware, SecurityHeadersMiddleware
+
+    app.add_middleware(SecurityHeadersMiddleware, hsts=settings.is_production)
+    app.add_middleware(BodySizeLimitMiddleware)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[settings.frontend_origin],
@@ -81,6 +86,7 @@ def create_app() -> FastAPI:
     app.include_router(monthly.router)
     app.include_router(news.router)
     app.include_router(news.codex_router)
+    app.include_router(admin_settings.router)
     return app
 
 

@@ -1,0 +1,26 @@
+# Production reverse proxy with automatic HTTPS (Let's Encrypt).
+# Set CP_DOMAIN in deploy/.env (e.g. pilot.yourdomain.com).
+{$CP_DOMAIN} {
+	encode gzip
+
+	handle /health* {
+		reverse_proxy backend:8000
+	}
+	handle /api/* {
+		reverse_proxy backend:8000
+	}
+	handle /ws/* {
+		reverse_proxy backend:8000
+	}
+	handle {
+		reverse_proxy frontend:80
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+}

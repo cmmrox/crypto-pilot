@@ -117,6 +117,17 @@ export function getHealth(): Promise<Health> {
   return apiRequest<Health>("/health", {}, { auth: false });
 }
 
+export interface DeepHealth {
+  status: string;
+  version: string;
+  database: string;
+  ingest_last_tick: string | null;
+  ingest_overdue: boolean;
+  scheduler_alive: boolean;
+}
+
+export const getDeepHealth = () => apiRequest<DeepHealth>("/health/deep", {}, { auth: false });
+
 export function login(email: string, password: string): Promise<{ totp_token: string }> {
   return apiRequest(
     "/api/auth/login",

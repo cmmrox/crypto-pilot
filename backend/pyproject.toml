@@ -57,6 +57,8 @@ ignore = ["B008"]  # FastAPI Depends() in defaults is idiomatic
 "tests/*" = ["S101"]
 # Alembic-generated migrations: don't enforce line length or import order on generated code.
 "app/db/migrations/versions/*" = ["E501", "I001"]
+# SMS templates are single message strings — keep them on one readable line.
+"app/notifier/templates.py" = ["E501"]
 
 [tool.mypy]
 python_version = "3.11"

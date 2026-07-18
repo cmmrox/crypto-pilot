@@ -50,9 +50,9 @@ test("QA-1.01 happy path: password + TOTP reaches the dashboard shell", async ({
 });
 
 test("QA-1.02 wrong password is rejected", async ({ page }) => {
-  // Throwaway email so the owner's lockout counter is never polluted.
+  // Unique throwaway email per run so it never locks (owner counter untouched).
   await page.goto("/");
-  await page.getByLabel("Email").fill("nobody@cryptopilot.app");
+  await page.getByLabel("Email").fill(`nobody-${Date.now()}@cryptopilot.app`);
   await page.getByLabel("Password", { exact: true }).fill("wrong-password");
   await page.getByRole("button", { name: /continue/i }).click();
   await expect(page.getByRole("alert")).toContainText(/invalid/i);

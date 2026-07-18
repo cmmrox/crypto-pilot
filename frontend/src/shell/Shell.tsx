@@ -15,6 +15,8 @@ import {
 } from "lucide-react";
 import { useAuth } from "../auth/store";
 import { PlaceholderView } from "./PlaceholderView";
+import { Events } from "../views/Events";
+import { Settings as SettingsView } from "../views/Settings";
 
 const NAV = [
   { to: "/overview", label: "Overview", icon: LayoutDashboard, stage: "Stage 5" },
@@ -117,7 +119,9 @@ export function Shell() {
         <main className="content">
           <Routes>
             <Route path="/" element={<Navigate to="/overview" replace />} />
-            {NAV.map((item) => (
+            <Route path="/events" element={<Events />} />
+            <Route path="/settings" element={<SettingsView />} />
+            {NAV.filter((i) => i.to !== "/events" && i.to !== "/settings").map((item) => (
               <Route
                 key={item.to}
                 path={item.to}

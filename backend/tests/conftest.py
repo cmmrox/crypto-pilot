@@ -101,3 +101,31 @@ def current_totp(secret: str) -> str:
     import pyotp
 
     return pyotp.TOTP(secret).now()
+
+
+@pytest.fixture()
+async def db_session(postgres_url: str) -> AsyncIterator[object]:
+    """Yield an AsyncSession against a freshly-created schema (for service tests)."""
+    import base64
+    import os
+
+    from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+
+    os.environ["CP_DATABASE_URL"] = postgres_url
+    os.environ.setdefault("CP_MASTER_KEY", base64.b64encode(b"0" * 32).decode())
+    os.environ.setdefault("CP_JWT_SECRET", "j" * 44)
+
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+
+    from app.db import models  # noqa: F401
+    from app.db.base import Base
+
+    engine = create_async_engine(postgres_url)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+        await conn.run_sync(Base.metadata.create_all)
+    async with AsyncSession(engine) as session:
+        yield session
+    await engine.dispose()

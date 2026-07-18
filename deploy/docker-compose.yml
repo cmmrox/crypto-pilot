@@ -1,32 +1,14 @@
 name: cryptopilot
 
 services:
-  postgres:
-    image: postgres:16-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-    # Not exposed publicly in production; published locally for development only.
-    ports:
-      - "5433:5432"
-
   backend:
     build:
       context: ../backend
       dockerfile: Dockerfile
     restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_healthy
+    # Connects to an EXISTING shared Postgres reachable on the `database`
+    # network as ${CP_DB_HOST}. There is no postgres service here anymore —
+    # see docker-compose.postgres.yml for the optional standalone instance.
     environment:
       CP_ENVIRONMENT: ${CP_ENVIRONMENT}
       CP_DATABASE_URL: ${CP_DATABASE_URL}
@@ -45,12 +27,17 @@ services:
       retries: 5
     expose:
       - "8000"
+    networks:
+      - default
+      - database
 
   frontend:
     build:
       context: ../frontend
       dockerfile: Dockerfile
     restart: unless-stopped
+    networks:
+      - default
 
   caddy:
     image: caddy:2-alpine
@@ -64,9 +51,18 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
+    networks:
+      - default
+
+networks:
+  default:
+  # The existing shared Postgres lives on this externally-managed network.
+  # Set CP_DB_NETWORK in .env to its name (e.g. gen-one-network locally).
+  database:
+    external: true
+    name: ${CP_DB_NETWORK}
 
 volumes:
-  pgdata:
   codex_data:
   caddy_data:
   caddy_config:

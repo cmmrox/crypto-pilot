@@ -1,0 +1,43 @@
+# Standalone / optional CryptoPilot Postgres.
+#
+# The main stack (docker-compose.yml) connects to an EXISTING shared Postgres
+# server on the `${CP_DB_NETWORK}` docker network — see .env. You normally do
+# NOT need this file.
+#
+# Use it only if you want CryptoPilot to run its own dedicated Postgres instead
+# of reusing the shared one:
+#   docker compose -f docker-compose.postgres.yml up -d
+# Then point CP_DATABASE_URL / CP_DB_HOST at this container's alias.
+name: cryptopilot-db
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    ports:
+      - "5433:5432"
+    # Join the shared DB network so the app can reach it here as `cryptopilot-db`
+    # if you choose to run a dedicated instance.
+    networks:
+      database:
+        aliases:
+          - cryptopilot-db
+
+networks:
+  database:
+    external: true
+    name: ${CP_DB_NETWORK}
+
+volumes:
+  pgdata:

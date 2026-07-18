@@ -1,17 +1,15 @@
 # Production overlay — use with the base file:
 #   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
-# Adds auto-TLS (real domain), resource limits, restart policies, no host DB port.
+# Adds auto-TLS (real domain), resource limits, restart policies.
+#
+# There is NO postgres DATABASE service: production reuses the EXISTING shared
+# Postgres already running on the server (e.g. the odoo Postgres). Point the app
+# at it via .env:  CP_DB_NETWORK = that Postgres's docker network,
+# CP_DB_HOST = its alias, CP_DATABASE_URL host = ${CP_DB_HOST}.
+# (The `backup` service below is a job, not a database — it just runs pg_dump.)
 name: cryptopilot
 
 services:
-  postgres:
-    restart: always
-    ports: []  # do NOT expose the database publicly in production
-    deploy:
-      resources:
-        limits:
-          memory: 768M
-
   backend:
     restart: always
     environment:
@@ -37,14 +35,14 @@ services:
       - caddy_data:/data
       - caddy_config:/config
 
-  # Nightly encrypted backup to object storage (BSD §15).
+  # Nightly encrypted backup to object storage (BSD §15). NOT a database — this
+  # job runs pg_dump against the EXISTING shared Postgres over the `database`
+  # network, encrypts with CP_MASTER_KEY, and uploads to CP_BACKUP_BUCKET if set.
   backup:
     image: postgres:16-alpine
     restart: always
-    depends_on:
-      postgres:
-        condition: service_healthy
     environment:
+      CP_DB_HOST: ${CP_DB_HOST}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_DB: ${POSTGRES_DB}
       PGPASSWORD: ${POSTGRES_PASSWORD}
@@ -57,8 +55,10 @@ services:
         while true; do
           sleep 86400
           TS=$$(date -u +%Y%m%dT%H%M%SZ)
-          pg_dump -h postgres -U "$$POSTGRES_USER" "$$POSTGRES_DB" | gzip \
+          pg_dump -h "$$CP_DB_HOST" -U "$$POSTGRES_USER" "$$POSTGRES_DB" | gzip \
             | openssl enc -aes-256-cbc -pbkdf2 -pass "pass:$$CP_MASTER_KEY" -out "/tmp/cp-$$TS.sql.gz.enc"
           [ -n "$$CP_BACKUP_BUCKET" ] && aws s3 cp "/tmp/cp-$$TS.sql.gz.enc" "$$CP_BACKUP_BUCKET/" || true
           echo "backup $$TS done"
         done
+    networks:
+      - database

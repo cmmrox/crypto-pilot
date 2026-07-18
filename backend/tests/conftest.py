@@ -43,8 +43,10 @@ async def app_client(postgres_url: str) -> AsyncIterator[object]:
     from app.db.base import Base
     from sqlalchemy.ext.asyncio import create_async_engine
 
+    # Fresh schema per test for isolation (rows must not bleed between tests).
     engine = create_async_engine(postgres_url)
     async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
     await engine.dispose()
 
@@ -57,3 +59,45 @@ async def app_client(postgres_url: str) -> AsyncIterator[object]:
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         yield client
     await dispose_engine()
+
+
+# Deterministic owner used across auth tests.
+OWNER_EMAIL = "owner@example.com"
+OWNER_PASSWORD = "correct horse battery staple"
+OWNER_TOTP_SECRET = "JBSWY3DPEHPK3PXP"  # RFC-6238 test-style base32 secret
+
+
+@pytest.fixture()
+async def owner(app_client: object) -> str:
+    """Provision the owner account in the test DB; returns the current TOTP code source.
+
+    Depends on app_client so the schema exists and settings are configured.
+    """
+    import os
+
+    from app.core.crypto import encrypt
+    from app.core.security import hash_password
+    from app.db.models import User
+    from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+
+    engine = create_async_engine(os.environ["CP_DATABASE_URL"])
+    async with AsyncSession(engine) as s:
+        s.add(
+            User(
+                email=OWNER_EMAIL,
+                password_hash=hash_password(OWNER_PASSWORD),
+                role="owner",
+                totp_secret_encrypted=encrypt(OWNER_TOTP_SECRET, os.environ["CP_MASTER_KEY"]),
+                totp_enabled=True,
+            )
+        )
+        await s.commit()
+    await engine.dispose()
+    return OWNER_TOTP_SECRET
+
+
+def current_totp(secret: str) -> str:
+    """Compute the current 6-digit code for a secret (test helper)."""
+    import pyotp
+
+    return pyotp.TOTP(secret).now()

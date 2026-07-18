@@ -105,6 +105,12 @@ jobs:
           for i in $(seq 1 30); do
             curl -sf http://localhost:8090/health && break || sleep 3
           done
+      - name: Provision E2E owner (deterministic TOTP secret)
+        run: |
+          docker compose -f deploy/docker-compose.yml exec -T backend \
+            python -m app.cli create-owner \
+            --email owner@cryptopilot.app --password 'PilotOwner!2026' \
+            --totp-secret JBSWY3DPEHPK3PXP --force
       - uses: actions/setup-node@v4
         with:
           node-version: "24"

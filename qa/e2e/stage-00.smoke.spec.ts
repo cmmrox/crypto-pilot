@@ -21,12 +21,10 @@ test("QA-0.02 SPA is served with the app title", async ({ page }) => {
   await expect(page).toHaveTitle(/CryptoPilot/);
 });
 
-test("QA-0.03 frontend renders live backend health", async ({ page }) => {
+test("QA-0.03 frontend SPA boots and renders through Caddy", async ({ page }) => {
   await page.goto("/");
-  const card = page.getByTestId("health-card");
-  await expect(card).toBeVisible();
-  // The status resolves to "ok" once the frontend reaches the backend through Caddy.
-  await expect(page.getByTestId("health-status")).toContainText(/ok/i);
+  // The SPA mounts and shows the owner login screen (the app's entry point).
+  await expect(page.getByRole("heading", { name: /sign in securely/i })).toBeVisible();
 });
 
 test("QA-0.04 security header present and server banner hidden", async ({ request }) => {

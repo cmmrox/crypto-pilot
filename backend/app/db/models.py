@@ -36,6 +36,26 @@ class User(Base):
     totp_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
 
+class Session(Base):
+    """A logged-in owner session; enables server-side revocation.
+
+    Access tokens carry `sid`; every authenticated request checks the session is
+    not revoked or expired (SECURITY_GUIDELINES.md).
+    """
+
+    __tablename__ = "sessions"
+    __table_args__ = (Index("ix_sessions_user", "user_id"),)
+
+    id: Mapped[IntPk]
+    sid: Mapped[str] = mapped_column(String(32), unique=True, nullable=False)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), nullable=False)
+    refresh_jti: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    expires_at: Mapped[dt.datetime] = mapped_column(nullable=False)
+    last_used_at: Mapped[dt.datetime | None] = mapped_column(nullable=True)
+    revoked_at: Mapped[dt.datetime | None] = mapped_column(nullable=True)
+    user_agent: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+
 class AppSettings(Base):
     """Singleton configuration row (id is always 1)."""
 
@@ -237,6 +257,7 @@ __all__ = [
     "Event",
     "NewsItem",
     "Order",
+    "Session",
     "Strategy",
     "Trade",
     "User",

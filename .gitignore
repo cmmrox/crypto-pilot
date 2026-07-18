@@ -10,6 +10,7 @@ venv/
 # Node
 node_modules/
 dist/
+build/
 .npm-cache/
 .vite/
 
@@ -18,14 +19,65 @@ dist/
 .env.*
 !.env.example
 
+# Key material & credential files — never commit
+*.pem
+*.key
+*.p12
+*.pfx
+*.pkcs12
+*.keystore
+*.jks
+*.crt
+*.cer
+id_rsa
+id_rsa.*
+id_ed25519
+id_ed25519.*
+*.secret
+secrets/
+credentials.json
+auth.json
+service-account*.json
+
+# Codex / OpenAI / auth session stores (device-code tokens live here)
+.openai/
+.codex/
+**/codex/
+**/.codex/
+
+# Databases, dumps & encrypted backups — never commit
+*.sqlite
+*.sqlite3
+*.db
+*.sql.gz
+*.dump
+*.bak
+*.enc
+cp-*.sql.gz.enc
+
+# Logs
+*.log
+logs/
+
+# Test / coverage artifacts
+.coverage
+coverage/
+htmlcov/
+playwright-report/
+test-results/
+qa/playwright-report/
+qa/test-results/
+.playwright-cli/
+
+# Local Claude Code settings (keep launch.json & skills, ignore machine-local)
+.claude/settings.local.json
+
 # OS / editor
 .DS_Store
 Thumbs.db
 .idea/
 .vscode/
 
-# Local tooling caches
-.playwright-cli/
-.openai/
+# Local tooling caches / scratch
 tmp/
 output/

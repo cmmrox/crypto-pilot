@@ -9,7 +9,9 @@ from tests.conftest import OWNER_EMAIL, OWNER_PASSWORD, current_totp
 
 
 async def _headers(client: httpx.AsyncClient, secret: str) -> dict[str, str]:
-    r = await client.post("/api/auth/login", json={"email": OWNER_EMAIL, "password": OWNER_PASSWORD})
+    r = await client.post(
+        "/api/auth/login", json={"email": OWNER_EMAIL, "password": OWNER_PASSWORD}
+    )
     tok = r.json()["totp_token"]
     r = await client.post("/api/auth/totp", json={"code": current_totp(secret)},
                           headers={"Authorization": f"Bearer {tok}"})
@@ -55,12 +57,16 @@ async def test_environment_switch_blocked_while_running(
     async with get_sessionmaker()() as s:
         await bot_service.start(s, FakeExchange(), by="test")
         await s.commit()
-    resp = await app_client.put("/api/settings/environment", json={"environment": "DEMO"}, headers=h)
+    resp = await app_client.put(
+        "/api/settings/environment", json={"environment": "DEMO"}, headers=h
+    )
     assert resp.status_code == 409  # bot running
 
 
 @pytest.mark.asyncio
-async def test_live_switch_requires_typed_confirm(app_client: httpx.AsyncClient, owner: str) -> None:
+async def test_live_switch_requires_typed_confirm(
+    app_client: httpx.AsyncClient, owner: str
+) -> None:
     h = await _headers(app_client, owner)
     # Bot is stopped by default.
     bad = await app_client.put("/api/settings/environment", json={"environment": "LIVE"}, headers=h)

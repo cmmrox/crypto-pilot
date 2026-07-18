@@ -250,3 +250,60 @@ export interface StrategyInfo {
 export function getStrategies(): Promise<StrategyInfo[]> {
   return apiRequest<StrategyInfo[]>("/api/strategies");
 }
+
+// --- Bot + Overview ---
+
+export interface BotStatus {
+  status: string;
+  environment: string;
+  strategy: string;
+  run_id: number | null;
+  started_at: string | null;
+  safe_mode_reason: string | null;
+}
+
+export interface Position {
+  side: string | null;
+  qty: string;
+  entry_price: string;
+  mark_price: string;
+  unrealized_pnl: string;
+  leverage: string;
+  has_price_stop: boolean;
+}
+
+export interface Breaker {
+  book: string;
+  month_to_date_pnl: string;
+  drawdown_pct: string;
+  tripped: boolean;
+}
+
+export interface Overview {
+  environment: string;
+  bot_status: string;
+  strategy: string;
+  exchange_reachable: boolean;
+  balance: string;
+  equity: string;
+  unrealized_pnl: string;
+  position: Position | null;
+  breakers: Breaker[];
+  month_realized_pnl: string;
+}
+
+export interface EquityPoint {
+  ts: string;
+  equity: string;
+}
+
+export const getOverview = () => apiRequest<Overview>("/api/overview");
+export const getEquityCurve = () => apiRequest<EquityPoint[]>("/api/overview/equity");
+export const getBotStatus = () => apiRequest<BotStatus>("/api/bot/status");
+export const startBot = () => apiRequest<{ message: string }>("/api/bot/start", { method: "POST" });
+export const stopBot = () => apiRequest<{ message: string }>("/api/bot/stop", { method: "POST" });
+export const stopCloseBot = () =>
+  apiRequest<{ message: string }>("/api/bot/stop-close", { method: "POST" });
+export const safeModeBot = () =>
+  apiRequest<{ message: string }>("/api/bot/safe-mode", { method: "POST" });
+export const killSwitch = () => apiRequest<{ ok: boolean }>("/api/ops/kill", { method: "POST" });

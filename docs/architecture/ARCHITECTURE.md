@@ -111,3 +111,4 @@ unless hotfix-critical. Health endpoint + dead-man cron.
 1. **News LLM = Codex SDK with GPT-5.5** (BSD said Claude API). No `OPENAI_API_KEY` anywhere; Codex credentials only. Pluggable provider; see `INTEGRATIONS.md §3`.
 2. **Binance demo endpoints updated** to `demo-fapi.binance.com` (BSD referenced the retired testnet host).
 3. **Strategy parameters are read-only in the operator UI** (prototype-approved override of FR-11's editable parameters); changes ship as versioned releases through parity tests.
+4. **Overview live updates use short-interval polling (4s), not WebSocket** (BSD §12 said WebSocket). For a bot that decides once per 4h close, 4s polling delivers a real-time feel with far less complexity and better reconnection robustness. The WebSocket push channel remains a future optimization; the REST `/api/overview` aggregate is the source.

@@ -307,3 +307,86 @@ export const stopCloseBot = () =>
 export const safeModeBot = () =>
   apiRequest<{ message: string }>("/api/bot/safe-mode", { method: "POST" });
 export const killSwitch = () => apiRequest<{ ok: boolean }>("/api/ops/kill", { method: "POST" });
+
+// --- Trades ---
+
+export interface TradeRow {
+  id: number;
+  opened_at: string;
+  closed_at: string | null;
+  side: string;
+  entry_px: string;
+  exit_px: string | null;
+  qty: string;
+  fees: string;
+  realized_pnl: string | null;
+  r_multiple: string | null;
+  exit_reason: string | null;
+  strategy: string;
+  environment: string;
+  outcome: string;
+}
+
+export interface OrderRow {
+  client_order_id: string;
+  binance_order_id: string | null;
+  type: string;
+  status: string;
+  qty: string;
+  price: string | null;
+  stop_price: string | null;
+  reduce_only: boolean;
+}
+
+export interface TradeDetail extends TradeRow {
+  orders: OrderRow[];
+}
+
+export interface TradeFilters {
+  side?: string;
+  environment?: string;
+  strategy?: string;
+  month?: string;
+  search?: string;
+}
+
+function tradeQuery(f: TradeFilters): string {
+  const q = new URLSearchParams();
+  for (const [k, v] of Object.entries(f)) if (v) q.set(k, v);
+  return q.toString();
+}
+
+export const getTrades = (f: TradeFilters = {}) =>
+  apiRequest<TradeRow[]>(`/api/trades?${tradeQuery(f)}`);
+export const getTradeDetail = (id: number) => apiRequest<TradeDetail>(`/api/trades/${id}`);
+
+/** Fetch the trades CSV as text with auth (endpoint requires a bearer token). */
+export async function getTradesCsv(f: TradeFilters = {}): Promise<string> {
+  let resp = await rawRequest(`/api/trades/export.csv?${tradeQuery(f)}`, {}, true);
+  if (resp.status === 401 && (await tryRefresh())) {
+    resp = await rawRequest(`/api/trades/export.csv?${tradeQuery(f)}`, {}, true);
+  }
+  if (!resp.ok) throw new ApiError(resp.status, "csv export failed");
+  return resp.text();
+}
+
+// --- Monthly ---
+
+export interface MonthRow {
+  month: string;
+  trades: number;
+  realized_pnl: string;
+  fees: string;
+  net: string;
+  withdrawn: string;
+  withdrawable: string;
+  long_breaker: string;
+  short_breaker: string;
+}
+
+export const getMonthly = () => apiRequest<MonthRow[]>("/api/monthly");
+export const markWithdrawn = (month: string) =>
+  apiRequest<{ message: string }>("/api/monthly/mark-withdrawn", {
+    method: "POST",
+    body: JSON.stringify({ month }),
+  });

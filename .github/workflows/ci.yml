@@ -6,6 +6,13 @@ on:
   pull_request:
 
 jobs:
+  agent-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate shared Claude Code and Codex setup
+        run: bash .agents/skills/cryptopilot-dev/scripts/validate-agent-setup.sh
+
   backend:
     runs-on: ubuntu-latest
     services:

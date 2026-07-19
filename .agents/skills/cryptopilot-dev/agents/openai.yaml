@@ -1,0 +1,4 @@
+interface:
+  display_name: "CryptoPilot Development"
+  short_description: "Develop CryptoPilot safely and consistently"
+  default_prompt: "Use $cryptopilot-dev to implement the next CryptoPilot task with the required documentation and QA gates."

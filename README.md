@@ -32,9 +32,11 @@ dashboard, notify.lk SMS alerts, pluggable strategies and an isolated AI news br
 | [`guidelines/`](docs/guidelines/) | Development · Backend · Frontend · UI/UX · Clean code · Code review · Testing · Logging · Security · Maintainability |
 | [`reports/`](docs/reports/) | Validated research reports (why the strategy rules exist) |
 
-**AI development:** Claude Code loads `.claude/skills/cryptopilot-dev/SKILL.md`; Codex
-reads [`AGENTS.md`](AGENTS.md). Both are thin routers into `docs/` so the two agents
-share one rulebook.
+**AI development:** Claude Code and Codex share the same canonical skill at
+`.agents/skills/cryptopilot-dev/SKILL.md`. Claude's `.claude/skills/cryptopilot-dev`
+path is a relative symlink to it. Codex reads [`AGENTS.md`](AGENTS.md), while Claude
+reads `CLAUDE.md`, which is a relative symlink to that same bootstrap. Product and
+engineering truth remains in `docs/`; update it there once for both agents.
 
 ## Architecture (BSD §4)
 

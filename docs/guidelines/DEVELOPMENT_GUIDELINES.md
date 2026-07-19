@@ -15,10 +15,12 @@ The workflow rules for building CryptoPilot. Stack-specific rules:
    commit — a reviewer must be able to revert any commit safely.
 4. **Definition of Done** for any task: code + tests + docs updated + lints/types clean
    + reviewed. "Works on my machine" is not done; green in CI is done.
-5. **AI pair development (Claude Code / Codex):** both agents load the same context —
-   Claude via `.claude/skills/cryptopilot-dev/`, Codex via root `AGENTS.md`. Agents
-   must read the referenced doc for the area they touch *before* writing code. AI
-   output goes through the same review gate as human code — no direct-to-main.
+5. **AI pair development (Claude Code / Codex):** both agents load the canonical
+   `.agents/skills/cryptopilot-dev/SKILL.md`. Claude's project skill path symlinks to
+   it; root `CLAUDE.md` symlinks to `AGENTS.md`, so both tools also share one bootstrap.
+   Agents must read the referenced doc for the area they touch *before* writing code.
+   AI output goes through the same review gate as human code — no direct-to-main.
+   Run the skill's `scripts/validate-agent-setup.sh` after changing agent configuration.
 
 ## Non-negotiable engineering rules
 

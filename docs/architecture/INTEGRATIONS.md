@@ -75,10 +75,11 @@ Rules:
 
 ### Codex CLI/SDK for development
 
-The same Codex credentials also drive development agents: Codex reads the root
-`AGENTS.md` (which points into `docs/`); Claude Code reads
-`.claude/skills/cryptopilot-dev/SKILL.md`. Use separate credentials for dev machines
-vs the deployed server so rotation is independent.
+The same Codex credentials also drive development agents. Codex and Claude Code use
+the canonical `.agents/skills/cryptopilot-dev/SKILL.md`; Claude's skill path symlinks
+to it. Their root bootstrap is also shared (`CLAUDE.md` → `AGENTS.md`). The shared
+skill routes both tools into `docs/`. Use separate credentials for dev machines vs
+the deployed server so rotation is independent.
 
 ## 4. RSS / calendar sources (news collection)
 

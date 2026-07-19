@@ -510,7 +510,7 @@ function Login({ onContinue }) {
           <div><ShieldCheck size={20} /><span><strong>Exchange-first truth</strong><small>Binance positions, orders and income are reconciled before action.</small></span></div>
           <div><Clock3 size={20} /><span><strong>4h close only</strong><small>No intrabar trading decisions and no high-frequency behavior.</small></span></div>
           <div><Waypoints size={20} /><span><strong>Validated release</strong><small>Trend Rider v6 · LONG + SHORT · immutable configuration.</small></span></div>
-          <div><LockKeyhole size={20} /><span><strong>Mandatory 2FA</strong><small>Every valid password sign-in is followed by authenticator verification.</small></span></div>
+          <div><LockKeyhole size={20} /><span><strong>SMS two-factor</strong><small>A fresh SMS code follows every password sign-in while 2FA is enabled.</small></span></div>
         </div>
       </section>
       <section className="auth-form-wrap">
@@ -521,7 +521,7 @@ function Login({ onContinue }) {
           </div>
           <p className="kicker">SINGLE-OWNER WORKSPACE</p>
           <h2>Sign in securely</h2>
-          <p>Use your owner credentials. Authenticator verification always follows.</p>
+          <p>Use your owner credentials. If two-factor is on, an SMS code follows.</p>
           <label>
             Email
             <input
@@ -553,7 +553,7 @@ function Login({ onContinue }) {
           </label>
           <div className="auth-meta">
             <label><input type="checkbox" /> Remember email for 14 days</label>
-            <span>TOTP still required</span>
+            <span>SMS code still required</span>
           </div>
           {error && <div className="form-error" role="alert"><AlertTriangle size={16} />{error}</div>}
           <button className="button primary full" type="submit">
@@ -561,7 +561,7 @@ function Login({ onContinue }) {
           </button>
           <div className="auth-security-note">
             <ShieldCheck size={16} />
-            <span>JWT session · Argon2 password hash · mandatory TOTP · TLS-only production access</span>
+            <span>JWT session · Argon2 password hash · SMS two-factor · TLS-only production access</span>
           </div>
           <small className="prototype-note">Prototype credentials are pre-filled.</small>
         </form>
@@ -570,14 +570,14 @@ function Login({ onContinue }) {
   );
 }
 
-function Totp({ onVerify, onBack }) {
+function Otp({ onVerify, onBack }) {
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
 
   const submit = (event) => {
     event.preventDefault();
     if (code.replace(/\s/g, "") !== "428916") {
-      setError("That authenticator code is invalid. Use sample code 428916.");
+      setError("That SMS code is invalid. Use sample code 428916.");
       return;
     }
     setError("");
@@ -585,19 +585,19 @@ function Totp({ onVerify, onBack }) {
   };
 
   return (
-    <main className="totp-shell">
-      <form className="totp-card" onSubmit={submit}>
-        <IconButton type="button" label="Back to password" onClick={onBack} className="totp-back">
+    <main className="otp-shell">
+      <form className="otp-card" onSubmit={submit}>
+        <IconButton type="button" label="Back to password" onClick={onBack} className="otp-back">
           <ArrowRight size={17} className="rotate-180" />
         </IconButton>
-        <span className="totp-icon"><Smartphone size={24} /></span>
+        <span className="otp-icon"><Smartphone size={24} /></span>
         <p className="kicker">TWO-STEP VERIFICATION</p>
         <h1>Enter your 6-digit code</h1>
-        <p>Open your authenticator app and enter the current code for CryptoPilot.</p>
-        <label className="sr-only" htmlFor="totp">Authentication code</label>
+        <p>We sent a verification code by SMS to ···· 1234. Enter it below to finish signing in.</p>
+        <label className="sr-only" htmlFor="otp">Authentication code</label>
         <input
-          id="totp"
-          className="totp-input"
+          id="otp"
+          className="otp-input"
           aria-label="Authentication code"
           inputMode="numeric"
           maxLength={6}
@@ -608,7 +608,7 @@ function Totp({ onVerify, onBack }) {
         />
         {error && <div className="form-error" role="alert"><AlertTriangle size={16} />{error}</div>}
         <button className="button primary full" type="submit">Verify & enter</button>
-        <div className="totp-required"><ShieldCheck size={15} />Two-factor verification is mandatory for every sign-in.</div>
+        <div className="otp-required"><ShieldCheck size={15} />The code is single-use and expires after five minutes.</div>
       </form>
     </main>
   );
@@ -1501,9 +1501,9 @@ function NewsSettings({ showToast }) {
 function SecuritySettings({ showToast, openModal }) {
   return (
     <Panel className="settings-card">
-      <SettingsHeading icon={ShieldCheck} kicker="OWNER ACCESS" title="Security & sessions" description="JWT session, Argon2 password hashing and mandatory authenticator verification." status="TOTP required" />
+      <SettingsHeading icon={ShieldCheck} kicker="OWNER ACCESS" title="Security & sessions" description="JWT session, Argon2 password hashing and owner-configurable SMS verification." status="SMS 2FA on" />
       <div className="security-list">
-        <div><span className="settings-icon"><Smartphone size={18} /></span><span><strong>Authenticator app (TOTP)</strong><small>Required after every valid username and password sign-in. No bypass.</small></span><button className="button secondary" onClick={() => showToast("Recovery codes protected", "Production recovery requires re-authentication and creates an audit event.")}>Manage recovery</button></div>
+        <div><span className="settings-icon"><Smartphone size={18} /></span><span><strong>SMS two-factor</strong><small>Sign-in requires a single-use SMS code while enabled. Recovery is server-shell only.</small></span><button className="button secondary" onClick={() => showToast("Number change protected", "Changing the number requires password re-entry and a code sent to the new phone.")}>Change number</button></div>
         <div><span className="settings-icon"><Clock3 size={18} /></span><span><strong>Session timeout</strong><small>Automatically revoke an inactive owner session.</small></span><select defaultValue="30"><option value="15">15 minutes</option><option value="30">30 minutes</option><option value="60">1 hour</option></select></div>
         <div><span className="settings-icon"><ShieldCheck size={18} /></span><span><strong>TLS and host hardening</strong><small>Caddy TLS, non-root containers, firewall, fail2ban and unattended security updates.</small></span><StatusPill tone="success">Compliant</StatusPill></div>
         <div><span className="settings-icon"><Archive size={18} /></span><span><strong>Nightly encrypted backup</strong><small>Last pg_dump verified at 02:10 UTC. Restore drill passed 01 Jul.</small></span><StatusPill tone="success">Healthy</StatusPill></div>
@@ -1610,8 +1610,8 @@ export function App() {
     return () => document.removeEventListener("keydown", handleEscape);
   }, []);
 
-  if (authStage === "login") return <Login onContinue={() => setAuthStage("totp")} />;
-  if (authStage === "totp") return <Totp onVerify={() => setAuthStage("app")} onBack={() => setAuthStage("login")} />;
+  if (authStage === "login") return <Login onContinue={() => setAuthStage("otp")} />;
+  if (authStage === "otp") return <Otp onVerify={() => setAuthStage("app")} onBack={() => setAuthStage("login")} />;
 
   const signOut = () => {
     setAuthStage("login");

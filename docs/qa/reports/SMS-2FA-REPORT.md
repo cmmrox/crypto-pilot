@@ -1,7 +1,7 @@
 # SMS 2FA implementation and release-gate report
 
 **Date:** 2026-07-19  
-**Branch:** `feature/sms-2fa`  
+**Branch:** `main` (merged from `feature/sms-2fa`)
 **Status:** SMS implementation and focused historical QA recorded; current-snapshot
 release gates are still open and the change is **not released to LIVE**
 
@@ -75,6 +75,55 @@ release blockers were fixed:
   ciphertext before restore, keeps key material out of process arguments, and
   bounds local temporary files.
 
+### Login rollover hotfix verification (2026-07-19)
+
+A real owner login through the in-app Browser reproduced the reported rollout
+mismatch: the screenshot was an already-open pre-SMS bundle (authenticator/TOTP
+copy) talking to the new SMS backend. The backend sent the SMS successfully, but
+that in-memory client did not understand the new response contract.
+
+The fix serves the SPA entrypoint with `Cache-Control: no-store`, so every refresh
+loads the current SMS OTP bundle. The active backend exposes only `otp_token` and
+`/api/auth/otp/verify`; obsolete TOTP response fields and endpoints are absent.
+The owner refreshed into the SMS screen and completed a real login successfully.
+
+Fresh verification on the fixed tree:
+
+| Gate | Result |
+| --- | --- |
+| Real owner Browser login | Passed: password → real SMS screen → supplied SMS code → authenticated Overview |
+| Auth-contract regression | Passed: current SMS endpoint succeeds; obsolete TOTP response field and endpoint are absent |
+| Backend full suite incl. parity | **200 passed, 3 skipped** |
+| Ruff lint | Passed |
+| Changed-file Ruff format | Passed |
+| Mypy strict | Passed, 71 source files |
+| Import boundaries | Passed, 2 contracts |
+| Frontend audit/lint/type/build | Passed; 0 high vulnerabilities |
+| QA audit | Passed; 0 high vulnerabilities |
+| Playwright inventory | **122 tests in 11 files** |
+| Isolated full Playwright regression | **119 passed, 3 intentional mobile-only skips, 0 failures** |
+| Binance DEMO credential + signed account check | Passed on desktop and mobile |
+| Binance DEMO self-check round-trip | Passed on desktop and mobile; reconciled and flattened |
+| Bot lifecycle + kill switch | Passed on desktop and mobile |
+| Real notify.lk test SMS | Passed in the in-app Browser and on desktop + mobile |
+| Read-only Browser screen pass | Overview, Trades, Monthly, News, Events, Settings; no UI alerts, console warnings/errors, or desktop overflow |
+
+The three Playwright skips are deliberate mobile duplicates of state-changing
+cases: recording the monthly withdrawal allowance, changing the owner phone, and
+disabling/re-enabling 2FA with session revocation. Each case passed on desktop.
+All credential-gated Binance DEMO and real-SMS cases ran on both projects.
+
+The exchange-backed pass used a fresh isolated test database and the encrypted
+DEMO/notify.lk configuration already stored by the owner. Secrets were injected
+only into the test process, never written to source or returned by the UI. The
+suite exercised signed account access, real DEMO order round-trips, reconciliation,
+flattening, start/stop, and the kill switch. LIVE trading remained disabled.
+
+The repository-wide `ruff format --check app tests` command still reports 43
+pre-existing, untouched files that would be reformatted. They were not bulk-edited
+as part of this focused auth hotfix; all three changed Python files pass the same
+format check.
+
 Fresh checks on the combined working tree:
 
 | Gate | Current result |
@@ -82,21 +131,22 @@ Fresh checks on the combined working tree:
 | Ruff | Passed |
 | Mypy strict | Passed, 71 source files |
 | Import boundaries | Passed, 2 contracts |
-| Backend unit + parity tests | **90 passed** |
+| Backend unit + parity tests | **200 passed, 3 skipped** |
 | Frontend lint and TypeScript | Passed |
 | Frontend production build | Passed |
-| Playwright discovery | **120 tests in 11 files** |
+| Playwright discovery | **122 tests in 11 files** |
 | Shell syntax and Compose rendering | Passed |
 | Frozen research tree | Unchanged |
-| Integration/full browser/container regression | Blocked in the managed task because Docker socket access is denied; must pass in CI on the committed snapshot |
-| Online dependency audits | Blocked in the managed task by restricted DNS; must pass in CI |
+| Integration/full browser/container regression | **119 passed, 3 intentional mobile-only skips, 0 failures** on a fresh isolated credential-backed stack |
+| Dependency audits | No known backend/frontend/QA vulnerabilities; local backend package excluded as non-PyPI |
 | Exact-snapshot security scan | Pending |
 
-The focused E2E run used a fresh isolated PostgreSQL/backend/frontend/Caddy
-stack on port 8091 with test-only SMS capture. It covered foundations, password
-and SMS login, invalid OTP, logout, session persistence, anonymous authorization,
-login limits, security headers, DEMO/LIVE guard UI, 2FA disable guard, and a
-new-phone verification round trip that restored the original test number.
+The current E2E run used a fresh isolated PostgreSQL/backend/frontend/Caddy
+stack on port 8092. It covered all stages from foundations through reliability,
+including password and SMS login, invalid OTP, logout, session persistence,
+authorization, login limits, security headers, DEMO/LIVE guards, real Binance
+DEMO execution/lifecycle, real notify.lk delivery, 2FA disable protection, and
+a new-phone verification round trip that restored the original test number.
 
 ## Full E2E regression
 

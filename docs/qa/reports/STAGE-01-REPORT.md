@@ -1,5 +1,10 @@
 # Stage 1 — Authentication & App Shell — Report
 
+> Historical report for the original authenticator-based implementation.
+> The active authentication design and release evidence are SMS OTP; see
+> `SMS-2FA-REPORT.md`. TOTP names and results below are retained only as an
+> immutable audit record of the superseded stage snapshot.
+
 **Status:** ✅ COMPLETE — QA gate passed. **Date:** 2026-07-18.
 
 ## Scope shipped

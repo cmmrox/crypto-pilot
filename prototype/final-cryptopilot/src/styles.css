@@ -76,7 +76,7 @@ a {
 
 code,
 time,
-.totp-input {
+.otp-input {
   font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
@@ -3210,7 +3210,7 @@ td code {
 }
 
 .auth-form-wrap,
-.totp-shell {
+.otp-shell {
   display: grid;
   place-items: center;
   padding: 40px;
@@ -3245,7 +3245,7 @@ td code {
 }
 
 .auth-card input,
-.totp-card input {
+.otp-card input {
   width: 100%;
   height: 44px;
   border: 1px solid var(--border);
@@ -3257,7 +3257,7 @@ td code {
 }
 
 .auth-card input:focus,
-.totp-card input:focus {
+.otp-card input:focus {
   border-color: var(--amber);
   box-shadow: 0 0 0 3px rgb(245 166 35 / 8%);
 }
@@ -3333,12 +3333,12 @@ td code {
   font-size: 9px;
 }
 
-.totp-shell {
+.otp-shell {
   min-height: 100vh;
   background: radial-gradient(circle at 50% 30%, rgb(245 166 35 / 7%), transparent 26%), var(--bg);
 }
 
-.totp-card {
+.otp-card {
   width: min(400px, 100%);
   border: 1px solid var(--border);
   border-radius: 11px;
@@ -3349,13 +3349,13 @@ td code {
   text-align: center;
 }
 
-.totp-back {
+.otp-back {
   position: absolute;
   top: 17px;
   left: 17px;
 }
 
-.totp-icon {
+.otp-icon {
   width: 50px;
   height: 50px;
   border: 1px solid rgb(245 166 35 / 35%);
@@ -3367,19 +3367,19 @@ td code {
   margin: 10px auto 20px;
 }
 
-.totp-card h1 {
+.otp-card h1 {
   margin: 4px 0 8px;
   font-size: 25px;
 }
 
-.totp-card > p:not(.kicker) {
+.otp-card > p:not(.kicker) {
   margin: 0 0 21px;
   color: var(--muted);
   font-size: 11px;
   line-height: 1.55;
 }
 
-.totp-input {
+.otp-input {
   height: 54px !important;
   margin-bottom: 12px;
   text-align: center;
@@ -3387,7 +3387,7 @@ td code {
   letter-spacing: 0.3em;
 }
 
-.totp-required {
+.otp-required {
   border: 1px solid var(--border);
   border-radius: 6px;
   background: #0d1317;
@@ -3791,11 +3791,11 @@ td code {
     font-size: 26px;
   }
 
-  .totp-shell {
+  .otp-shell {
     padding: 14px;
   }
 
-  .totp-card {
+  .otp-card {
     padding: 27px 20px 20px;
   }
 }

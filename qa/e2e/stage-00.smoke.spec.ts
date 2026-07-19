@@ -61,3 +61,11 @@ test("QA-0.06 unknown client route falls back to SPA (no 404 page)", async ({ pa
   expect(resp?.status()).toBeLessThan(400);
   await expect(page).toHaveTitle(/CryptoPilot/);
 });
+
+test("QA-0.07 SPA entrypoint is never cached across auth-contract releases", async ({
+  request,
+}) => {
+  const resp = await request.get("/");
+  expect(resp.status()).toBe(200);
+  expect(resp.headers()["cache-control"]).toContain("no-store");
+});

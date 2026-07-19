@@ -37,6 +37,36 @@ async def test_happy_path_login(app_client: httpx.AsyncClient, owner: str) -> No
 
 
 @pytest.mark.asyncio
+async def test_login_contract_exposes_only_sms_otp_surface(
+    app_client: httpx.AsyncClient, owner: str
+) -> None:
+    password_step = await app_client.post(
+        "/api/auth/login", json={"email": OWNER_EMAIL, "password": OWNER_PASSWORD}
+    )
+    assert password_step.status_code == 200
+    body = password_step.json()
+    assert body["mode"] == "otp"
+    assert body["otp_token"]
+    assert "totp_token" not in body
+
+    removed_endpoint = await app_client.post(
+        "/api/auth/totp",
+        json={"code": current_otp()},
+        headers={"Authorization": f"Bearer {body['otp_token']}"},
+    )
+    assert removed_endpoint.status_code == 404
+
+    verified = await app_client.post(
+        "/api/auth/otp/verify",
+        json={"code": current_otp()},
+        headers={"Authorization": f"Bearer {body['otp_token']}"},
+    )
+    assert verified.status_code == 200
+    assert verified.json()["access_token"]
+    assert verified.json()["refresh_token"]
+
+
+@pytest.mark.asyncio
 async def test_password_step_never_issues_tokens_when_2fa_on(
     app_client: httpx.AsyncClient, owner: str
 ) -> None:

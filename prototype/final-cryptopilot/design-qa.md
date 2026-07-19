@@ -56,8 +56,8 @@ No actionable P0, P1, or P2 visual differences remain.
 
 Primary interactions tested:
 
-1. Password sign-in followed by mandatory TOTP.
-2. Invalid TOTP rejection and valid prototype code acceptance.
+1. Password sign-in followed by SMS OTP.
+2. Invalid SMS OTP rejection and valid prototype code acceptance.
 3. Overview, Trades, Monthly, News, Events, and all Settings sections.
 4. Trade filters and order/fill detail drawer.
 5. DEMO/LIVE switch guard.

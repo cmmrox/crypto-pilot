@@ -1,5 +1,9 @@
 # Stage 9 — Settings, Security Hardening & Environment Guard — Report
 
+> Historical stage snapshot. Any TOTP reference below describes the superseded
+> Stage 1 implementation; current authentication uses owner-configurable SMS OTP
+> and is governed by `SMS-2FA-REPORT.md`.
+
 **Status:** ✅ COMPLETE — QA gate passed. **Date:** 2026-07-18.
 
 ## Scope shipped

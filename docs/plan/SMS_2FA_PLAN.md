@@ -1,11 +1,11 @@
 # SMS 2FA Implementation Plan
 
 **Implementation status (2026-07-19):** implementation and expanded automated
-coverage are present on `feature/sms-2fa`; evidence and remaining release gates
-are recorded in `docs/qa/reports/SMS-2FA-REPORT.md`. The stage is not released
-or closed: the fixture-backed container regression and final exact-snapshot
-security scan must pass on the reviewed commit, and production promotion
-remains prohibited by the Stage 11/12 gates in `IMPLEMENTATION_PLAN.md`.
+coverage are merged into `main`; evidence and remaining release gates are
+recorded in `docs/qa/reports/SMS-2FA-REPORT.md`. The stage is not released or
+closed: the final exact-snapshot security scan remains pending, and production
+promotion remains prohibited by the Stage 11/12 gates in
+`IMPLEMENTATION_PLAN.md`.
 
 Replace authenticator-app TOTP with SMS OTP (via the existing notify.lk gateway),
 add a Settings toggle to enable/disable 2FA, and allow the owner to change the
@@ -127,6 +127,9 @@ or changing the number is itself authenticated, OTP-confirmed, and audited.
 - `auth/Totp.tsx` → `auth/Otp.tsx`: same card UI, SMS wording ("We sent a code
   to ···· 1234"), 6-digit input, **Resend code** button with 60 s countdown,
   distinct messages for expired vs invalid vs locked (as far as the API allows).
+- Serve the SPA entrypoint with `Cache-Control: no-store` so a refreshed client
+  always receives the current SMS OTP contract. No legacy TOTP API aliases or
+  response fields remain in the active application.
 - `views/Settings.tsx`: new `SecurityCard` (pattern-matched to existing cards):
   - 2FA toggle (uses existing `toggle` + `ConfirmModal` patterns; danger tone
     when disabling, body text explains password-only login).

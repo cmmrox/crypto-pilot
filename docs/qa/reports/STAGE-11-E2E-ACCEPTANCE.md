@@ -1,5 +1,10 @@
 # Pre-Stage 11 — Local Full-Stack End-to-End Acceptance — Report
 
+> Historical acceptance snapshot from before the SMS OTP migration. TOTP
+> references below are retained as immutable evidence for that earlier build.
+> Current authentication and release evidence are governed by
+> `SMS-2FA-REPORT.md`.
+
 **Status:** Local pre-deployment acceptance completed on 2026-07-18; **Stage 11
 is not complete**. The real VPS deployment, current-snapshot regression, and
 calendar soak remain.

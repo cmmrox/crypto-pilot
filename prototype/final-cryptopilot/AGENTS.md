@@ -12,6 +12,7 @@ When implementing from a selected generated mock, treat that image as the source
 - `BUSINESS_SOLUTION_v2.pdf` is the feature authority and Trend Rider v6 long/short is the deployed strategy.
 - The active strategy must be prominent globally and on the Overview.
 - Strategy parameters are deployed, validated, and read-only in the operator UI. A strategy release can be selected only while the bot is stopped.
-- Login requires username, password, and mandatory TOTP with no bypass.
+- Login requires email and password, followed by a single-use SMS OTP whenever
+  owner-configurable 2FA is enabled. There is no OTP bypass while it is enabled.
 - Preserve strong dark-mode contrast and responsive behavior.
 - The final prototype must expose the complete owner workflow, not only the Overview screen.

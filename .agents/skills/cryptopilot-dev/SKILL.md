@@ -23,6 +23,9 @@ the repository's `docs/` directory as the authoritative knowledge base.
 6. Run the narrow checks first, then all required regression gates for the affected
    risk area.
 7. Self-review against `docs/guidelines/CODE_REVIEW.md` before declaring completion.
+8. For ordinary code-review requests, use this repository's review checklist and
+   validation gates. Do not start the Codex Security plugin/workbench workflow unless
+   the owner explicitly requests a Codex Security scan or security-specific review.
 
 ## Non-negotiable rules
 

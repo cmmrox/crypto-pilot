@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 
 const html = await readFile(new URL("../dist/index.html", import.meta.url), "utf8");
 const workerSource = `const HTML = ${JSON.stringify(html)};
@@ -28,3 +28,7 @@ export default {
 
 await mkdir(new URL("../dist/server/", import.meta.url), { recursive: true });
 await writeFile(new URL("../dist/server/index.js", import.meta.url), workerSource);
+await copyFile(
+  new URL("../dist/index.html", import.meta.url),
+  new URL("../CryptoPilot_Final_Prototype.html", import.meta.url),
+);

@@ -25,10 +25,16 @@ test("QA-7.02 SMS delivery can be toggled", async ({ page }) => {
   await login(page);
   await gotoSettings(page);
   const toggle = page.getByRole("switch", { name: /toggle sms delivery/i });
+  // The toggle disables itself while the flip + status refresh round-trips, and
+  // aria-checked reflects the confirmed server state. Wait for it to settle
+  // before each click so the assertions never race an in-flight request.
+  await expect(toggle).toBeEnabled();
   const before = await toggle.getAttribute("aria-checked");
   await toggle.click();
   await expect(toggle).not.toHaveAttribute("aria-checked", before ?? "false");
+  await expect(toggle).toBeEnabled();
   await toggle.click(); // restore
+  await expect(toggle).toHaveAttribute("aria-checked", before ?? "false");
 });
 
 test("QA-7.03 SMS status API reports configured + enabled", async ({

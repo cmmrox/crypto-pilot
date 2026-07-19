@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { login } from "./helpers/auth";
+import { login, OWNER_PASSWORD } from "./helpers/auth";
 
 /**
  * Stage 4 — Risk & execution (QA-4, live DEMO slice).
@@ -32,13 +32,16 @@ test("QA-4.01 store DEMO credentials and verify authenticated connection", async
   await gotoSettings(page);
   await page.getByLabel("DEMO API key").fill(DEMO_KEY);
   await page.getByLabel("DEMO API secret").fill(DEMO_SECRET);
+  // Replacing exchange credentials is password-guarded (re-auth), so the owner
+  // password is required to persist the pair.
+  await page.getByLabel("DEMO current password").fill(OWNER_PASSWORD);
   await page
     .getByTestId("credential-DEMO")
     .getByRole("button", { name: /save credentials/i })
     .click();
-  await expect(page.getByTestId("cred-state-DEMO")).toContainText(
-    /configured/i,
-  );
+  // Capital-C "Configured" so the match cannot pass on the "Not configured"
+  // placeholder.
+  await expect(page.getByTestId("cred-state-DEMO")).toContainText("Configured");
 
   await page
     .getByTestId("credential-DEMO")

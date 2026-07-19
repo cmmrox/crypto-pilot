@@ -34,7 +34,7 @@ log.info("order_placed", side="SHORT", qty="0.116", px="65711.20",
 
 ## Red lines
 
-- **Never log secrets** — API keys, signatures, TOTP secrets, JWTs, phone numbers
+- **Never log secrets** — API keys, signatures, OTP codes/hashes, JWTs, phone numbers
   (mask: `+94 77 ••• ••42`). The signing function itself must be excluded from debug
   logging. gitleaks + a log-scrub test (Stage 0) enforce this.
 - Never log at `INFO`+ inside per-bar hot loops except the single decision line.

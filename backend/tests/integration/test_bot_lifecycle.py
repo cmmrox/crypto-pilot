@@ -12,7 +12,7 @@ from app.db.models import Candle
 from app.execution.orders import OrderManager
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tests.conftest import OWNER_TOTP_SECRET  # noqa: F401  (ensures conftest import)
+from tests.conftest import OWNER_PHONE  # noqa: F401  (ensures conftest import)
 from tests.fakes import FakeExchange
 
 D = Decimal
@@ -147,6 +147,28 @@ async def test_evaluate_opens_long_on_fresh_regime(db_session: AsyncSession) -> 
     await db_session.commit()
     assert "open_long" in actions
     assert (await ex.get_position("BTCUSDT")).qty > 0
+
+
+@pytest.mark.asyncio
+async def test_every_close_reconciliation_blocks_new_risk(
+    db_session: AsyncSession,
+) -> None:
+    svc = BotService()
+    ex = FakeExchange()
+    om = OrderManager(ex)
+    await svc.start(db_session, ex, by="o")
+    await db_session.commit()
+    await ex.place_market(
+        "BTCUSDT", "BUY", D("0.05"), client_order_id="out-of-band"
+    )
+
+    actions = await svc.evaluate_once(
+        db_session, ex, om, candles=_bull_candles()
+    )
+    await db_session.commit()
+
+    assert actions == ["safe_mode"]
+    assert (await svc.status(db_session)).status == BotStatus.SAFE_MODE
 
 
 @pytest.mark.asyncio

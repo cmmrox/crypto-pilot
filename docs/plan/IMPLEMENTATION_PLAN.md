@@ -48,19 +48,21 @@ HTTP(S), `/health` 200 via request context.
 
 **Deliverables**
 - Backend: owner user provisioning (CLI command), Argon2id password verify, JWT
-  (short-lived access + refresh), **mandatory TOTP** (enrol + verify, encrypted secret),
+  (short-lived access + refresh), owner-configurable **SMS OTP 2FA** (encrypted phone,
+  single-use challenge; password-only only while explicitly disabled),
   session revocation, login rate-limiting, auth audit events (`security` category).
-- Frontend: Login → TOTP → app shell (sidebar nav, header, environment badge, sign-out),
+- Frontend: Login → SMS OTP when enabled → app shell (sidebar nav, header, environment badge, sign-out),
   ported from `prototype/final-cryptopilot` design; route guards; session expiry handling.
 
-**QA test cases (QA-1):** valid login+TOTP succeeds; wrong password / wrong TOTP / reused
-TOTP rejected; rate limit locks after N failures (event logged); JWT expiry forces
+**QA test cases (QA-1):** valid login+SMS OTP succeeds; wrong password / wrong, expired,
+locked, or reused OTP rejected; OTP is bound to its challenge; rate limit locks after N failures (event logged); JWT expiry forces
 re-auth; revoked session dies; no auth bypass on any API route (401 sweep); XSS-safe
 rendering of inputs.
 **Playwright:** `stage-01.auth.spec.ts` — full happy path, all failure paths, session
 expiry, route-guard redirects, API 401 sweep via request context.
 
-**Exit:** dashboard unreachable without email+password+TOTP; all auth events audited.
+**Exit:** while 2FA is enabled, dashboard unreachable without email+password+fresh SMS
+OTP; while disabled, the approved password-only policy applies; all auth events audited.
 
 ---
 
@@ -246,7 +248,8 @@ navigation, refresh flow, settings; LLM mocked in E2E, one recorded real-provide
 - Settings complete: environment switch (bot-stopped guard + typed LIVE confirmation —
   UI complete but LIVE row absent until Stage 12), strategy library (guarded fallback
   selection while stopped), credentials, security (session timeout, revoke-others,
-  TOTP recovery), operations page (service health, rollout gate, drill evidence).
+  SMS 2FA enable/disable/phone-change + server-only recovery), operations page
+  (service health, rollout gate, drill evidence).
 - Hardening: security headers/CSP, strict CORS, request-size limits, dependency audit
   in CI, non-root containers, firewall doc, fail2ban, secrets-scan CI job (gitleaks).
 

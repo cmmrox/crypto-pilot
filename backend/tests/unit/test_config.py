@@ -19,6 +19,8 @@ def test_valid_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     s = Settings()
     assert s.app_name == "CryptoPilot"
     assert not s.is_production
+    assert not s.live_trading_approved
+    assert not s.live_key_permissions_verified
 
 
 def test_placeholder_secret_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -43,3 +45,23 @@ def test_production_flag(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv(k, v)
     monkeypatch.setenv("CP_ENVIRONMENT", "production")
     assert Settings().is_production
+
+
+def test_otp_test_mode_rejected_outside_test(monkeypatch: pytest.MonkeyPatch) -> None:
+    for k, v in _BASE_ENV.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.setenv("CP_ENVIRONMENT", "production")
+    monkeypatch.setenv("CP_OTP_TEST_MODE", "true")
+    with pytest.raises(ValidationError):
+        Settings()
+
+
+def test_otp_test_throttle_override_rejected_outside_test(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for k, v in _BASE_ENV.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.setenv("CP_ENVIRONMENT", "production")
+    monkeypatch.setenv("CP_OTP_TEST_DISABLE_THROTTLE", "true")
+    with pytest.raises(ValidationError):
+        Settings()

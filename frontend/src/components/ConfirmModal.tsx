@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { AlertTriangle, X } from "lucide-react";
 
 export interface ModalSpec {
@@ -16,13 +16,49 @@ export interface ModalSpec {
 export function ConfirmModal({ modal, onClose }: { modal: ModalSpec; onClose: () => void }) {
   const [word, setWord] = useState("");
   const [busy, setBusy] = useState(false);
+  const dialogRef = useRef<HTMLElement>(null);
+  const titleId = useId();
   const needsWord = Boolean(modal.confirmWord);
   const canConfirm = !needsWord || word === modal.confirmWord;
 
   useEffect(() => {
-    const onEsc = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    document.addEventListener("keydown", onEsc);
-    return () => document.removeEventListener("keydown", onEsc);
+    const previouslyFocused =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const dialog = dialogRef.current;
+    const focusable = () =>
+      Array.from(
+        dialog?.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), input:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
+        ) ?? [],
+      );
+    focusable()[0]?.focus();
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        onClose();
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const items = focusable();
+      if (items.length === 0) {
+        e.preventDefault();
+        return;
+      }
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      previouslyFocused?.focus();
+    };
   }, [onClose]);
 
   const confirm = async () => {
@@ -42,7 +78,13 @@ export function ConfirmModal({ modal, onClose }: { modal: ModalSpec; onClose: ()
       role="presentation"
       onMouseDown={(e) => e.target === e.currentTarget && onClose()}
     >
-      <section className={`modal ${modal.tone ?? "warning"}`} role="dialog" aria-modal="true">
+      <section
+        ref={dialogRef}
+        className={`modal ${modal.tone ?? "warning"}`}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+      >
         <button className="icon-button modal-close" aria-label="Close dialog" onClick={onClose}>
           <X size={17} />
         </button>
@@ -50,7 +92,7 @@ export function ConfirmModal({ modal, onClose }: { modal: ModalSpec; onClose: ()
           <AlertTriangle size={22} />
         </span>
         <p className="kicker">{modal.kicker ?? "CONFIRM ACTION"}</p>
-        <h1>{modal.title}</h1>
+        <h1 id={titleId}>{modal.title}</h1>
         <p>{modal.body}</p>
         {modal.details && (
           <ul className="modal-details">
@@ -62,7 +104,12 @@ export function ConfirmModal({ modal, onClose }: { modal: ModalSpec; onClose: ()
         {needsWord && (
           <label className="confirm-field">
             Type <strong>{modal.confirmWord}</strong> to confirm
-            <input aria-label={`Type ${modal.confirmWord} to confirm`} value={word} onChange={(e) => setWord(e.target.value)} autoFocus />
+            <input
+              aria-label={`Type ${modal.confirmWord} to confirm`}
+              value={word}
+              onChange={(e) => setWord(e.target.value)}
+              autoFocus
+            />
           </label>
         )}
         <div className="modal-actions">

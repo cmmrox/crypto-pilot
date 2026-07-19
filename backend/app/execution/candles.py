@@ -71,9 +71,8 @@ async def backfill(
 ) -> int:
     """Backfill recent closed candles from REST. Returns rows upserted."""
     klines = await client.get_klines(symbol, interval, limit=limit)
-    # The most recent kline from REST may be the still-forming candle on some feeds;
-    # Binance returns closed candles for historical rows. We persist all as closed
-    # because /klines returns completed candles (the live one is delivered via WS).
+    # Binance REST includes the current still-forming final kline. `Kline`
+    # carries a close-time-derived flag, so `upsert_klines` drops it.
     count = await upsert_klines(session, symbol, interval, klines)
     _log.info("candles_backfilled", symbol=symbol, interval=interval, count=len(klines))
     return count

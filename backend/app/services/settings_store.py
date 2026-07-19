@@ -8,9 +8,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import AppSettings
 
 
-async def get_settings_row(session: AsyncSession) -> AppSettings:
+async def get_settings_row(
+    session: AsyncSession, *, for_update: bool = False
+) -> AppSettings:
     """Return the singleton settings row, creating it with defaults if absent."""
-    row = (await session.execute(select(AppSettings).limit(1))).scalar_one_or_none()
+    stmt = select(AppSettings).limit(1)
+    if for_update:
+        stmt = stmt.with_for_update()
+    row = (await session.execute(stmt)).scalar_one_or_none()
     if row is None:
         row = AppSettings()
         session.add(row)

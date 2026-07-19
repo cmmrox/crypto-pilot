@@ -9,7 +9,7 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import Any
 
-from app.execution.binance_client import BinanceClient
+from app.execution.binance_client import BinanceClient, BinanceError
 from app.execution.exchange import AccountState, OrderResult, Position
 from app.execution.filters import SymbolFilters
 
@@ -45,7 +45,13 @@ class BinanceExchange:
         data = await self._c.signed_request(
             "GET", "/fapi/v2/positionRisk", {"symbol": symbol}
         )
-        row = data[0] if data else {"positionAmt": "0", "entryPrice": "0"}
+        if not isinstance(data, list) or len(data) != 1:
+            raise BinanceError(
+                f"unexpected position response for {symbol}: expected exactly one row"
+            )
+        row = data[0]
+        if not isinstance(row, dict) or row.get("symbol") != symbol:
+            raise BinanceError(f"position response symbol mismatch for {symbol}")
         return Position(
             symbol=symbol,
             qty=Decimal(str(row["positionAmt"])),
@@ -74,7 +80,10 @@ class BinanceExchange:
         }
         if reduce_only:
             params["reduceOnly"] = "true"
-        return self._to_result(await self._c.signed_request("POST", "/fapi/v1/order", params))
+        return self._to_result(
+            await self._c.signed_request("POST", "/fapi/v1/order", params),
+            expected_client_order_id=client_order_id,
+        )
 
     async def place_stop_market(
         self,
@@ -96,7 +105,10 @@ class BinanceExchange:
             "reduceOnly": "true" if reduce_only else "false",
             "workingType": "MARK_PRICE",
         }
-        return self._to_result(await self._c.signed_request("POST", "/fapi/v1/order", params))
+        return self._to_result(
+            await self._c.signed_request("POST", "/fapi/v1/order", params),
+            expected_client_order_id=client_order_id,
+        )
 
     async def place_take_profit(
         self,
@@ -118,7 +130,10 @@ class BinanceExchange:
             "newClientOrderId": client_order_id,
             "reduceOnly": "true" if reduce_only else "false",
         }
-        return self._to_result(await self._c.signed_request("POST", "/fapi/v1/order", params))
+        return self._to_result(
+            await self._c.signed_request("POST", "/fapi/v1/order", params),
+            expected_client_order_id=client_order_id,
+        )
 
     async def cancel_all(self, symbol: str) -> int:
         before = await self.get_open_orders(symbol)
@@ -131,12 +146,38 @@ class BinanceExchange:
         )
 
     @staticmethod
-    def _to_result(o: dict[str, Any]) -> OrderResult:
+    def _to_result(
+        o: dict[str, Any], *, expected_client_order_id: str | None = None
+    ) -> OrderResult:
+        if not isinstance(o, dict):
+            raise BinanceError("invalid order response shape")
+        client_order_id = str(o.get("clientOrderId", ""))
+        exchange_order_id = str(o.get("orderId", ""))
+        status = str(o.get("status", ""))
+        if not client_order_id or not exchange_order_id:
+            raise BinanceError("order response missing identity")
+        if (
+            expected_client_order_id is not None
+            and client_order_id != expected_client_order_id
+        ):
+            raise BinanceError("order response client identity mismatch")
+        if status not in {
+            "NEW",
+            "PARTIALLY_FILLED",
+            "FILLED",
+            "CANCELED",
+            "REJECTED",
+            "EXPIRED",
+        }:
+            raise BinanceError("order response has invalid status")
+        filled_qty = Decimal(str(o.get("executedQty", "0")))
+        if filled_qty < 0:
+            raise BinanceError("order response has negative filled quantity")
         return OrderResult(
-            client_order_id=str(o.get("clientOrderId", "")),
-            exchange_order_id=str(o.get("orderId", "")),
-            status=str(o.get("status", "NEW")),
-            filled_qty=Decimal(str(o.get("executedQty", "0"))),
+            client_order_id=client_order_id,
+            exchange_order_id=exchange_order_id,
+            status=status,
+            filled_qty=filled_qty,
             avg_price=Decimal(str(o.get("avgPrice", "0") or "0")),
             raw=o,
         )

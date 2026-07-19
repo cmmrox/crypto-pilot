@@ -5,20 +5,11 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from tests.conftest import OWNER_EMAIL, OWNER_PASSWORD, current_totp
+from tests.conftest import auth_headers
 
 
-async def _headers(client: httpx.AsyncClient, secret: str) -> dict[str, str]:
-    r = await client.post(
-        "/api/auth/login", json={"email": OWNER_EMAIL, "password": OWNER_PASSWORD}
-    )
-    tok = r.json()["totp_token"]
-    r = await client.post(
-        "/api/auth/totp",
-        json={"code": current_totp(secret)},
-        headers={"Authorization": f"Bearer {tok}"},
-    )
-    return {"Authorization": f"Bearer {r.json()['access_token']}"}
+async def _headers(client: httpx.AsyncClient, _secret: str) -> dict[str, str]:
+    return await auth_headers(client)
 
 
 @pytest.mark.asyncio

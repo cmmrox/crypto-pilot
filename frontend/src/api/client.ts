@@ -84,10 +84,13 @@ async function tryRefresh(): Promise<boolean> {
 export async function apiRequest<T>(
   path: string,
   init: RequestInit = {},
-  { auth = true }: { auth?: boolean } = {},
+  {
+    auth = true,
+    refreshOnUnauthorized = true,
+  }: { auth?: boolean; refreshOnUnauthorized?: boolean } = {},
 ): Promise<T> {
   let resp = await rawRequest(path, init, auth);
-  if (resp.status === 401 && auth) {
+  if (resp.status === 401 && auth && refreshOnUnauthorized) {
     if (await tryRefresh()) {
       resp = await rawRequest(path, init, auth);
     }
@@ -128,7 +131,15 @@ export interface DeepHealth {
 
 export const getDeepHealth = () => apiRequest<DeepHealth>("/health/deep", {}, { auth: false });
 
-export function login(email: string, password: string): Promise<{ totp_token: string }> {
+export interface LoginResponse {
+  mode: "tokens" | "otp";
+  access_token: string | null;
+  refresh_token: string | null;
+  otp_token: string | null;
+  phone_hint: string | null;
+}
+
+export function login(email: string, password: string): Promise<LoginResponse> {
   return apiRequest(
     "/api/auth/login",
     { method: "POST", body: JSON.stringify({ email, password }) },
@@ -136,14 +147,22 @@ export function login(email: string, password: string): Promise<{ totp_token: st
   );
 }
 
-export function verifyTotp(totpToken: string, code: string): Promise<Tokens> {
+export function verifyOtp(otpToken: string, code: string): Promise<Tokens> {
   return apiRequest(
-    "/api/auth/totp",
+    "/api/auth/otp/verify",
     {
       method: "POST",
       body: JSON.stringify({ code }),
-      headers: { Authorization: `Bearer ${totpToken}` },
+      headers: { Authorization: `Bearer ${otpToken}` },
     },
+    { auth: false },
+  );
+}
+
+export function resendOtp(otpToken: string): Promise<{ message: string }> {
+  return apiRequest(
+    "/api/auth/otp/resend",
+    { method: "POST", headers: { Authorization: `Bearer ${otpToken}` } },
     { auth: false },
   );
 }
@@ -231,11 +250,16 @@ export function saveCredential(body: {
   service: string;
   api_key: string;
   api_secret: string;
+  current_password: string;
 }): Promise<{ message: string }> {
-  return apiRequest("/api/settings/credentials", {
-    method: "PUT",
-    body: JSON.stringify(body),
-  });
+  return apiRequest(
+    "/api/settings/credentials",
+    {
+      method: "PUT",
+      body: JSON.stringify(body),
+    },
+    { refreshOnUnauthorized: false },
+  );
 }
 
 export function testBinanceConnection(
@@ -417,7 +441,16 @@ export const saveSmsConfig = (body: {
   api_key: string;
   sender_id: string;
   phone: string;
-}) => apiRequest<{ message: string }>("/api/settings/sms", { method: "PUT", body: JSON.stringify(body) });
+  current_password: string;
+}) =>
+  apiRequest<{ message: string }>(
+    "/api/settings/sms",
+    {
+      method: "PUT",
+      body: JSON.stringify(body),
+    },
+    { refreshOnUnauthorized: false },
+  );
 export const toggleSms = (enabled: boolean) =>
   apiRequest<{ message: string }>("/api/settings/sms/toggle", {
     method: "POST",
@@ -476,3 +509,35 @@ export const switchStrategy = (name: string) =>
     method: "PUT",
     body: JSON.stringify({ name }),
   });
+
+// --- Two-factor authentication (SMS) ---
+
+export interface SecurityStatus {
+  twofa_enabled: boolean;
+  phone_hint: string | null;
+}
+
+export type SecurityAction = "enable" | "disable" | "change_phone";
+
+export const getSecurityStatus = () => apiRequest<SecurityStatus>("/api/settings/security");
+
+export const startSecurityChange = (body: {
+  password: string;
+  action: SecurityAction;
+  new_phone?: string;
+}) =>
+  apiRequest<{ challenge_id: number; phone_hint: string | null }>(
+    "/api/settings/security/2fa/start",
+    { method: "POST", body: JSON.stringify(body) },
+    { refreshOnUnauthorized: false },
+  );
+
+export const confirmSecurityChange = (challengeId: number, code: string) =>
+  apiRequest<{ message: string }>(
+    "/api/settings/security/2fa/confirm",
+    {
+      method: "POST",
+      body: JSON.stringify({ challenge_id: challengeId, code }),
+    },
+    { refreshOnUnauthorized: false },
+  );

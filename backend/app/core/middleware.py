@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from typing import Any, cast
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -44,13 +45,62 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         return response
 
 
-class BodySizeLimitMiddleware(BaseHTTPMiddleware):
-    """Reject over-large request bodies (defense against memory abuse)."""
+class BodySizeLimitMiddleware:
+    """Reject oversized fixed-length and streamed request bodies.
 
-    async def dispatch(
-        self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
-    ) -> Response:
-        cl = request.headers.get("content-length")
-        if cl is not None and cl.isdigit() and int(cl) > MAX_BODY_BYTES:
-            return JSONResponse({"detail": "request body too large"}, status_code=413)
-        return await call_next(request)
+    This is pure ASGI middleware so chunked/lengthless bodies are bounded while
+    they are received, before Starlette or Pydantic can buffer and parse them.
+    """
+
+    def __init__(self, app: Any) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        headers = {
+            key.lower(): value for key, value in scope.get("headers", [])
+        }
+        raw_length = headers.get(b"content-length")
+        if raw_length is not None:
+            try:
+                if int(raw_length) > MAX_BODY_BYTES:
+                    await self._reject(scope, receive, send)
+                    return
+            except ValueError:
+                await self._reject(scope, receive, send)
+                return
+
+        messages: list[dict[str, Any]] = []
+        total = 0
+        while True:
+            message = await receive()
+            messages.append(message)
+            if message["type"] == "http.disconnect":
+                return
+            if message["type"] != "http.request":
+                continue
+            total += len(message.get("body", b""))
+            if total > MAX_BODY_BYTES:
+                await self._reject(scope, receive, send)
+                return
+            if not message.get("more_body", False):
+                break
+
+        async def replay_receive() -> dict[str, Any]:
+            if messages:
+                return messages.pop(0)
+            # Streaming responses may continue listening for a client
+            # disconnect after the request body has been replayed.
+            return cast(dict[str, Any], await receive())
+
+        await self.app(scope, replay_receive, send)
+
+    @staticmethod
+    async def _reject(scope: Any, receive: Any, send: Any) -> None:
+        response = JSONResponse(
+            {"detail": "request body too large"}, status_code=413
+        )
+        await response(scope, receive, send)

@@ -30,7 +30,13 @@ Docs: [developer.notify.lk](https://developer.notify.lk/api-endpoints/).
 - Endpoint: `https://app.notify.lk/api/v1/send` (GET or POST).
 - Params: `user_id`, `api_key`, `sender_id`, `to` (`9471XXXXXXX` format), `message` (≤320 chars).
 - Response: JSON `{"status": "success", "data": "Sent"}` — treat anything else as failure.
-- **Fire-and-log:** SMS failure never blocks trading. 3 retries with backoff, then log `ERROR` event + dashboard banner (BSD §10). Every attempt writes an `events` row with delivery status.
+- **Trading alerts are fire-and-log:** failure never blocks trading. 3 retries with
+  backoff, then log `ERROR` event + dashboard banner (BSD §10). Every attempt writes
+  an `events` row with delivery status.
+- **Authentication OTP is deliberately blocking:** a login/security change never
+  succeeds unless its single SMS attempt is accepted by the gateway. Failure is
+  audited and surfaced for retry; it never issues tokens or commits the requested
+  security change. OTP delivery ignores the alerts on/off toggle.
 - Use the approved custom sender ID in production; `NotifyDemo` only for early smoke tests.
 
 ## 3. Codex SDK + GPT-5.5 (AI news assistant)

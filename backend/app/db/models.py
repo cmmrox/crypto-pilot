@@ -13,6 +13,7 @@ from typing import Any
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     ForeignKey,
     Index,
     String,
@@ -32,8 +33,47 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[str] = mapped_column(String(32), default="owner", nullable=False)
-    totp_secret_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
-    totp_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # SMS second factor. phone_encrypted holds the AES-GCM ciphertext of the
+    # 2FA number; when twofa_enabled is false, login is password-only.
+    phone_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    twofa_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+
+class OtpChallenge(Base):
+    """A short-lived SMS one-time-password challenge.
+
+    Codes are random, single-use and stored only as a keyed hash. A challenge is
+    consumed on success and dies after max_attempts failures or expiry. The
+    login step binds its otp_pending token to a specific challenge id so a token
+    can never be replayed against a different challenge.
+    """
+
+    __tablename__ = "otp_challenges"
+    __table_args__ = (
+        Index("ix_otp_user_purpose_created", "user_id", "purpose", "created_at"),
+        CheckConstraint(
+            "purpose IN ('login', 'enable_2fa', 'disable_2fa', 'change_phone')",
+            name="ck_otp_challenges_purpose",
+        ),
+        CheckConstraint("attempts >= 0", name="ck_otp_challenges_attempts"),
+        CheckConstraint("max_attempts > 0", name="ck_otp_challenges_max_attempts"),
+        CheckConstraint("send_count > 0", name="ck_otp_challenges_send_count"),
+    )
+
+    id: Mapped[IntPk]
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), nullable=False)
+    # login | enable_2fa | disable_2fa | change_phone
+    purpose: Mapped[str] = mapped_column(String(16), nullable=False)
+    code_hash: Mapped[str] = mapped_column(String(128), nullable=False)
+    # Target number for this challenge (AES-GCM); for change_phone/enable this is
+    # the NEW number being proven, not necessarily the user's stored one.
+    phone_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    attempts: Mapped[int] = mapped_column(default=0, nullable=False)
+    max_attempts: Mapped[int] = mapped_column(default=5, nullable=False)
+    expires_at: Mapped[dt.datetime] = mapped_column(nullable=False)
+    consumed_at: Mapped[dt.datetime | None] = mapped_column(nullable=True)
+    last_sent_at: Mapped[dt.datetime] = mapped_column(nullable=False)
+    send_count: Mapped[int] = mapped_column(default=1, nullable=False)
 
 
 class Session(Base):
@@ -84,6 +124,9 @@ class ApiCredential(Base):
     id: Mapped[IntPk]
     environment: Mapped[str] = mapped_column(String(8), nullable=False)  # DEMO | LIVE
     service: Mapped[str] = mapped_column(String(32), nullable=False)  # binance|notifylk|codex
+    api_key_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Legacy compatibility only. New writes set this to NULL and lazy-migrate
+    # any pre-upgrade plaintext value on first access.
     api_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     secret_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
 
@@ -257,6 +300,7 @@ __all__ = [
     "Event",
     "NewsItem",
     "Order",
+    "OtpChallenge",
     "Session",
     "Strategy",
     "Trade",

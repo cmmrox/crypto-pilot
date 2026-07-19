@@ -14,6 +14,7 @@ at the execution boundary (Stage 4), not here.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
@@ -57,7 +58,7 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def long_equity(df: pd.DataFrame) -> tuple[pd.Series, list[dict[str, object]]]:
+def long_equity(df: pd.DataFrame) -> tuple[pd.Series[Any], list[dict[str, object]]]:
     """v5.2 managed long engine + 4% monthly breaker. Returns (equity, trades).
 
     Line-for-line port of research circuit_breaker.managed_cb with the chosen
@@ -138,16 +139,16 @@ def long_equity(df: pd.DataFrame) -> tuple[pd.Series, list[dict[str, object]]]:
     return pd.Series(equity, index=idx[: len(equity)]), trades
 
 
-def _atr(df: pd.DataFrame, n: int = 14) -> pd.Series:
+def _atr(df: pd.DataFrame, n: int = 14) -> pd.Series[Any]:
     c = df["close"]
     tr = np.maximum(
         df["high"] - df["low"],
         np.maximum((df["high"] - c.shift()).abs(), (df["low"] - c.shift()).abs()),
     )
-    return pd.Series(tr.ewm(alpha=1 / n, adjust=False).mean())
+    return cast("pd.Series[Any]", pd.Series(tr.ewm(alpha=1 / n, adjust=False).mean()))
 
 
-def short_target(df: pd.DataFrame) -> pd.Series:
+def short_target(df: pd.DataFrame) -> pd.Series[Any]:
     """s_deep(0.5): -1 while (close<SMA200 and EMA50<EMA200 and close<SMA200-0.5*ATR)."""
     c = df["close"]
     sma_ = c.rolling(200).mean()
@@ -158,7 +159,7 @@ def short_target(df: pd.DataFrame) -> pd.Series:
     return -deep.astype(float)
 
 
-def _sleeve_raw_returns(df: pd.DataFrame) -> tuple[pd.Series, pd.Series]:
+def _sleeve_raw_returns(df: pd.DataFrame) -> tuple[pd.Series[Any], pd.Series[Any]]:
     """Vectorized sleeve returns (pre monthly breaker) and per-bar held exposure.
 
     Port of research_ls.backtest with vol_target=0.4, cap=1.0, vol_span=48.
@@ -179,8 +180,8 @@ def _sleeve_raw_returns(df: pd.DataFrame) -> tuple[pd.Series, pd.Series]:
 
 
 def apply_month_breaker(
-    r: pd.Series, cap: float = SLEEVE_MONTH_CAP, cost: float = COST
-) -> pd.Series:
+    r: pd.Series[Any], cap: float = SLEEVE_MONTH_CAP, cost: float = COST
+) -> pd.Series[Any]:
     """Zero out the rest of a month once the stream loses `cap` within it."""
     out = r.to_numpy(copy=True)
     idx = pd.DatetimeIndex(r.index)
@@ -205,10 +206,10 @@ def apply_month_breaker(
 
 @dataclass
 class CompositeResult:
-    equity: pd.Series
-    r_long: pd.Series
-    r_short: pd.Series  # after breaker, before weighting
-    short_exposure: pd.Series  # per-bar held short exposure (negative)
+    equity: pd.Series[Any]
+    r_long: pd.Series[Any]
+    r_short: pd.Series[Any]  # after breaker, before weighting
+    short_exposure: pd.Series[Any]  # per-bar held short exposure (negative)
     trades: list[dict[str, object]]
 
 

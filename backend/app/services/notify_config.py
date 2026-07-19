@@ -37,38 +37,51 @@ async def save_notify_config(
     session: AsyncSession, *, user_id: str, api_key: str, sender_id: str, phone: str
 ) -> None:
     """Store or replace the encrypted notify.lk config."""
+    master = get_settings().master_key
     blob = encrypt(
         json.dumps({"api_key": api_key, "sender_id": sender_id, "phone": phone}),
-        get_settings().master_key,
+        master,
     )
+    user_id_encrypted = encrypt(user_id, master)
     row = (
-        await session.execute(
-            select(ApiCredential).where(ApiCredential.service == _SERVICE)
-        )
+        await session.execute(select(ApiCredential).where(ApiCredential.service == _SERVICE))
     ).scalar_one_or_none()
     if row is None:
         session.add(
             ApiCredential(
-                environment="ALL", service=_SERVICE, api_key=user_id,
+                environment="ALL",
+                service=_SERVICE,
+                api_key=None,
+                api_key_encrypted=user_id_encrypted,
                 secret_encrypted=blob,
             )
         )
     else:
-        row.api_key = user_id
+        row.api_key = None
+        row.api_key_encrypted = user_id_encrypted
         row.secret_encrypted = blob
 
 
 async def get_notify_config(session: AsyncSession) -> NotifyConfig | None:
     row = (
-        await session.execute(
-            select(ApiCredential).where(ApiCredential.service == _SERVICE)
-        )
+        await session.execute(select(ApiCredential).where(ApiCredential.service == _SERVICE))
     ).scalar_one_or_none()
-    if row is None or row.api_key is None:
+    if row is None:
         return None
-    data = json.loads(decrypt(row.secret_encrypted, get_settings().master_key))
+    master = get_settings().master_key
+    if row.api_key_encrypted is not None:
+        user_id = decrypt(row.api_key_encrypted, master)
+    elif row.api_key is not None:
+        # Compatibility for pre-encryption rows. Migrate on first access so an
+        # existing notify.lk installation keeps working across the upgrade.
+        user_id = row.api_key
+        row.api_key_encrypted = encrypt(user_id, master)
+        row.api_key = None
+    else:
+        return None
+    data = json.loads(decrypt(row.secret_encrypted, master))
     return NotifyConfig(
-        user_id=row.api_key,
+        user_id=user_id,
         api_key=data["api_key"],
         sender_id=data["sender_id"],
         phone=data["phone"],
@@ -86,9 +99,7 @@ async def config_status(session: AsyncSession) -> dict[str, object]:
     }
 
 
-async def notify_event(
-    session: AsyncSession, *, kind: str, payload: dict[str, object]
-) -> str:
+async def notify_event(session: AsyncSession, *, kind: str, payload: dict[str, object]) -> str:
     """Resolve config from the DB and send an event SMS. No-op if unconfigured/disabled."""
     settings_row = await get_settings_row(session)
     cfg = await get_notify_config(session)

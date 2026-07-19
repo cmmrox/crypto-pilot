@@ -97,7 +97,6 @@ class CandleIngestService:
                 async with BinanceClient(env) as client:
                     await candle_svc.backfill(session, client, SYMBOL, INTERVAL, limit=500)
                 gaps = await candle_svc.detect_gaps(session, SYMBOL, INTERVAL)
-                self._dead_man.beat(utc_now())
                 await record_event(
                     session,
                     level="INFO" if not gaps else "WARN",
@@ -108,8 +107,30 @@ class CandleIngestService:
                 )
                 await session.commit()
                 # Drive the bot on a real candle close (not on startup catch-up).
-                if reason == "candle_close":
+                if reason == "candle_close" and not gaps:
                     await self._drive_bot(session)
+                elif reason == "candle_close" and gaps:
+                    await record_event(
+                        session,
+                        level="WARN",
+                        category="reconciliation",
+                        message="Trading decision blocked until candle gaps are repaired",
+                        ref="candle_gap_block",
+                        payload={"gaps": len(gaps)},
+                    )
+                    await session.commit()
+                self._dead_man.beat(utc_now())
+            # OTP retention housekeeping is deliberately isolated from the
+            # trading transaction. A cleanup failure must never suppress a
+            # closed-candle decision or its heartbeat.
+            try:
+                async with get_sessionmaker()() as cleanup_session:
+                    from app.services.otp import cleanup_expired
+
+                    await cleanup_expired(cleanup_session)
+                    await cleanup_session.commit()
+            except Exception as exc:
+                _log.error("otp_cleanup_failed", error=str(exc))
         except Exception as exc:
             _log.error("ingest_failed", reason=reason, error=str(exc))
 
@@ -147,8 +168,24 @@ class CandleIngestService:
                     _log.info("bot_actions", actions=actions)
                 await session.commit()
         except NotConfiguredError:
-            return
+            await bot_service.enter_safe_mode(
+                session, reason="Binance credentials unavailable at candle close"
+            )
+            await session.commit()
         except Exception as exc:
+            await session.rollback()
+            await bot_service.enter_safe_mode(
+                session, reason="closed-candle evaluation failed"
+            )
+            await record_event(
+                session,
+                level="ERROR",
+                category="error",
+                message="Closed-candle evaluation failed; bot entered safe mode",
+                ref="bot_drive_failed",
+                payload={"error_type": type(exc).__name__},
+            )
+            await session.commit()
             _log.error("bot_drive_failed", error=str(exc))
 
 

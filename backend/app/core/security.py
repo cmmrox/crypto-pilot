@@ -1,4 +1,4 @@
-"""Security primitives: Argon2id password hashing, JWT tokens, TOTP.
+"""Security primitives: Argon2id password hashing, JWT tokens, SMS OTP codes.
 
 See docs/guidelines/SECURITY_GUIDELINES.md. Secrets are never logged; token
 verification raises typed errors the API maps to 401.
@@ -7,11 +7,13 @@ verification raises typed errors the API maps to 401.
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
+import hmac
+import secrets
 import uuid
 from typing import Any, Literal
 
 import jwt
-import pyotp
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerifyMismatchError
 
@@ -19,7 +21,9 @@ from app.core.config import get_settings
 
 _hasher = PasswordHasher()
 
-TokenPurpose = Literal["access", "refresh", "totp_pending"]
+TokenPurpose = Literal["access", "refresh", "otp_pending"]
+
+OTP_LENGTH = 6
 
 
 class TokenError(Exception):
@@ -92,22 +96,31 @@ def decode_token(token: str, *, expected_purpose: TokenPurpose) -> dict[str, Any
     return claims
 
 
-# --- TOTP --------------------------------------------------------------------
+# --- SMS OTP -----------------------------------------------------------------
 
 
-def generate_totp_secret() -> str:
-    """Generate a new base32 TOTP secret."""
-    return pyotp.random_base32()
+def generate_otp() -> str:
+    """Return a cryptographically-random 6-digit numeric code (zero-padded)."""
+    return f"{secrets.randbelow(10**OTP_LENGTH):0{OTP_LENGTH}d}"
 
 
-def totp_provisioning_uri(secret: str, email: str, issuer: str = "CryptoPilot") -> str:
-    """Return an otpauth:// URI for authenticator-app enrolment."""
-    return pyotp.TOTP(secret).provisioning_uri(name=email, issuer_name=issuer)
+def _otp_key() -> bytes:
+    """Derive an HMAC key for OTP hashing from the master key.
+
+    The master key never leaves the environment, so a passive reader of the
+    otp_challenges table cannot recover live codes from their stored hashes.
+    """
+    return hashlib.sha256(get_settings().master_key.encode("utf-8")).digest()
 
 
-def verify_totp(secret: str, code: str, *, valid_window: int = 1) -> bool:
-    """Verify a 6-digit TOTP code, allowing ±1 step for clock skew."""
+def hash_otp(code: str) -> str:
+    """Return the keyed HMAC-SHA256 hash of an OTP code (hex)."""
+    return hmac.new(_otp_key(), code.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def verify_otp_hash(code: str, code_hash: str) -> bool:
+    """Timing-safe check of a candidate code against a stored hash."""
     cleaned = code.replace(" ", "").strip()
     if not cleaned.isdigit():
         return False
-    return pyotp.TOTP(secret).verify(cleaned, valid_window=valid_window)
+    return hmac.compare_digest(hash_otp(cleaned), code_hash)

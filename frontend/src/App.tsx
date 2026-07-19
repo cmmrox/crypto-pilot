@@ -1,31 +1,36 @@
 import { useEffect, useState } from "react";
 import { BrowserRouter } from "react-router-dom";
 import { Login } from "./auth/Login";
-import { Totp } from "./auth/Totp";
+import { Otp } from "./auth/Otp";
 import { Shell } from "./shell/Shell";
 import { useAuth } from "./auth/store";
 
+interface OtpFlow {
+  token: string;
+  phoneHint: string | null;
+}
+
 /**
- * Root component. Routes between the auth flow (Login → TOTP) and the
+ * Root component. Routes between the auth flow (Login → SMS OTP) and the
  * authenticated Shell based on the auth store. The Shell is only mounted
  * for authenticated sessions — mounting itself is the route guard.
  */
 export function App() {
   const status = useAuth((s) => s.status);
   const bootstrap = useAuth((s) => s.bootstrap);
-  const [totpToken, setTotpToken] = useState<string | null>(null);
+  const [otpFlow, setOtpFlow] = useState<OtpFlow | null>(null);
 
   useEffect(() => {
     void bootstrap();
   }, [bootstrap]);
 
-  // Clear the in-flight TOTP token once authenticated so a later sign-out
-  // returns to the Login screen, not a stale TOTP prompt.
+  // Clear the in-flight OTP challenge once authenticated so a later sign-out
+  // returns to the Login screen, not a stale OTP prompt.
   useEffect(() => {
-    if (status === "authenticated" && totpToken !== null) {
-      setTotpToken(null);
+    if (status === "authenticated" && otpFlow !== null) {
+      setOtpFlow(null);
     }
-  }, [status, totpToken]);
+  }, [status, otpFlow]);
 
   if (status === "loading") {
     return (
@@ -40,10 +45,16 @@ export function App() {
   }
 
   if (status === "unauthenticated") {
-    if (totpToken) {
-      return <Totp totpToken={totpToken} onBack={() => setTotpToken(null)} />;
+    if (otpFlow) {
+      return (
+        <Otp
+          otpToken={otpFlow.token}
+          phoneHint={otpFlow.phoneHint}
+          onBack={() => setOtpFlow(null)}
+        />
+      );
     }
-    return <Login onPasswordVerified={setTotpToken} />;
+    return <Login onOtpRequired={(token, phoneHint) => setOtpFlow({ token, phoneHint })} />;
   }
 
   return (

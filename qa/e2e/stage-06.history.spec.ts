@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { authenticator } from "otplib";
+import { login } from "./helpers/auth";
 
 /**
  * Stage 6 — Trades / Monthly / Events (QA-6).
@@ -7,20 +7,6 @@ import { authenticator } from "otplib";
  * and the monthly ledger with the manual withdrawal flow. Assumes two seeded
  * closed trades (a winning LONG and a losing SHORT) in 2026-07.
  */
-
-const EMAIL = "owner@cryptopilot.app";
-const PASSWORD = "PilotOwner!2026";
-const TOTP_SECRET = "JBSWY3DPEHPK3PXP";
-
-async function login(page: Page) {
-  await page.goto("/");
-  await page.getByLabel("Email").fill(EMAIL);
-  await page.getByLabel("Password", { exact: true }).fill(PASSWORD);
-  await page.getByRole("button", { name: /continue/i }).click();
-  await page.getByLabel("Authentication code").fill(authenticator.generate(TOTP_SECRET));
-  await page.getByRole("button", { name: /verify & enter/i }).click();
-  await expect(page.getByTestId("environment-badge")).toBeVisible();
-}
 
 async function goto(page: Page, name: RegExp, title: string) {
   const menu = page.getByRole("button", { name: /open navigation/i });
@@ -52,7 +38,9 @@ test("QA-6.03 trade drawer reconstructs linked orders", async ({ page }) => {
   await goto(page, /trades/i, "Trades");
   await page.getByLabel("Filter by side").selectOption("LONG");
   // Wait for the LONG filter to settle before opening the first row.
-  await expect(page.getByTestId("trades-table").locator(".side").first()).toHaveText("LONG");
+  await expect(
+    page.getByTestId("trades-table").locator(".side").first(),
+  ).toHaveText("LONG");
   await page.getByTestId("trades-table").getByRole("button").first().click();
   const orders = page.getByTestId("linked-orders");
   await expect(orders).toBeVisible();
@@ -70,7 +58,9 @@ test("QA-6.04 CSV export downloads reconciled rows", async ({ page }) => {
   expect(download.suggestedFilename()).toContain("cryptopilot-trades");
 });
 
-test("QA-6.05 monthly ledger aggregates realized P&L correctly", async ({ page }) => {
+test("QA-6.05 monthly ledger aggregates realized P&L correctly", async ({
+  page,
+}) => {
   await login(page);
   await goto(page, /monthly/i, "Monthly ledger");
   const july = page.getByTestId("month-2026-07");
@@ -85,7 +75,10 @@ test("QA-6.06 mark withdrawn records $14.10 and removes the allowance", async ({
 }, testInfo) => {
   // Data-mutation test: run on one project only (avoids parallel writes to the
   // same shared row). Idempotency is also covered by the backend test suite.
-  test.skip(testInfo.project.name !== "desktop", "mutation test runs on desktop only");
+  test.skip(
+    testInfo.project.name !== "desktop",
+    "mutation test runs on desktop only",
+  );
   await login(page);
   await goto(page, /monthly/i, "Monthly ledger");
   const july = page.getByTestId("month-2026-07");
@@ -98,12 +91,19 @@ test("QA-6.06 mark withdrawn records $14.10 and removes the allowance", async ({
     // Scope to the dialog — the row button and the modal confirm share the label.
     await Promise.all([
       page.waitForResponse(
-        (r) => r.url().includes("/api/monthly/mark-withdrawn") && r.request().method() === "POST",
+        (r) =>
+          r.url().includes("/api/monthly/mark-withdrawn") &&
+          r.request().method() === "POST",
       ),
-      page.getByRole("dialog").getByRole("button", { name: /mark withdrawn/i }).click(),
+      page
+        .getByRole("dialog")
+        .getByRole("button", { name: /mark withdrawn/i })
+        .click(),
     ]);
   }
   // End state: July shows the $14.10 withdrawal and offers no further allowance.
   await expect(july).toContainText("$14.10", { timeout: 10000 });
-  await expect(page.getByTestId("mark-2026-07")).toHaveCount(0, { timeout: 10000 });
+  await expect(page.getByTestId("mark-2026-07")).toHaveCount(0, {
+    timeout: 10000,
+  });
 });

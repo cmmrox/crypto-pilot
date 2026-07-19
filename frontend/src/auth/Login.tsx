@@ -1,14 +1,23 @@
 import { useState } from "react";
 import { AlertTriangle, ArrowRight, Bitcoin, Eye, EyeOff, ShieldCheck } from "lucide-react";
-import { ApiError, login } from "../api/client";
+import { ApiError, clearTokens, getMe, login, setTokens } from "../api/client";
+import { useAuth } from "./store";
 
-/** Owner login (email + password). On success, advances to TOTP verification. */
-export function Login({ onPasswordVerified }: { onPasswordVerified: (totpToken: string) => void }) {
+/**
+ * Owner login (email + password). With 2FA enabled, advances to SMS-code
+ * verification; with 2FA disabled, completes sign-in directly.
+ */
+export function Login({
+  onOtpRequired,
+}: {
+  onOtpRequired: (otpToken: string, phoneHint: string | null) => void;
+}) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const setAuthenticated = useAuth((s) => s.setAuthenticated);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -18,11 +27,27 @@ export function Login({ onPasswordVerified }: { onPasswordVerified: (totpToken: 
     }
     setError("");
     setBusy(true);
+    let tokensIssued = false;
     try {
-      const { totp_token } = await login(email.trim(), password);
-      onPasswordVerified(totp_token);
+      const res = await login(email.trim(), password);
+      if (res.mode === "otp" && res.otp_token) {
+        onOtpRequired(res.otp_token, res.phone_hint);
+        return;
+      }
+      if (res.access_token && res.refresh_token) {
+        setTokens({ access_token: res.access_token, refresh_token: res.refresh_token });
+        tokensIssued = true;
+        setAuthenticated(await getMe());
+        return;
+      }
+      setError("Unexpected sign-in response. Please try again.");
     } catch (err) {
-      if (err instanceof ApiError && err.status === 429) {
+      if (tokensIssued) {
+        // Do not leave a usable token pair behind when the post-issue identity
+        // check fails. The UI and session storage must transition atomically.
+        clearTokens();
+        setError("Could not verify the new session. Please sign in again.");
+      } else if (err instanceof ApiError && err.status === 429) {
         setError("Too many attempts. Your account is temporarily locked — try again later.");
       } else {
         setError("Invalid email or password.");
@@ -63,7 +88,7 @@ export function Login({ onPasswordVerified }: { onPasswordVerified: (totpToken: 
         <form className="auth-card" onSubmit={submit} noValidate>
           <p className="kicker">SINGLE-OWNER WORKSPACE</p>
           <h2>Sign in securely</h2>
-          <p>Use your owner credentials. Authenticator verification always follows.</p>
+          <p>Use your owner credentials. If two-factor is on, an SMS code follows.</p>
           <label>
             Email
             <input
@@ -105,7 +130,9 @@ export function Login({ onPasswordVerified }: { onPasswordVerified: (totpToken: 
           </button>
           <div className="auth-security-note">
             <ShieldCheck size={16} />
-            <span>JWT session · Argon2 password hash · mandatory TOTP · TLS-only production access</span>
+            <span>
+              JWT session · Argon2 password hash · SMS two-factor · TLS-only production access
+            </span>
           </div>
         </form>
       </section>

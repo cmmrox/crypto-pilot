@@ -61,8 +61,10 @@ class Kline:
     is_closed: bool
 
     @classmethod
-    def from_rest(cls, row: list[Any]) -> Kline:
-        """Parse a REST /klines row (always a closed candle)."""
+    def from_rest(cls, row: list[Any], *, now_ms: int | None = None) -> Kline:
+        """Parse a REST /klines row and determine whether it has actually closed."""
+        observed_at = int(time.time() * 1000) if now_ms is None else now_ms
+        close_time_ms = int(row[6])
         return cls(
             open_time_ms=int(row[0]),
             open=Decimal(str(row[1])),
@@ -70,8 +72,8 @@ class Kline:
             low=Decimal(str(row[3])),
             close=Decimal(str(row[4])),
             volume=Decimal(str(row[5])),
-            close_time_ms=int(row[6]),
-            is_closed=True,
+            close_time_ms=close_time_ms,
+            is_closed=close_time_ms < observed_at,
         )
 
 
@@ -129,7 +131,8 @@ class BinanceClient:
             "/fapi/v1/klines",
             params={"symbol": symbol, "interval": interval, "limit": limit},
         )
-        return [Kline.from_rest(row) for row in data]
+        observed_at = int(time.time() * 1000)
+        return [Kline.from_rest(row, now_ms=observed_at) for row in data]
 
     async def get_exchange_filters(self, symbol: str) -> dict[str, Any]:
         """Return lot-size / min-notional filters for a symbol (public)."""
@@ -170,6 +173,8 @@ class BinanceClient:
     ) -> Any:
         headers = {"X-MBX-APIKEY": self._api_key} if signed and self._api_key else {}
         last_exc: Exception | None = None
+        method = method.upper()
+        mutation = method not in {"GET", "HEAD", "OPTIONS"}
         for attempt in range(self._max_retries):
             try:
                 resp = await self._client.request(
@@ -190,6 +195,10 @@ class BinanceClient:
                 await asyncio.sleep(delay)
             except (httpx.TransportError, httpx.TimeoutException) as exc:
                 last_exc = exc
+                if mutation:
+                    raise BinanceError(
+                        "ambiguous exchange mutation outcome; reconciliation required"
+                    ) from exc
                 _log.warning("binance_transport_error", attempt=attempt, error=str(exc))
                 await asyncio.sleep(self._backoff(attempt))
         raise BinanceError(f"request failed after {self._max_retries} attempts: {last_exc}")

@@ -7,6 +7,7 @@ Secrets must never be logged — a scrubbing processor masks known-sensitive key
 from __future__ import annotations
 
 import logging
+import re
 import sys
 from collections.abc import MutableMapping
 from typing import Any
@@ -28,27 +29,62 @@ _SENSITIVE_KEYS = frozenset(
         "refresh_token",
         "authorization",
         "totp_secret",
+        "otp",
+        "otp_code",
+        "otp_token",
+        "verification_code",
+        "code",
+        "code_hash",
+        "phone",
+        "phone_encrypted",
         "signature",
         "codex_api_key",
     }
 )
 
 _MASK = "***"
+_OTP_IN_TEXT = re.compile(r"(?i)\b(code|otp)\s*[:=]?\s*[0-9]{6}\b")
+_PHONE_IN_TEXT = re.compile(r"(?<![0-9])(?:\+?94)[0-9]{9}(?![0-9])")
+_SECRET_ASSIGNMENT = re.compile(
+    r"(?i)\b(api[_-]?key|authorization|password|secret|signature|token)"
+    r"(\s*[=:]\s*|%3[dD])([^\s,;&\"'}]+)"
+)
+
+
+def _scrub_value(value: Any) -> Any:
+    if isinstance(value, MutableMapping):
+        for key in list(value.keys()):
+            value[key] = _MASK if key.lower() in _SENSITIVE_KEYS else _scrub_value(value[key])
+        return value
+    if isinstance(value, list):
+        return [_scrub_value(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_scrub_value(item) for item in value)
+    if isinstance(value, str):
+        value = _OTP_IN_TEXT.sub(lambda match: f"{match.group(1)} {_MASK}", value)
+        value = _PHONE_IN_TEXT.sub(_MASK, value)
+        return _SECRET_ASSIGNMENT.sub(
+            lambda match: f"{match.group(1)}{match.group(2)}{_MASK}", value
+        )
+    return value
 
 
 def _scrub_sensitive(
     _logger: Any, _method: str, event_dict: MutableMapping[str, Any]
 ) -> MutableMapping[str, Any]:
     """Mask values for known-sensitive keys before rendering."""
-    for key in list(event_dict.keys()):
-        if key.lower() in _SENSITIVE_KEYS:
-            event_dict[key] = _MASK
+    _scrub_value(event_dict)
     return event_dict
 
 
 def configure_logging(level: str = "INFO", json_output: bool = True) -> None:
     """Configure structlog + stdlib logging once at startup."""
     logging.basicConfig(format="%(message)s", stream=sys.stdout, level=level)
+    # httpx's INFO message includes the complete request URL. Signed Binance
+    # requests carry a short-lived authentication signature in the query
+    # string, so third-party transport loggers must never emit request URLs.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
 
     processors: list[structlog.typing.Processor] = [
         structlog.contextvars.merge_contextvars,

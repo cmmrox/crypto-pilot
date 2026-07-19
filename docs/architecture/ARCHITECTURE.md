@@ -17,7 +17,7 @@ frontend (React SPA)
    ▼
 backend/app
 ├── api/          FastAPI routers: auth, bot, trades, monthly, events, news, settings, ws
-├── core/         config (pydantic-settings) · security (Argon2/JWT/TOTP) · AES-GCM crypto
+├── core/         config (pydantic-settings) · security (Argon2/JWT/SMS OTP) · AES-GCM crypto
 ├── db/           SQLAlchemy models · Alembic migrations · session management
 ├── bot/          BotService: 24/7 loop · lifecycle (start/stop/stop-close/kill/safe-mode)
 │                 scheduler (4h ticks UTC, health, reconnect) · persisted state/resume
@@ -112,3 +112,10 @@ unless hotfix-critical. Health endpoint + dead-man cron.
 2. **Binance demo endpoints updated** to `demo-fapi.binance.com` (BSD referenced the retired testnet host).
 3. **Strategy parameters are read-only in the operator UI** (prototype-approved override of FR-11's editable parameters); changes ship as versioned releases through parity tests.
 4. **Overview live updates use short-interval polling (4s), not WebSocket** (BSD §12 said WebSocket). For a bot that decides once per 4h close, 4s polling delivers a real-time feel with far less complexity and better reconnection robustness. The WebSocket push channel remains a future optimization; the REST `/api/overview` aggregate is the source.
+5. **Owner-configurable SMS OTP replaces authenticator TOTP.** When enabled, the
+   password step can issue only a five-minute `otp_pending` token bound to one
+   single-use challenge. The owner may disable 2FA (password-only login) only through
+   password + current-phone OTP confirmation; phone changes prove the new number and
+   revoke other sessions. Server-shell `reset-2fa` is the only recovery path. This
+   accepts SIM-swap and optional-single-factor risk with the controls documented in
+   `SECURITY_GUIDELINES.md` and `docs/plan/SMS_2FA_PLAN.md`.

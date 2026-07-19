@@ -61,9 +61,11 @@ class BotService:
 
     async def start(self, session: AsyncSession, exchange: Exchange, *, by: str) -> BotRun:
         """Connect, reconcile, and begin running."""
+        # Shared settings-row lock serializes bot start with environment,
+        # strategy, and active-credential changes.
+        settings_row = await get_settings_row(session, for_update=True)
         if await self._current_run(session) is not None:
             raise RuntimeError("bot already running")
-        settings_row = await get_settings_row(session)
         # Reconcile before acting (account is source of truth).
         expected = await self._expected_position(session)
         rec = await reconcile_position(exchange, SYMBOL, expected_qty=expected)
@@ -179,6 +181,27 @@ class BotService:
         run = await self._current_run(session)
         if run is None or run.stop_reason == "safe_mode":
             return []
+
+        expected = await self._expected_position(session)
+        reconciliation = await reconcile_position(
+            exchange, SYMBOL, expected_qty=expected
+        )
+        if not reconciliation.matched:
+            await self.enter_safe_mode(
+                session, reason=f"every-close reconciliation: {reconciliation.detail}"
+            )
+            await record_event(
+                session,
+                level="WARN",
+                category="reconciliation",
+                message="Closed-candle decision blocked by reconciliation mismatch",
+                ref=f"bot_run:{run.id}",
+                payload={
+                    "expected_qty": str(reconciliation.expected_qty),
+                    "actual_qty": str(reconciliation.actual_qty),
+                },
+            )
+            return ["safe_mode"]
 
         acct = await exchange.get_account()
         equity = acct.balance

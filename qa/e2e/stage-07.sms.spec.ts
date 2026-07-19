@@ -1,25 +1,11 @@
 import { expect, test, type Page } from "@playwright/test";
-import { authenticator } from "otplib";
+import { login } from "./helpers/auth";
 
 /**
  * Stage 7 — Notifier / notify.lk SMS (QA-7).
  * Verifies the SMS settings panel shows configured state, the delivery toggle,
  * and (when RUN_LIVE_SMS=1) a real test SMS to the owner's phone.
  */
-
-const EMAIL = "owner@cryptopilot.app";
-const PASSWORD = "PilotOwner!2026";
-const TOTP_SECRET = "JBSWY3DPEHPK3PXP";
-
-async function login(page: Page) {
-  await page.goto("/");
-  await page.getByLabel("Email").fill(EMAIL);
-  await page.getByLabel("Password", { exact: true }).fill(PASSWORD);
-  await page.getByRole("button", { name: /continue/i }).click();
-  await page.getByLabel("Authentication code").fill(authenticator.generate(TOTP_SECRET));
-  await page.getByRole("button", { name: /verify & enter/i }).click();
-  await expect(page.getByTestId("environment-badge")).toBeVisible();
-}
 
 async function gotoSettings(page: Page) {
   const menu = page.getByRole("button", { name: /open navigation/i });
@@ -45,7 +31,10 @@ test("QA-7.02 SMS delivery can be toggled", async ({ page }) => {
   await toggle.click(); // restore
 });
 
-test("QA-7.03 SMS status API reports configured + enabled", async ({ page, request }) => {
+test("QA-7.03 SMS status API reports configured + enabled", async ({
+  page,
+  request,
+}) => {
   await login(page);
   const token = await page.evaluate(() => sessionStorage.getItem("cp_access"));
   const resp = await request.get("/api/settings/sms", {
@@ -57,12 +46,20 @@ test("QA-7.03 SMS status API reports configured + enabled", async ({ page, reque
   expect(body.sender_id).toBe("NotifyDEMO");
 });
 
-test("QA-7.04 real test SMS delivers to the owner phone @sms", async ({ page }) => {
-  test.skip(process.env.RUN_LIVE_SMS !== "1", "set RUN_LIVE_SMS=1 to send a real SMS");
+test("QA-7.04 real test SMS delivers to the owner phone @sms", async ({
+  page,
+}) => {
+  test.skip(
+    process.env.RUN_LIVE_SMS !== "1",
+    "set RUN_LIVE_SMS=1 to send a real SMS",
+  );
   await login(page);
   await gotoSettings(page);
   await page.getByTestId("test-sms").click();
-  await expect(page.getByTestId("sms-result")).toContainText(/sent to your phone/i, {
-    timeout: 15000,
-  });
+  await expect(page.getByTestId("sms-result")).toContainText(
+    /sent to your phone/i,
+    {
+      timeout: 15000,
+    },
+  );
 });

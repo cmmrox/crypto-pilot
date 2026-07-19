@@ -37,13 +37,18 @@ def postgres_url() -> Iterator[str]:
 
 
 @pytest.fixture()
-async def app_client(postgres_url: str) -> AsyncIterator[object]:
+async def app_client(
+    postgres_url: str, monkeypatch: pytest.MonkeyPatch
+) -> AsyncIterator[object]:
     """Return an httpx AsyncClient wired to the app with migrations applied."""
     import base64
 
-    os.environ["CP_DATABASE_URL"] = postgres_url
-    os.environ.setdefault("CP_MASTER_KEY", base64.b64encode(b"0" * 32).decode())
-    os.environ.setdefault("CP_JWT_SECRET", "j" * 44)
+    monkeypatch.setenv("CP_DATABASE_URL", postgres_url)
+    monkeypatch.setenv("CP_MASTER_KEY", base64.b64encode(b"0" * 32).decode())
+    monkeypatch.setenv("CP_JWT_SECRET", "j" * 44)
+    monkeypatch.setenv("CP_ENVIRONMENT", "test")
+    # Capture SMS OTP codes in-process so tests can complete the 2FA flow.
+    monkeypatch.setenv("CP_OTP_TEST_MODE", "1")
 
     # Fresh settings + schema
     from app.core.config import get_settings
@@ -75,14 +80,15 @@ async def app_client(postgres_url: str) -> AsyncIterator[object]:
 # Deterministic owner used across auth tests.
 OWNER_EMAIL = "owner@example.com"
 OWNER_PASSWORD = "correct horse battery staple"
-OWNER_TOTP_SECRET = "JBSWY3DPEHPK3PXP"  # RFC-6238 test-style base32 secret
+OWNER_PHONE = "94711234567"  # notify.lk form; 2FA is enabled for the test owner
 
 
 @pytest.fixture()
 async def owner(app_client: object) -> str:
-    """Provision the owner account in the test DB; returns the current TOTP code source.
+    """Provision the owner account (SMS 2FA enabled) in the test DB.
 
-    Depends on app_client so the schema exists and settings are configured.
+    Returns the owner's phone number, which the login helpers use to read the
+    captured OTP code. Depends on app_client so the schema/settings exist.
     """
     import os
 
@@ -98,33 +104,61 @@ async def owner(app_client: object) -> str:
                 email=OWNER_EMAIL,
                 password_hash=hash_password(OWNER_PASSWORD),
                 role="owner",
-                totp_secret_encrypted=encrypt(OWNER_TOTP_SECRET, os.environ["CP_MASTER_KEY"]),
-                totp_enabled=True,
+                phone_encrypted=encrypt(OWNER_PHONE, os.environ["CP_MASTER_KEY"]),
+                twofa_enabled=True,
             )
         )
         await s.commit()
     await engine.dispose()
-    return OWNER_TOTP_SECRET
+    return OWNER_PHONE
 
 
-def current_totp(secret: str) -> str:
-    """Compute the current 6-digit code for a secret (test helper)."""
-    import pyotp
+def current_otp(phone: str = OWNER_PHONE) -> str:
+    """Return the last captured SMS OTP code for a phone (test-mode helper)."""
+    from app.services.otp import _TEST_CODES, normalize_phone
 
-    return pyotp.TOTP(secret).now()
+    return _TEST_CODES[normalize_phone(phone)]
+
+
+async def complete_login(client: object) -> tuple[str, str]:
+    """Full SMS-2FA login for the test owner; returns (access, refresh)."""
+    resp = await client.post(  # type: ignore[attr-defined]
+        "/api/auth/login", json={"email": OWNER_EMAIL, "password": OWNER_PASSWORD}
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["mode"] == "otp", body
+    otp_token = body["otp_token"]
+    verify = await client.post(  # type: ignore[attr-defined]
+        "/api/auth/otp/verify",
+        json={"code": current_otp()},
+        headers={"Authorization": f"Bearer {otp_token}"},
+    )
+    assert verify.status_code == 200, verify.text
+    tokens = verify.json()
+    return tokens["access_token"], tokens["refresh_token"]
+
+
+async def auth_headers(client: object) -> dict[str, str]:
+    """Return Authorization headers for an authenticated owner session."""
+    access, _ = await complete_login(client)
+    return {"Authorization": f"Bearer {access}"}
 
 
 @pytest.fixture()
-async def db_session(postgres_url: str) -> AsyncIterator[object]:
+async def db_session(
+    postgres_url: str, monkeypatch: pytest.MonkeyPatch
+) -> AsyncIterator[object]:
     """Yield an AsyncSession against a freshly-created schema (for service tests)."""
     import base64
-    import os
 
     from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
-    os.environ["CP_DATABASE_URL"] = postgres_url
-    os.environ.setdefault("CP_MASTER_KEY", base64.b64encode(b"0" * 32).decode())
-    os.environ.setdefault("CP_JWT_SECRET", "j" * 44)
+    monkeypatch.setenv("CP_DATABASE_URL", postgres_url)
+    monkeypatch.setenv("CP_MASTER_KEY", base64.b64encode(b"0" * 32).decode())
+    monkeypatch.setenv("CP_JWT_SECRET", "j" * 44)
+    monkeypatch.setenv("CP_ENVIRONMENT", "test")
+    monkeypatch.setenv("CP_OTP_TEST_MODE", "1")
 
     from app.core.config import get_settings
 

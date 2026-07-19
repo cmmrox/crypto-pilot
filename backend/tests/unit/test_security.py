@@ -9,10 +9,11 @@ from app.core.security import (
     TokenError,
     create_token,
     decode_token,
-    generate_totp_secret,
+    generate_otp,
+    hash_otp,
     hash_password,
+    verify_otp_hash,
     verify_password,
-    verify_totp,
 )
 
 _ENV = {
@@ -69,14 +70,29 @@ def test_token_tampered_rejected() -> None:
         decode_token(tampered, expected_purpose="access")
 
 
-def test_totp_verify() -> None:
-    import pyotp
-
-    secret = generate_totp_secret()
-    code = pyotp.TOTP(secret).now()
-    assert verify_totp(secret, code)
-    assert not verify_totp(secret, "000000")
+def test_generate_otp_is_six_digits() -> None:
+    for _ in range(50):
+        code = generate_otp()
+        assert len(code) == 6
+        assert code.isdigit()
 
 
-def test_totp_rejects_non_numeric() -> None:
-    assert not verify_totp(generate_totp_secret(), "abcdef")
+def test_otp_hash_verifies() -> None:
+    code = generate_otp()
+    h = hash_otp(code)
+    assert verify_otp_hash(code, h)
+    assert not verify_otp_hash("000000" if code != "000000" else "111111", h)
+
+
+def test_otp_hash_is_not_reversible_plaintext() -> None:
+    code = "123456"
+    assert code not in hash_otp(code)
+
+
+def test_otp_verify_rejects_non_numeric() -> None:
+    assert not verify_otp_hash("abcdef", hash_otp("123456"))
+
+
+def test_otp_verify_tolerates_whitespace() -> None:
+    code = "123456"
+    assert verify_otp_hash(" 123456 ", hash_otp(code))

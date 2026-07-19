@@ -5,17 +5,11 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from tests.conftest import OWNER_EMAIL, OWNER_PASSWORD, current_totp
+from tests.conftest import auth_headers
 
 
-async def _headers(client: httpx.AsyncClient, secret: str) -> dict[str, str]:
-    r = await client.post(
-        "/api/auth/login", json={"email": OWNER_EMAIL, "password": OWNER_PASSWORD}
-    )
-    tok = r.json()["totp_token"]
-    r = await client.post("/api/auth/totp", json={"code": current_totp(secret)},
-                          headers={"Authorization": f"Bearer {tok}"})
-    return {"Authorization": f"Bearer {r.json()['access_token']}"}
+async def _headers(client: httpx.AsyncClient, _secret: str) -> dict[str, str]:
+    return await auth_headers(client)
 
 
 @pytest.mark.asyncio
@@ -36,6 +30,7 @@ async def test_authz_sweep_protected_routes_reject_anonymous(
         "/api/auth/me", "/api/events", "/api/market/status", "/api/trades",
         "/api/monthly", "/api/bot/status", "/api/overview", "/api/news/latest",
         "/api/strategies", "/api/settings/sms", "/api/settings/codex/status",
+        "/api/settings/security",
     ]
     for path in protected_get:
         assert (await app_client.get(path)).status_code == 401, path
@@ -67,10 +62,22 @@ async def test_environment_switch_blocked_while_running(
 async def test_live_switch_requires_typed_confirm(
     app_client: httpx.AsyncClient, owner: str
 ) -> None:
+    from app.core.config import get_settings
+
     h = await _headers(app_client, owner)
     # Bot is stopped by default.
     bad = await app_client.put("/api/settings/environment", json={"environment": "LIVE"}, headers=h)
     assert bad.status_code == 400  # missing confirm
+    locked = await app_client.put(
+        "/api/settings/environment",
+        json={"environment": "LIVE", "confirm": "LIVE"},
+        headers=h,
+    )
+    assert locked.status_code == 403
+
+    settings = get_settings()
+    settings.live_trading_approved = True
+    settings.live_key_permissions_verified = True
     good = await app_client.put(
         "/api/settings/environment", json={"environment": "LIVE", "confirm": "LIVE"}, headers=h
     )
@@ -91,5 +98,21 @@ async def test_body_size_limit(app_client: httpx.AsyncClient, owner: str) -> Non
     huge = "x" * 2_000_000
     resp = await app_client.post(
         "/api/auth/login", content=huge, headers={"Content-Type": "application/json"}
+    )
+    assert resp.status_code == 413
+
+
+@pytest.mark.asyncio
+async def test_body_size_limit_rejects_lengthless_stream(
+    app_client: httpx.AsyncClient, owner: str
+) -> None:
+    async def oversized_body() -> object:
+        for _ in range(11):
+            yield b"x" * 100_000
+
+    resp = await app_client.post(
+        "/api/auth/login",
+        content=oversized_body(),
+        headers={"Content-Type": "application/json"},
     )
     assert resp.status_code == 413

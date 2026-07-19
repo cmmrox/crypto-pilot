@@ -48,17 +48,37 @@ services:
       PGPASSWORD: ${POSTGRES_PASSWORD}
       CP_MASTER_KEY: ${CP_MASTER_KEY}
       CP_BACKUP_BUCKET: ${CP_BACKUP_BUCKET:-}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-us-east-1}
+      AWS_ENDPOINT_URL: ${AWS_ENDPOINT_URL:-}
+    volumes:
+      - ./scripts/backup_auth.py:/usr/local/bin/backup_auth.py:ro
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
-        apk add --no-cache openssl aws-cli >/dev/null 2>&1 || true
+        set -eu
+        set -o pipefail
+        umask 077
+        apk add --no-cache openssl aws-cli python3 >/dev/null
+        : "$${CP_BACKUP_BUCKET:?CP_BACKUP_BUCKET is required in production}"
         while true; do
-          sleep 86400
           TS=$$(date -u +%Y%m%dT%H%M%SZ)
-          pg_dump -h "$$CP_DB_HOST" -U "$$POSTGRES_USER" "$$POSTGRES_DB" | gzip \
-            | openssl enc -aes-256-cbc -pbkdf2 -pass "pass:$$CP_MASTER_KEY" -out "/tmp/cp-$$TS.sql.gz.enc"
-          [ -n "$$CP_BACKUP_BUCKET" ] && aws s3 cp "/tmp/cp-$$TS.sql.gz.enc" "$$CP_BACKUP_BUCKET/" || true
+          OUT="/tmp/cp-$$TS.sql.gz.enc"
+          MAC="$$OUT.mac"
+          trap 'rm -f "$$OUT" "$$MAC"' EXIT HUP INT TERM
+          pg_dump -h "$$CP_DB_HOST" -U "$$POSTGRES_USER" "$$POSTGRES_DB" \
+            | gzip \
+            | openssl enc -aes-256-cbc -pbkdf2 -iter 600000 \
+                -pass env:CP_MASTER_KEY -out "$$OUT"
+          python3 /usr/local/bin/backup_auth.py create "$$OUT" "$$MAC"
+          aws s3 cp "$$MAC" "$$CP_BACKUP_BUCKET/"
+          aws s3 cp "$$OUT" "$$CP_BACKUP_BUCKET/"
+          rm -f "$$OUT" "$$MAC"
+          trap - EXIT HUP INT TERM
           echo "backup $$TS done"
+          sleep 86400
         done
     networks:
       - database

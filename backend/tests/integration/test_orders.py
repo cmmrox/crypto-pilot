@@ -49,6 +49,41 @@ async def test_open_long_places_entry_stop_and_tp(db_session: AsyncSession) -> N
 
 
 @pytest.mark.asyncio
+async def test_open_long_emergency_flattens_when_stop_fails(
+    db_session: AsyncSession,
+) -> None:
+    class StopFailingExchange(FakeExchange):
+        async def place_stop_market(
+            self,
+            symbol,
+            side,
+            qty,
+            stop_price,
+            *,
+            client_order_id,
+            reduce_only=True,
+        ):
+            raise RuntimeError("simulated stop rejection")
+
+    ex = StopFailingExchange(mark_price=D("65000"))
+    om = OrderManager(ex)
+    sizing = size_long(
+        equity=D("5000"), risk_pct=D("2"), stop_distance=D("2000"),
+        price=D("65000"), leverage_cap=D("3"), filters=await _filters(ex),
+    )
+    with pytest.raises(RuntimeError, match="emergency-flattened"):
+        await om.open_long(
+            db_session,
+            sizing=sizing,
+            stop_price=D("63000"),
+            tp1_price=D("67000"),
+            tp1_fraction=D("0.4"),
+            strategy="trend_rider_v6",
+        )
+    assert (await ex.get_position("BTCUSDT")).qty == D("0")
+
+
+@pytest.mark.asyncio
 async def test_open_short_has_no_price_stop(db_session: AsyncSession) -> None:
     ex = FakeExchange(mark_price=D("60000"))
     om = OrderManager(ex)

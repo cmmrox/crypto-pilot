@@ -57,14 +57,29 @@ class NotifyLkGateway:
         }
         try:
             resp = await self._client.post(NOTIFY_LK_URL, data=params)
-            body = resp.json() if resp.headers.get("content-type", "").startswith(
-                "application/json"
-            ) else {"raw": resp.text}
-            if resp.status_code == 200 and str(body.get("status", "")).lower() == "success":
+            body: object = {"raw": resp.text}
+            if resp.headers.get("content-type", "").startswith("application/json"):
+                body = resp.json()
+            status_ok = (
+                isinstance(body, dict)
+                and str(body.get("status", "")).lower() == "success"
+            )
+            if resp.status_code == 200 and status_ok:
                 return SmsResult(True, "delivered")
-            return SmsResult(False, f"provider rejected: {body}")
-        except (httpx.TransportError, httpx.TimeoutException) as exc:
-            return SmsResult(False, f"transport error: {exc}")
+            # Provider bodies may reflect submitted form fields (including the
+            # API key, phone and OTP message). Never propagate them to callers,
+            # logs or the web UI.
+            return SmsResult(False, "provider rejected request")
+        except (httpx.TransportError, httpx.TimeoutException):
+            return SmsResult(False, "provider transport error")
+        except Exception:
+            # send() must never raise: a delivery/parse failure (e.g. malformed
+            # JSON, a non-object body) must degrade to a failed SmsResult, not
+            # propagate up through notify() and roll back a trade whose exchange
+            # order already filled. The exception detail may echo provider form
+            # fields (api_key, OTP), so it is never logged or returned.
+            _log.warning("sms_send_unexpected_error", url=NOTIFY_LK_URL)
+            return SmsResult(False, "provider response error")
         finally:
             if self._owns:
                 await self._client.aclose()

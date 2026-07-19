@@ -9,7 +9,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, PostgresDsn, field_validator
+from pydantic import Field, PostgresDsn, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -47,6 +47,17 @@ class Settings(BaseSettings):
     argon2_time_cost: int = 3
     argon2_memory_cost_kib: int = 65536
     argon2_parallelism: int = 4
+    # TEST/E2E ONLY: when true, SMS OTP codes are captured for retrieval via the
+    # /api/auth/otp/dev-code endpoint instead of being trusted to real delivery.
+    # Must never be enabled in production — the endpoint 404s unless this is set.
+    otp_test_mode: bool = False
+    # E2E suites reuse one owner and may exercise more than five auth flows.
+    # This switch is rejected outside CP_ENVIRONMENT=test.
+    otp_test_disable_throttle: bool = False
+    # Stage-12 operational gates. Both must be explicitly enabled only after
+    # the Stage-11 soak/sign-off and independent Binance key-permission review.
+    live_trading_approved: bool = False
+    live_key_permissions_verified: bool = False
 
     # --- CORS / frontend ---
     frontend_origin: str = "http://localhost:5173"
@@ -65,6 +76,14 @@ class Settings(BaseSettings):
         if v.strip().lower() in {"changeme", "change-me", "todo", ""}:
             raise ValueError("secret must be set to a real value, not a placeholder")
         return v
+
+    @model_validator(mode="after")
+    def _test_otp_only_in_test_environment(self) -> Settings:
+        if (
+            self.otp_test_mode or self.otp_test_disable_throttle
+        ) and self.environment != "test":
+            raise ValueError("OTP test controls are permitted only when CP_ENVIRONMENT=test")
+        return self
 
     @property
     def is_production(self) -> bool:

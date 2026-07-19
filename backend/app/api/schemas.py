@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, EmailStr, Field
+
+# notify.lk owner numbers use the documented Sri Lankan international form.
+PHONE_PATTERN = r"^94[0-9]{9}$"
 
 
 class LoginRequest(BaseModel):
@@ -11,20 +16,58 @@ class LoginRequest(BaseModel):
 
 
 class LoginResponse(BaseModel):
-    """Returned after a valid password; TOTP still required."""
+    """Password-step outcome.
 
-    totp_token: str
-    totp_required: bool = True
+    mode="tokens" → 2FA is off and access/refresh are already issued.
+    mode="otp"    → an SMS code was sent; complete via /api/auth/otp/verify with
+    the otp_token as the bearer credential.
+    """
+
+    mode: Literal["tokens", "otp"]
+    access_token: str | None = None
+    refresh_token: str | None = None
+    otp_token: str | None = None
+    phone_hint: str | None = None
 
 
-class TotpRequest(BaseModel):
-    code: str = Field(min_length=6, max_length=8)
+class OtpVerifyRequest(BaseModel):
+    code: str = Field(min_length=6, max_length=6, pattern=r"^[0-9]{6}$")
 
 
 class TokenResponse(BaseModel):
     access_token: str
     refresh_token: str
     token_type: str = "bearer"
+
+
+# --- Security settings (2FA) ---
+
+
+class SecurityStatusOut(BaseModel):
+    twofa_enabled: bool
+    phone_hint: str | None
+
+
+class SecurityChangeStart(BaseModel):
+    password: str = Field(min_length=1, max_length=256)
+    action: Literal["enable", "disable", "change_phone"]
+    new_phone: str | None = Field(default=None, pattern=PHONE_PATTERN)
+
+
+class SecurityChangeStartOut(BaseModel):
+    challenge_id: int
+    phone_hint: str | None
+
+
+class SecurityChangeConfirm(BaseModel):
+    challenge_id: int = Field(gt=0)
+    code: str = Field(min_length=6, max_length=6, pattern=r"^[0-9]{6}$")
+
+
+class DevOtpOut(BaseModel):
+    """TEST/E2E ONLY response for the gated dev-code endpoint."""
+
+    code: str
 
 
 class RefreshRequest(BaseModel):
@@ -84,9 +127,10 @@ class MarketStatus(BaseModel):
 
 class CredentialIn(BaseModel):
     environment: str = Field(pattern="^(DEMO|LIVE)$")
-    service: str = Field(pattern="^(binance|notifylk|codex)$")
+    service: Literal["binance"]
     api_key: str = Field(min_length=1, max_length=512)
     api_secret: str = Field(min_length=1, max_length=1024)
+    current_password: str = Field(min_length=1, max_length=256)
 
 
 class CredentialStatusOut(BaseModel):

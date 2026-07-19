@@ -10,21 +10,13 @@ import pytest
 from app.db.models import Order, Trade
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
-from tests.conftest import OWNER_EMAIL, OWNER_PASSWORD, current_totp
+from tests.conftest import auth_headers
 
 D = Decimal
 
 
-async def _headers(client: httpx.AsyncClient, secret: str) -> dict[str, str]:
-    r = await client.post(
-        "/api/auth/login", json={"email": OWNER_EMAIL, "password": OWNER_PASSWORD}
-    )
-    tok = r.json()["totp_token"]
-    r = await client.post(
-        "/api/auth/totp", json={"code": current_totp(secret)},
-        headers={"Authorization": f"Bearer {tok}"},
-    )
-    return {"Authorization": f"Bearer {r.json()['access_token']}"}
+async def _headers(client: httpx.AsyncClient, _secret: str) -> dict[str, str]:
+    return await auth_headers(client)
 
 
 async def _seed_trades() -> None:

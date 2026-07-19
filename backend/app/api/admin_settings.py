@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import CurrentUserDep
 from app.bot.service import bot_service
 from app.bot.state import BotStatus
+from app.core.config import get_settings
 from app.db.session import get_session
 from app.services import strategies as strat_svc
 from app.services.events import record_event
@@ -51,13 +52,25 @@ async def _require_stopped(session: AsyncSession) -> None:
 async def switch_environment(
     body: EnvironmentIn, current: CurrentUserDep, session: SessionDep
 ) -> MessageOut:
+    row = await get_settings_row(session, for_update=True)
     await _require_stopped(session)
     if body.environment == "LIVE" and body.confirm != "LIVE":
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
             detail="Switching to LIVE requires typing LIVE to confirm.",
         )
-    row = await get_settings_row(session)
+    runtime = get_settings()
+    if body.environment == "LIVE" and not (
+        runtime.live_trading_approved
+        and runtime.live_key_permissions_verified
+    ):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            detail=(
+                "LIVE is locked until Stage 11 acceptance and Binance key "
+                "permissions are independently verified."
+            ),
+        )
     old = row.active_environment
     row.active_environment = body.environment
     await record_event(
@@ -65,6 +78,7 @@ async def switch_environment(
         message=f"Environment switched {old} → {body.environment}",
         ref="env_switch", payload={"from": old, "to": body.environment, "by": current.user.email},
     )
+    await session.commit()
     return MessageOut(message=f"environment set to {body.environment}")
 
 
@@ -72,10 +86,10 @@ async def switch_environment(
 async def switch_strategy(
     body: StrategyIn, current: CurrentUserDep, session: SessionDep
 ) -> MessageOut:
+    row = await get_settings_row(session, for_update=True)
     await _require_stopped(session)
     if body.name not in {s.name for s in strat_svc.list_registered()}:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="unknown strategy")
-    row = await get_settings_row(session)
     old = row.active_strategy
     row.active_strategy = body.name
     await record_event(
@@ -83,4 +97,5 @@ async def switch_strategy(
         message=f"Active strategy switched {old} → {body.name}",
         ref="strategy_switch", payload={"from": old, "to": body.name, "by": current.user.email},
     )
+    await session.commit()
     return MessageOut(message=f"active strategy set to {body.name}")

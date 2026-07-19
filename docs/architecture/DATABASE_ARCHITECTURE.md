@@ -16,9 +16,10 @@ state (balance/positions/income) — the DB records it, never invents it.
 
 | Table | Purpose | Key columns / constraints |
 |---|---|---|
-| `users` | Owner login | `email unique`, `password_hash` (Argon2id), `role` (`owner`), `totp_secret` (encrypted), `totp_enabled` |
+| `users` | Owner login | `email unique`, `password_hash` (Argon2id), `role` (`owner`), `phone_encrypted`, `twofa_enabled` |
+| `otp_challenges` | Single-use SMS login/security proof | `user_id fk`, constrained `purpose`, HMAC `code_hash`, encrypted target phone, attempts/max, expiry/consumed/send timestamps; index `(user_id, purpose, created_at)` |
 | `app_settings` | Singleton config row | `active_environment` (`DEMO`\|`LIVE`), `active_strategy`, `risk_pct`, `sleeve_weight_pct`, `sleeve_vol_target`, `leverage_cap`, `sms_enabled`, `news_sources jsonb`, `news_time`, `news_provider` |
-| `api_credentials` | Per-environment exchange + SMS + LLM secrets | `environment`, `service` (`binance`\|`notifylk`\|`codex`), `api_key`, `secret_encrypted` (AES-GCM), unique `(environment, service)` |
+| `api_credentials` | Per-environment exchange + SMS secrets | `environment`, `service` (`binance`\|`notifylk`), `api_key_encrypted`, `secret_encrypted` (AES-GCM), unique `(environment, service)`; the legacy plaintext `api_key` slot is cleared by a fail-closed startup data migration |
 | `strategies` | Registered plugins | `name unique`, `class_path`, `params_json jsonb`, `enabled`, `validated_release` |
 | `bot_runs` | One row per start→stop | `started_at`, `stopped_at`, `environment`, `strategy`, `stop_reason` (`user`\|`error`\|`kill`\|`breaker`), `started_by` |
 | `candles` | Cached klines | `symbol`, `interval`, `open_time` — unique `(symbol, interval, open_time)`; o/h/l/c/v `numeric(20,8)`; `closed boolean` |
@@ -48,6 +49,7 @@ state (balance/positions/income) — the DB records it, never invents it.
 
 - `trades (environment, opened_at desc)`, `trades (side)`, `trades (strategy)` — history filters.
 - `events (ts desc)`, `events (category, ts desc)`, `events (level, ts desc)` — ledger queries.
+- `otp_challenges (user_id, purpose, created_at)` — send cap and challenge lookup.
 - `candles (symbol, interval, open_time desc)` — window loads.
 - `equity_snapshots (environment, ts desc)` — chart ranges.
 
@@ -55,6 +57,8 @@ state (balance/positions/income) — the DB records it, never invents it.
 
 - Candles: keep ≥3 years (parity replays need full history). ~6.6k rows/yr at 4h — trivial.
 - Events: no automatic pruning in v1 (auditability first); revisit at >5 M rows.
+- OTP challenges: expired/consumed rows are deleted by the existing four-hour ingest
+  tick; permanent delivery/change evidence remains in `events`.
 - Backups: nightly encrypted `pg_dump` to object storage; **restore drill is part of
   Stage 10 acceptance** — an untested backup does not count.
 

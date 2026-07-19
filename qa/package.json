@@ -8,7 +8,6 @@
     "report": "playwright show-report"
   },
   "devDependencies": {
-    "@playwright/test": "1.49.1",
-    "otplib": "^12.0.1"
+    "@playwright/test": "^1.61.1"
   }
 }

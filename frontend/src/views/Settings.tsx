@@ -5,23 +5,29 @@ import {
   Copy,
   ExternalLink,
   KeyRound,
+  Lock,
   MessageSquareText,
   PlugZap,
   Send,
   ShieldCheck,
+  Smartphone,
   Waypoints,
 } from "lucide-react";
 import {
+  ApiError,
   codexLogout,
+  confirmSecurityChange,
   getBotStatus,
   getCodexLoginStatus,
   getCodexStatus,
   getCredentialStatus,
+  getSecurityStatus,
   getSmsStatus,
   getStrategies,
   saveCredential,
   saveSmsConfig,
   startCodexLogin,
+  startSecurityChange,
   switchEnvironment,
   switchStrategy,
   testBinanceConnection,
@@ -29,6 +35,8 @@ import {
   toggleSms,
   type CodexLoginStart,
   type CredentialStatus,
+  type SecurityAction,
+  type SecurityStatus,
   type SmsStatus,
   type StrategyInfo,
 } from "../api/client";
@@ -47,6 +55,7 @@ export function Settings() {
           <p>API credentials are write-only and encrypted at rest (AES-GCM).</p>
         </div>
       </div>
+      <SecurityCard />
       <EnvironmentCard />
       <StrategyLibrary />
       <CodexCard />
@@ -85,9 +94,274 @@ export function Settings() {
   );
 }
 
+function SecurityCard() {
+  const [status, setStatus] = useState<SecurityStatus | null>(null);
+  // Active guarded flow: null when idle, otherwise the pending action.
+  const [action, setAction] = useState<SecurityAction | null>(null);
+  const [password, setPassword] = useState("");
+  const [newPhone, setNewPhone] = useState("");
+  const [challengeId, setChallengeId] = useState<number | null>(null);
+  const [code, setCode] = useState("");
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [guard, setGuard] = useState<ModalSpec | null>(null);
+
+  const refresh = () =>
+    getSecurityStatus()
+      .then((next) => {
+        setStatus(next);
+      })
+      .catch(() => {
+        setStatus(null);
+        setMsg({ ok: false, text: "Could not load account security status." });
+      });
+  useEffect(() => {
+    void refresh();
+  }, []);
+
+  const reset = () => {
+    setAction(null);
+    setPassword("");
+    setNewPhone("");
+    setChallengeId(null);
+    setCode("");
+  };
+
+  const begin = (next: SecurityAction) => {
+    reset();
+    setMsg(null);
+    setAction(next);
+  };
+
+  const requestToggle = () => {
+    if (!status) return;
+    if (!status.twofa_enabled) {
+      begin("enable");
+      return;
+    }
+    setGuard({
+      tone: "danger",
+      kicker: "REDUCE ACCOUNT SECURITY",
+      title: "Disable two-factor authentication?",
+      body: "Future sign-ins will use the owner password only.",
+      details: [
+        "A verification code will be sent to the current mobile number.",
+        "All other signed-in sessions will be revoked after confirmation.",
+        "The previous number receives a security notification.",
+      ],
+      confirmLabel: "Continue to verification",
+      onConfirm: () => begin("disable"),
+    });
+  };
+
+  const sendCode = async () => {
+    if (!action) return;
+    if (!password) {
+      setMsg({ ok: false, text: "Enter your current password." });
+      return;
+    }
+    if ((action === "enable" || action === "change_phone") && !/^94[0-9]{9}$/.test(newPhone)) {
+      setMsg({ ok: false, text: "Enter a valid mobile number (9471XXXXXXX)." });
+      return;
+    }
+    setBusy(true);
+    setMsg(null);
+    try {
+      const res = await startSecurityChange({
+        password,
+        action,
+        new_phone: action === "disable" ? undefined : newPhone,
+      });
+      setPassword("");
+      setChallengeId(res.challenge_id);
+      setMsg({
+        ok: true,
+        text: `Verification code sent${res.phone_hint ? ` to ${res.phone_hint}` : ""}.`,
+      });
+    } catch (err) {
+      const detail = err instanceof ApiError ? err.message : "Could not start the change.";
+      setMsg({ ok: false, text: detail });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const confirm = async () => {
+    if (!challengeId || code.length !== 6) {
+      setMsg({ ok: false, text: "Enter the 6-digit code from the SMS." });
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await confirmSecurityChange(challengeId, code);
+      setMsg({ ok: true, text: res.message });
+      reset();
+      await refresh();
+    } catch (err) {
+      const detail = err instanceof ApiError ? err.message : "That code was not accepted.";
+      setMsg({ ok: false, text: detail });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const enabled = status?.twofa_enabled ?? false;
+
+  return (
+    <div className="panel credential-card" data-testid="twofa-card">
+      <div className="settings-heading">
+        <span className="settings-icon">
+          <Lock size={18} />
+        </span>
+        <div>
+          <p className="kicker">ACCOUNT SECURITY</p>
+          <h2>Two-factor authentication</h2>
+          <p>A one-time SMS code is required at sign-in while this is on.</p>
+        </div>
+        <span className={`pill ${enabled ? "ok" : "warn"}`} data-testid="twofa-state">
+          {enabled ? `On ${status?.phone_hint ?? ""}` : "Off"}
+        </span>
+      </div>
+
+      <div className="setting-row">
+        <span>
+          <strong>SMS two-factor</strong>
+          <small>
+            {enabled
+              ? "Sign-in requires your password and an SMS code."
+              : "Sign-in uses your password only. Turn on for stronger protection."}
+          </small>
+        </span>
+        <button
+          className={`toggle ${enabled ? "on" : ""}`}
+          role="switch"
+          aria-checked={enabled}
+          aria-label="Toggle two-factor authentication"
+          data-testid="twofa-toggle"
+          onClick={requestToggle}
+          disabled={!status || busy}
+        >
+          <i />
+        </button>
+      </div>
+
+      {enabled && action === null && (
+        <div className="credential-footer">
+          <button
+            className="button secondary"
+            data-testid="twofa-change-phone"
+            onClick={() => begin("change_phone")}
+          >
+            <Smartphone size={14} /> Change mobile number
+          </button>
+        </div>
+      )}
+
+      {action !== null && (
+        <div className="twofa-flow" data-testid="twofa-flow">
+          <p className="kicker">
+            {action === "enable"
+              ? "ENABLE TWO-FACTOR"
+              : action === "disable"
+                ? "DISABLE TWO-FACTOR"
+                : "CHANGE MOBILE NUMBER"}
+          </p>
+          {challengeId === null ? (
+            <>
+              <div className="form-grid">
+                <label>
+                  Current password
+                  <input
+                    type="password"
+                    aria-label="Current password"
+                    autoComplete="current-password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                  />
+                </label>
+                {(action === "enable" || action === "change_phone") && (
+                  <label>
+                    Mobile number (9471XXXXXXX)
+                    <input
+                      aria-label="New mobile number"
+                      type="tel"
+                      autoComplete="tel"
+                      inputMode="tel"
+                      value={newPhone}
+                      onChange={(e) => setNewPhone(e.target.value)}
+                    />
+                  </label>
+                )}
+              </div>
+              <div className="credential-footer">
+                <button
+                  className="button primary"
+                  data-testid="twofa-send-code"
+                  onClick={() => void sendCode()}
+                  disabled={busy}
+                >
+                  <Send size={14} /> Send code
+                </button>
+                <button className="button ghost" onClick={reset} disabled={busy}>
+                  Cancel
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="form-grid">
+                <label>
+                  Verification code
+                  <input
+                    aria-label="Verification code"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    pattern="[0-9]*"
+                    maxLength={6}
+                    placeholder="000000"
+                    value={code}
+                    onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                  />
+                </label>
+              </div>
+              <div className="credential-footer">
+                <button
+                  className="button primary"
+                  data-testid="twofa-confirm"
+                  onClick={() => void confirm()}
+                  disabled={busy}
+                >
+                  <ShieldCheck size={14} /> Confirm
+                </button>
+                <button className="button ghost" onClick={reset} disabled={busy}>
+                  Cancel
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {msg && (
+        <div
+          className={`inline-msg ${msg.ok ? "ok" : "err"}`}
+          role={msg.ok ? "status" : "alert"}
+          data-testid="twofa-result"
+        >
+          {msg.text}
+        </div>
+      )}
+      {guard && <ConfirmModal modal={guard} onClose={() => setGuard(null)} />}
+    </div>
+  );
+}
+
 function OperationsCard() {
   const [h, setH] = useState<DeepHealth | null>(null);
-  const load = () => getDeepHealth().then(setH).catch(() => setH(null));
+  const load = () =>
+    getDeepHealth()
+      .then(setH)
+      .catch(() => setH(null));
   useEffect(() => {
     void load();
     const t = setInterval(() => void load(), 10000);
@@ -97,7 +371,9 @@ function OperationsCard() {
   return (
     <div className="panel" data-testid="operations-card">
       <div className="settings-heading">
-        <span className="settings-icon"><Activity size={18} /></span>
+        <span className="settings-icon">
+          <Activity size={18} />
+        </span>
         <div>
           <p className="kicker">RELIABILITY</p>
           <h2>Operations & health</h2>
@@ -108,10 +384,34 @@ function OperationsCard() {
         </span>
       </div>
       <div className="operations-grid">
-        <span><Database size={16} /><div><small>Database</small><strong>{h?.database ?? "—"}</strong></div></span>
-        <span><RadioTower size={16} /><div><small>Scheduler</small><strong>{h?.scheduler_alive ? "Alive" : "Down"}</strong></div></span>
-        <span><Wifi size={16} /><div><small>Last candle tick</small><strong>{tick}</strong></div></span>
-        <span><Activity size={16} /><div><small>Dead-man switch</small><strong>{h?.ingest_overdue ? "OVERDUE" : "Armed"}</strong></div></span>
+        <span>
+          <Database size={16} />
+          <div>
+            <small>Database</small>
+            <strong>{h?.database ?? "—"}</strong>
+          </div>
+        </span>
+        <span>
+          <RadioTower size={16} />
+          <div>
+            <small>Scheduler</small>
+            <strong>{h?.scheduler_alive ? "Alive" : "Down"}</strong>
+          </div>
+        </span>
+        <span>
+          <Wifi size={16} />
+          <div>
+            <small>Last candle tick</small>
+            <strong>{tick}</strong>
+          </div>
+        </span>
+        <span>
+          <Activity size={16} />
+          <div>
+            <small>Dead-man switch</small>
+            <strong>{h?.ingest_overdue ? "OVERDUE" : "Armed"}</strong>
+          </div>
+        </span>
       </div>
       <button className="button secondary" data-testid="ops-refresh" onClick={() => void load()}>
         <RefreshCw size={14} /> Run health check
@@ -170,7 +470,9 @@ function EnvironmentCard() {
   return (
     <div className="panel credential-card" data-testid="environment-card">
       <div className="settings-heading">
-        <span className="settings-icon"><Server size={18} /></span>
+        <span className="settings-icon">
+          <Server size={18} />
+        </span>
         <div>
           <p className="kicker">TRADING VENUE</p>
           <h2>Environment</h2>
@@ -198,7 +500,11 @@ function EnvironmentCard() {
           <small>Real funds · production</small>
         </button>
       </div>
-      {msg && <div className="inline-msg ok" role="status">{msg}</div>}
+      {msg && (
+        <div className="inline-msg ok" role="status">
+          {msg}
+        </div>
+      )}
       {modal && <ConfirmModal modal={modal} onClose={() => setModal(null)} />}
     </div>
   );
@@ -207,7 +513,10 @@ function EnvironmentCard() {
 function StrategyLibrary() {
   const [strategies, setStrategies] = useState<StrategyInfo[]>([]);
   const [modal, setModal] = useState<ModalSpec | null>(null);
-  const load = () => getStrategies().then(setStrategies).catch(() => setStrategies([]));
+  const load = () =>
+    getStrategies()
+      .then(setStrategies)
+      .catch(() => setStrategies([]));
   useEffect(() => {
     void load();
   }, []);
@@ -237,7 +546,11 @@ function StrategyLibrary() {
       </div>
       <div className="strategy-list">
         {strategies.map((s) => (
-          <article key={s.name} className={s.active ? "active" : ""} data-testid={`strategy-${s.name}`}>
+          <article
+            key={s.name}
+            className={s.active ? "active" : ""}
+            data-testid={`strategy-${s.name}`}
+          >
             <div>
               <strong>{s.name}</strong>
               <code>release {s.validated_release}</code>
@@ -276,7 +589,10 @@ function CodexCard() {
   const [loginStatus, setLoginStatus] = useState<string>("");
   const [busy, setBusy] = useState(false);
 
-  const refresh = () => getCodexStatus().then((s) => setAuthed(s.authenticated)).catch(() => setAuthed(false));
+  const refresh = () =>
+    getCodexStatus()
+      .then((s) => setAuthed(s.authenticated))
+      .catch(() => setAuthed(false));
   useEffect(() => {
     void refresh();
   }, []);
@@ -322,14 +638,19 @@ function CodexCard() {
   return (
     <div className="panel credential-card" data-testid="codex-card">
       <div className="settings-heading">
-        <span className="settings-icon"><Bot size={18} /></span>
+        <span className="settings-icon">
+          <Bot size={18} />
+        </span>
         <div>
           <p className="kicker">AI NEWS · CODEX SDK (GPT-5.5)</p>
           <h2>Codex authentication</h2>
           <p>Device-code login. The news agent is isolated — no exchange keys, never trades.</p>
         </div>
-        <span className={`pill ${authed ? "ok" : "warn"}`} data-testid="codex-state">
-          {authed ? "Connected" : "Not connected"}
+        <span
+          className={`pill ${authed === null ? "" : authed ? "ok" : "warn"}`}
+          data-testid="codex-state"
+        >
+          {authed === null ? "Checking…" : authed ? "Connected" : "Not connected"}
         </span>
       </div>
 
@@ -355,15 +676,29 @@ function CodexCard() {
 
       <div className="credential-footer">
         {!authed ? (
-          <button className="button primary" data-testid="codex-connect" onClick={() => void connect()} disabled={busy || !!login}>
+          <button
+            className="button primary"
+            data-testid="codex-connect"
+            onClick={() => void connect()}
+            disabled={busy || !!login}
+          >
             <Bot size={14} /> Connect Codex
           </button>
         ) : (
           <>
-            <button className="button secondary" data-testid="codex-reauth" onClick={() => void connect()} disabled={busy || !!login}>
+            <button
+              className="button secondary"
+              data-testid="codex-reauth"
+              onClick={() => void connect()}
+              disabled={busy || !!login}
+            >
               <Bot size={14} /> Re-authenticate
             </button>
-            <button className="button ghost" data-testid="codex-logout" onClick={() => void disconnect()}>
+            <button
+              className="button ghost"
+              data-testid="codex-logout"
+              onClick={() => void disconnect()}
+            >
               Disconnect
             </button>
           </>
@@ -379,24 +714,35 @@ function SmsCard() {
   const [apiKey, setApiKey] = useState("");
   const [senderId, setSenderId] = useState("NotifyDEMO");
   const [phone, setPhone] = useState("");
+  const [currentPassword, setCurrentPassword] = useState("");
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const refresh = () => getSmsStatus().then(setStatus).catch(() => setStatus(null));
+  const refresh = () =>
+    getSmsStatus()
+      .then(setStatus)
+      .catch(() => setStatus(null));
   useEffect(() => {
     void refresh();
   }, []);
 
   const save = async () => {
-    if (!userId || !apiKey || !senderId || !phone) {
-      setMsg({ ok: false, text: "Fill in all notify.lk fields." });
+    if (!userId || !apiKey || !senderId || !phone || !currentPassword) {
+      setMsg({ ok: false, text: "Fill in all fields and enter your current password." });
       return;
     }
     setBusy(true);
     try {
-      await saveSmsConfig({ user_id: userId, api_key: apiKey, sender_id: senderId, phone });
+      await saveSmsConfig({
+        user_id: userId,
+        api_key: apiKey,
+        sender_id: senderId,
+        phone,
+        current_password: currentPassword,
+      });
       setMsg({ ok: true, text: "SMS credentials stored securely." });
       setApiKey("");
+      setCurrentPassword("");
       await refresh();
     } catch {
       setMsg({ ok: false, text: "Could not save SMS credentials." });
@@ -417,8 +763,15 @@ function SmsCard() {
 
   const flipEnabled = async () => {
     if (!status) return;
-    await toggleSms(!status.sms_enabled);
-    await refresh();
+    setBusy(true);
+    try {
+      await toggleSms(!status.sms_enabled);
+      await refresh();
+    } catch {
+      setMsg({ ok: false, text: "Could not change SMS delivery state." });
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -447,6 +800,7 @@ function SmsCard() {
           aria-checked={status?.sms_enabled ?? false}
           aria-label="Toggle SMS delivery"
           onClick={() => void flipEnabled()}
+          disabled={!status || busy}
         >
           <i />
         </button>
@@ -454,31 +808,68 @@ function SmsCard() {
       <div className="form-grid">
         <label>
           User ID
-          <input aria-label="notify.lk user ID" value={userId} onChange={(e) => setUserId(e.target.value)} />
+          <input
+            aria-label="notify.lk user ID"
+            value={userId}
+            onChange={(e) => setUserId(e.target.value)}
+          />
         </label>
         <label>
           API key
-          <input type="password" aria-label="notify.lk API key" placeholder={status?.configured ? "Stored — enter to replace" : ""} value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
+          <input
+            type="password"
+            aria-label="notify.lk API key"
+            placeholder={status?.configured ? "Stored — enter to replace" : ""}
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+          />
         </label>
         <label>
           Sender ID
-          <input aria-label="notify.lk sender ID" value={senderId} onChange={(e) => setSenderId(e.target.value)} />
+          <input
+            aria-label="notify.lk sender ID"
+            value={senderId}
+            onChange={(e) => setSenderId(e.target.value)}
+          />
         </label>
         <label>
           Phone (9471XXXXXXX)
-          <input aria-label="Owner phone" value={phone} onChange={(e) => setPhone(e.target.value)} />
+          <input
+            aria-label="Owner phone"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+          />
+        </label>
+        <label>
+          Current password
+          <input
+            type="password"
+            aria-label="notify.lk current password"
+            autoComplete="current-password"
+            value={currentPassword}
+            onChange={(e) => setCurrentPassword(e.target.value)}
+          />
         </label>
       </div>
       <div className="credential-footer">
         <button className="button primary" onClick={() => void save()} disabled={busy}>
           <KeyRound size={14} /> Save
         </button>
-        <button className="button secondary" data-testid="test-sms" onClick={() => void runTest()} disabled={busy || !status?.configured}>
+        <button
+          className="button secondary"
+          data-testid="test-sms"
+          onClick={() => void runTest()}
+          disabled={busy || !status?.configured}
+        >
           <Send size={14} /> Send test SMS
         </button>
       </div>
       {msg && (
-        <div className={`inline-msg ${msg.ok ? "ok" : "err"}`} role="status" data-testid="sms-result">
+        <div
+          className={`inline-msg ${msg.ok ? "ok" : "err"}`}
+          role="status"
+          data-testid="sms-result"
+        >
           {msg.text}
         </div>
       )}
@@ -490,6 +881,7 @@ function CredentialCard({ environment }: { environment: string }) {
   const [status, setStatus] = useState<CredentialStatus | null>(null);
   const [apiKey, setApiKey] = useState("");
   const [apiSecret, setApiSecret] = useState("");
+  const [currentPassword, setCurrentPassword] = useState("");
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -504,16 +896,23 @@ function CredentialCard({ environment }: { environment: string }) {
   }, [environment]);
 
   const save = async () => {
-    if (!apiKey || !apiSecret) {
-      setMsg({ ok: false, text: "Enter both the API key and secret." });
+    if (!apiKey || !apiSecret || !currentPassword) {
+      setMsg({ ok: false, text: "Enter the API key, secret, and current password." });
       return;
     }
     setBusy(true);
     try {
-      await saveCredential({ environment, service: "binance", api_key: apiKey, api_secret: apiSecret });
+      await saveCredential({
+        environment,
+        service: "binance",
+        api_key: apiKey,
+        api_secret: apiSecret,
+        current_password: currentPassword,
+      });
       setMsg({ ok: true, text: "Credentials stored securely." });
       setApiKey("");
       setApiSecret("");
+      setCurrentPassword("");
       await refresh();
     } catch {
       setMsg({ ok: false, text: "Could not save credentials." });
@@ -543,7 +942,10 @@ function CredentialCard({ environment }: { environment: string }) {
             {environment === "DEMO" ? "Testnet — fake funds" : "Production — real funds"}
           </small>
         </div>
-        <span className={`pill ${status?.configured ? "ok" : "warn"}`} data-testid={`cred-state-${environment}`}>
+        <span
+          className={`pill ${status?.configured ? "ok" : "warn"}`}
+          data-testid={`cred-state-${environment}`}
+        >
           {status?.configured ? `Configured ${status.key_hint ?? ""}` : "Not configured"}
         </span>
       </div>
@@ -568,6 +970,16 @@ function CredentialCard({ environment }: { environment: string }) {
             onChange={(e) => setApiSecret(e.target.value)}
           />
         </label>
+        <label>
+          Current password
+          <input
+            type="password"
+            aria-label={`${environment} current password`}
+            autoComplete="current-password"
+            value={currentPassword}
+            onChange={(e) => setCurrentPassword(e.target.value)}
+          />
+        </label>
       </div>
       <div className="credential-footer">
         <button className="button primary" onClick={() => void save()} disabled={busy}>
@@ -578,7 +990,11 @@ function CredentialCard({ environment }: { environment: string }) {
         </button>
       </div>
       {msg && (
-        <div className={`inline-msg ${msg.ok ? "ok" : "err"}`} role="status" data-testid={`test-result-${environment}`}>
+        <div
+          className={`inline-msg ${msg.ok ? "ok" : "err"}`}
+          role="status"
+          data-testid={`test-result-${environment}`}
+        >
           {msg.text}
         </div>
       )}

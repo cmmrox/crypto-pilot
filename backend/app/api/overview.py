@@ -19,6 +19,7 @@ from app.api.deps import CurrentUserDep
 from app.bot.service import bot_service
 from app.db.models import EquitySnapshot, Trade
 from app.db.session import get_session
+from app.execution.binance_client import BinanceError
 from app.risk.breakers import evaluate_breaker
 from app.services import execution_service as exec_svc
 from app.services.settings_store import get_settings_row
@@ -94,7 +95,7 @@ async def overview(current: CurrentUserDep, session: SessionDep) -> OverviewOut:
                     leverage=f"{lev:.2f}",
                     has_price_stop=(side == "LONG"),
                 )
-    except exec_svc.NotConfiguredError:
+    except (exec_svc.NotConfiguredError, BinanceError):
         reachable = False
 
     # Month-to-date realized P&L per book (from closed trades).

@@ -14,9 +14,10 @@ RUN groupadd -r app && useradd -r -g app app
 
 WORKDIR /app
 
-# Install dependencies first for layer caching
-COPY pyproject.toml ./
-RUN pip install --upgrade pip && pip install .
+# Install the hash-locked production graph first for reproducible, auditable
+# images. requirements.lock is generated from uv.lock and excludes dev tools.
+COPY requirements.lock ./
+RUN pip install --require-hashes --no-deps -r requirements.lock
 
 # Application code
 COPY alembic.ini ./

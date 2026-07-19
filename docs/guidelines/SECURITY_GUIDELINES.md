@@ -6,15 +6,28 @@ the worst case is bounded (no withdrawal permission — ever).
 
 ## Identity & access
 
-- Single owner role. Argon2id password hashing (tuned params), **mandatory TOTP** —
-  no bypass path, no "remember this device" for TOTP.
+- Single owner role. Argon2id password hashing (tuned params). The owner may enable
+  **SMS OTP 2FA** with an encrypted notify.lk-format phone number. When enabled, no
+  access/refresh token is issued until the challenge bound to the password step is
+  verified; there is no remembered-device or OTP-bypass path.
+- SMS 2FA is weaker than authenticator TOTP (notably SIM-swap risk). Disabling it is
+  an owner-approved trade-off that reduces login to password-only. Enable/change/
+  disable requires password re-entry and an OTP; change/disable revokes other sessions,
+  notifies the previous phone, and writes `security` events.
+- OTPs are random six-digit values, HMAC-SHA256 hashed at rest, single-use, valid for
+  five minutes, limited to five attempts, resend-throttled, and capped at five sends
+  per owner per hour. Raw codes and full phone numbers never enter logs/events.
+- Lost-phone recovery is server-side only: `python -m app.cli reset-2fa --email ...`.
+  There is no web recovery endpoint. Test code capture/throttle controls are rejected
+  by configuration unless `CP_ENVIRONMENT=test`.
 - JWT: short-lived access (≤15 min) + rotating refresh; revocation list honored;
   session revoke-others in Settings writes a `security` event.
 - Login rate limiting + lockout with event trail; auth failures are `security` events.
 
 ## Secrets
 
-- At rest: AES-GCM via `MASTER_KEY` from environment only. In the UI: write-only
+- At rest: AES-GCM via `MASTER_KEY` from environment only (including the 2FA phone).
+  OTP challenge rows contain only a keyed hash and encrypted target phone. In the UI: write-only
   fields, never echoed (only last-4 hint). In transit: TLS everywhere (Caddy,
   Let's Encrypt), HSTS.
 - In code/CI: gitleaks blocking; `.env` gitignored; fixtures use obvious fakes.

@@ -42,6 +42,19 @@ The workflow rules for building CryptoPilot. Stack-specific rules:
   is named in the PR description with a one-line justification.
 - Pin everything (uv/pip-tools lock, package-lock). Renovate/audit runs in CI; upgrades
   are their own PRs, never mixed with features.
+- After any backend dependency change, regenerate and verify both lock artifacts:
+
+  ```sh
+  cd backend
+  uv lock
+  uv export --frozen --no-dev --no-emit-project \
+    --format requirements-txt --output-file requirements.lock
+  uv sync --frozen --all-groups
+  uv run --frozen pip-audit
+  ```
+
+  `uv.lock` pins the complete development/CI graph. The production image installs
+  the hash-verified `requirements.lock`; never hand-edit either generated file.
 
 ## When blocked or uncertain
 

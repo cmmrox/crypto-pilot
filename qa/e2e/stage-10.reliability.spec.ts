@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { authenticator } from "otplib";
+import { login } from "./helpers/auth";
 
 /**
  * Stage 10 — Reliability engineering (QA-10, UI slice).
@@ -8,21 +8,9 @@ import { authenticator } from "otplib";
  * as part of acceptance, not from the browser.
  */
 
-const EMAIL = "owner@cryptopilot.app";
-const PASSWORD = "PilotOwner!2026";
-const TOTP_SECRET = "JBSWY3DPEHPK3PXP";
-
-async function login(page: Page) {
-  await page.goto("/");
-  await page.getByLabel("Email").fill(EMAIL);
-  await page.getByLabel("Password", { exact: true }).fill(PASSWORD);
-  await page.getByRole("button", { name: /continue/i }).click();
-  await page.getByLabel("Authentication code").fill(authenticator.generate(TOTP_SECRET));
-  await page.getByRole("button", { name: /verify & enter/i }).click();
-  await expect(page.getByTestId("environment-badge")).toBeVisible();
-}
-
-test("QA-10.01 deep health endpoint reports scheduler + dead-man", async ({ request }) => {
+test("QA-10.01 deep health endpoint reports scheduler + dead-man", async ({
+  request,
+}) => {
   const resp = await request.get("/health/deep");
   expect(resp.ok()).toBeTruthy();
   const body = await resp.json();

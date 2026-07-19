@@ -1,13 +1,16 @@
-# Stage 11 — Full-Stack End-to-End Acceptance (local production-like) — Report
+# Pre-Stage 11 — Local Full-Stack End-to-End Acceptance — Report
 
-**Status:** ✅ COMPLETE — full production-like stack verified end-to-end. **Date:** 2026-07-18.
-**Only the manual VPS production deploy + the calendar soak remain (owner-performed).**
+**Status:** Local pre-deployment acceptance completed on 2026-07-18; **Stage 11
+is not complete**. The real VPS deployment, current-snapshot regression, and
+calendar soak remain.
 
 ## What was verified
 
-The complete application was run as a **production-like Docker stack** (postgres +
-backend + frontend + caddy, same images/topology as production, reachable via Caddy on
-:8090) and exercised end-to-end across every service.
+The application snapshot at the time was run as a local Docker stack (Postgres,
+backend, frontend, and Caddy, reachable through Caddy on :8090) and exercised
+end-to-end. This was useful pre-deployment evidence, but it did not verify the
+external shared-Postgres production topology, VPS hardening, public TLS, backups,
+or the Stage 11 soak.
 
 ### Clean boot & persistence
 - `docker compose down && up --build` → all 4 services **healthy** from images.
@@ -51,7 +54,8 @@ production deploy artifacts. All merged to `main`.
 - **Stage 12:** LIVE Binance key (trade+read only, withdrawals off, IP-allowlisted),
   switch to LIVE with pilot sizing after the soak.
 
-## Sign-off
+## Local acceptance conclusion
 
-The application is **code-complete and production-ready**, verified end-to-end on a
-production-like local stack. Everything up to the manual production deployment is done.
+The 2026-07-18 snapshot passed local acceptance. It is not a production-release
+sign-off. Stage 11 begins only after a reviewed current snapshot is deployed to
+the hardened VPS in DEMO mode; it exits after four clean weeks and owner sign-off.

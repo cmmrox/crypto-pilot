@@ -28,7 +28,8 @@ A stage closes only when:
 
 - One spec file per stage: `stage-XX.<area>.spec.ts`; tests map 1:1 to the QA-XX test
   cases by ID in the test title: `test("QA-4.07 kill switch from running state", …)`.
-- Fixtures: authenticated session (login+TOTP via API, storageState reuse); seeded DB
+- Fixtures: authenticated session (login+SMS OTP via a fake gateway in an isolated
+  `CP_ENVIRONMENT=test` stack; token reuse per worker); seeded DB
   snapshot per suite; deterministic clock where the UI shows countdowns.
 - Backend-only checks use Playwright's request context (API testing) so every stage —
   including pre-UI ones — has an automated suite.
@@ -69,7 +70,9 @@ Every bug: reproduce → write failing test → fix → test green → note in s
 
 ## 6. Acceptance protocol (Stages 11–12)
 
-- Weekly: full Playwright regression against the deployed VPS; reconciliation report
+- Weekly: full Playwright regression against an isolated test-mode clone of the
+  deployed VPS release, plus a manual real-SMS login check on the deployed VPS;
+  reconciliation report
   clean; every decision that week explained against strategy rules; SMS latency sample
   ≤60 s; backup restore spot-check monthly.
 - Deviation log: anything unexplained → investigate to root cause; unexplained

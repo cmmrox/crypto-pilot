@@ -33,8 +33,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     configure_logging(level=settings.log_level, json_output=settings.log_json)
     log = get_logger("app")
     import os
+
     os.environ.setdefault("CODEX_HOME", settings.codex_home)
     log.info("app_starting", version=settings.version, environment=settings.environment)
+
+    # Alembic adds the encrypted key column without receiving CP_MASTER_KEY.
+    # Clear every legacy plaintext key before the server accepts requests.
+    from app.db.session import get_sessionmaker
+    from app.services.credentials import migrate_plaintext_keys
+
+    async with get_sessionmaker()() as session:
+        migrated_keys = await migrate_plaintext_keys(session)
+        await session.commit()
+    if migrated_keys:
+        log.info("legacy_api_keys_encrypted", count=migrated_keys)
 
     from app.bot.ingest import ingest_service
 

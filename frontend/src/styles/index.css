@@ -228,8 +228,8 @@ a {
   padding: 10px 12px;
 }
 
-/* --- TOTP --- */
-.totp-shell {
+/* --- SMS OTP --- */
+.otp-shell {
   min-height: 100vh;
   display: flex;
   align-items: center;
@@ -237,7 +237,7 @@ a {
   padding: 24px;
   background: radial-gradient(100% 60% at 50% 0%, rgb(245 166 35 / 6%), transparent 60%), var(--bg);
 }
-.totp-card {
+.otp-card {
   position: relative;
   width: 100%;
   max-width: 400px;
@@ -251,12 +251,12 @@ a {
   gap: 12px;
   text-align: center;
 }
-.totp-back {
+.otp-back {
   position: absolute;
   top: 16px;
   left: 16px;
 }
-.totp-icon {
+.otp-icon {
   display: inline-flex;
   width: 52px;
   height: 52px;
@@ -266,14 +266,14 @@ a {
   background: rgb(245 166 35 / 12%);
   color: var(--amber);
 }
-.totp-card h1 {
+.otp-card h1 {
   font-size: 1.5rem;
 }
-.totp-card > p {
+.otp-card > p {
   color: var(--muted);
   font-size: 0.88rem;
 }
-.totp-input {
+.otp-input {
   width: 100%;
   text-align: center;
   letter-spacing: 0.5em;
@@ -284,11 +284,11 @@ a {
   border-radius: 12px;
   color: var(--text);
 }
-.totp-input:focus {
+.otp-input:focus {
   outline: none;
   border-color: var(--amber);
 }
-.totp-required {
+.otp-required {
   display: flex;
   align-items: center;
   gap: 7px;
@@ -1421,6 +1421,11 @@ a {
   border: 1px solid var(--border); border-radius: 8px; padding: 8px 14px; color: var(--text);
 }
 .device-code small { color: var(--muted); font-size: 0.72rem; }
+.twofa-flow {
+  border: 1px solid var(--border); background: var(--panel-2);
+  border-radius: 10px; padding: 14px; display: grid; gap: 12px; margin-top: 4px;
+}
+.twofa-flow .kicker { margin: 0; }
 @media (max-width: 860px) { .news-grid { grid-template-columns: 1fr; } }
 
 /* --- Stage 9: environment options --- */

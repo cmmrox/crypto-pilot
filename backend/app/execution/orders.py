@@ -55,10 +55,28 @@ class OrderManager:
         trade = await self._persist_trade(session, "LONG", entry, sizing.qty, strategy, bot_run_id)
         await self._persist_order(session, entry, trade.id, "MARKET", reduce_only=False)
 
-        stop = await self._ex.place_stop_market(
-            self._symbol, "SELL", sizing.qty, stop_price,
-            client_order_id=new_client_order_id("CPS"),
-        )
+        try:
+            stop = await self._ex.place_stop_market(
+                self._symbol, "SELL", sizing.qty, stop_price,
+                client_order_id=new_client_order_id("CPS"),
+            )
+        except Exception as stop_error:
+            try:
+                await self._ex.cancel_all(self._symbol)
+                await self._ex.place_market(
+                    self._symbol,
+                    "SELL",
+                    sizing.qty,
+                    client_order_id=new_client_order_id("CP-EMERGENCY"),
+                    reduce_only=True,
+                )
+            except Exception as flatten_error:
+                raise RuntimeError(
+                    "protective stop failed and emergency flatten was not confirmed"
+                ) from flatten_error
+            raise RuntimeError(
+                "protective stop failed; long was emergency-flattened"
+            ) from stop_error
         await self._persist_order(session, stop, trade.id, "STOP_MARKET", reduce_only=True,
                                   stop_price=stop_price)
 

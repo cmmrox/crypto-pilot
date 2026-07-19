@@ -1,25 +1,11 @@
 import { expect, test, type Page } from "@playwright/test";
-import { authenticator } from "otplib";
+import { login, OWNER_PASSWORD } from "./helpers/auth";
 
 /**
  * Stage 2 — Market data & scheduler (QA-2).
  * Verifies real DEMO candle ingest, connection status, the event ledger with
  * payload drawer, and write-only credential storage + connection test.
  */
-
-const EMAIL = "owner@cryptopilot.app";
-const PASSWORD = "PilotOwner!2026";
-const TOTP_SECRET = "JBSWY3DPEHPK3PXP";
-
-async function login(page: Page) {
-  await page.goto("/");
-  await page.getByLabel("Email").fill(EMAIL);
-  await page.getByLabel("Password", { exact: true }).fill(PASSWORD);
-  await page.getByRole("button", { name: /continue/i }).click();
-  await page.getByLabel("Authentication code").fill(authenticator.generate(TOTP_SECRET));
-  await page.getByRole("button", { name: /verify & enter/i }).click();
-  await expect(page.getByTestId("environment-badge")).toBeVisible();
-}
 
 async function gotoEvents(page: Page) {
   const menu = page.getByRole("button", { name: /open navigation/i });
@@ -28,7 +14,9 @@ async function gotoEvents(page: Page) {
   await expect(page.getByTestId("view-title")).toHaveText("Event ledger");
 }
 
-test("QA-2.01 connection status shows Binance reachable and candles stored", async ({ page }) => {
+test("QA-2.01 connection status shows Binance reachable and candles stored", async ({
+  page,
+}) => {
   await login(page);
   await gotoEvents(page);
   const status = page.getByTestId("connection-status");
@@ -37,7 +25,10 @@ test("QA-2.01 connection status shows Binance reachable and candles stored", asy
   await expect(status).toContainText(/\d/);
 });
 
-test("QA-2.02 API reports real ingested candles with zero gaps", async ({ page, request }) => {
+test("QA-2.02 API reports real ingested candles with zero gaps", async ({
+  page,
+  request,
+}) => {
   await login(page);
   // Reuse the browser's stored access token for a direct API assertion.
   const token = await page.evaluate(() => sessionStorage.getItem("cp_access"));
@@ -52,7 +43,9 @@ test("QA-2.02 API reports real ingested candles with zero gaps", async ({ page, 
   expect(body.symbol).toBe("BTCUSDT");
 });
 
-test("QA-2.03 event ledger lists ingest events and opens payload drawer", async ({ page }) => {
+test("QA-2.03 event ledger lists ingest events and opens payload drawer", async ({
+  page,
+}) => {
   await login(page);
   await gotoEvents(page);
   const table = page.getByTestId("events-table");
@@ -84,7 +77,9 @@ test("QA-2.05 manual candle ingest button works", async ({ page }) => {
   await gotoEvents(page);
   await page.getByTestId("backfill-btn").click();
   // Status still shows connected + candles after re-ingest.
-  await expect(page.getByTestId("connection-status")).toContainText("Connected");
+  await expect(page.getByTestId("connection-status")).toContainText(
+    "Connected",
+  );
 });
 
 test("QA-2.06 credentials are write-only: saved key shows masked hint, secret never returned", async ({
@@ -98,15 +93,25 @@ test("QA-2.06 credentials are write-only: saved key shows masked hint, secret ne
 
   await page.getByLabel("DEMO API key").fill("DEMOKEYABCD1234WXYZ");
   await page.getByLabel("DEMO API secret").fill("ultra-secret-demo-value");
-  await page.getByTestId("credential-DEMO").getByRole("button", { name: /save credentials/i }).click();
+  await page.getByLabel("DEMO current password").fill(OWNER_PASSWORD);
+  await page
+    .getByTestId("credential-DEMO")
+    .getByRole("button", { name: /save credentials/i })
+    .click();
 
-  await expect(page.getByTestId("cred-state-DEMO")).toContainText(/configured/i);
+  await expect(page.getByTestId("cred-state-DEMO")).toContainText(
+    /configured/i,
+  );
   await expect(page.getByTestId("cred-state-DEMO")).toContainText("WXYZ");
   // The plaintext secret must never appear anywhere in the DOM.
-  await expect(page.locator("body")).not.toContainText("ultra-secret-demo-value");
+  await expect(page.locator("body")).not.toContainText(
+    "ultra-secret-demo-value",
+  );
 });
 
-test("QA-2.07 connection test reports public reachability", async ({ page }) => {
+test("QA-2.07 connection test reports public reachability", async ({
+  page,
+}) => {
   await login(page);
   const menu = page.getByRole("button", { name: /open navigation/i });
   if (await menu.isVisible()) await menu.click();

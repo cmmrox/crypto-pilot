@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,9 +14,16 @@ from app.api.schemas import (
     CredentialIn,
     CredentialStatusOut,
     MessageResponse,
+    SecurityChangeConfirm,
+    SecurityChangeStart,
+    SecurityChangeStartOut,
+    SecurityStatusOut,
 )
+from app.bot.service import bot_service
+from app.bot.state import BotStatus
 from app.db.session import get_session
 from app.execution.binance_client import BinanceClient, BinanceError
+from app.services import auth as auth_service
 from app.services import credentials as cred_svc
 from app.services import notify_config as notify_svc
 from app.services.events import record_event
@@ -29,7 +36,10 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
 @router.get("/credentials/{environment}/{service}", response_model=CredentialStatusOut)
 async def credential_status(
-    environment: str, service: str, _current: CurrentUserDep, session: SessionDep
+    environment: Literal["DEMO", "LIVE"],
+    service: Literal["binance"],
+    _current: CurrentUserDep,
+    session: SessionDep,
 ) -> CredentialStatusOut:
     """Return whether a credential is configured (masked hint only, never the secret)."""
     status = await cred_svc.get_status(session, environment=environment, service=service)
@@ -46,6 +56,24 @@ async def save_credential(
     body: CredentialIn, current: CurrentUserDep, session: SessionDep
 ) -> MessageResponse:
     """Store or replace an encrypted credential pair (write-only)."""
+    try:
+        await auth_service.require_password_reauth(
+            session,
+            current.user,
+            body.current_password,
+            action=f"replace_{body.environment}_binance_credentials",
+        )
+    except auth_service.AuthError as exc:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+    except auth_service.RateLimitedError as exc:
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, detail=str(exc)) from exc
+    # This is the same lock used by bot start and operational setting changes.
+    await get_settings_row(session, for_update=True)
+    if (await bot_service.status(session)).status != BotStatus.STOPPED:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail="stop the bot before replacing exchange credentials",
+        )
     await cred_svc.save_credential(
         session,
         environment=body.environment,
@@ -61,12 +89,11 @@ async def save_credential(
         ref=f"cred_update:{body.environment}:{body.service}",
         payload={"environment": body.environment, "service": body.service},
     )
+    await session.commit()
     return MessageResponse(message="credentials stored")
 
 
-@router.post(
-    "/credentials/{environment}/binance/test", response_model=ConnectionTestOut
-)
+@router.post("/credentials/{environment}/binance/test", response_model=ConnectionTestOut)
 async def test_binance_connection(
     environment: str, _current: CurrentUserDep, session: SessionDep
 ) -> ConnectionTestOut:
@@ -106,6 +133,7 @@ class SmsConfigIn(BaseModel):
     api_key: str = Field(min_length=1, max_length=256)
     sender_id: str = Field(min_length=1, max_length=32)
     phone: str = Field(min_length=9, max_length=15)
+    current_password: str = Field(min_length=1, max_length=256)
 
 
 class SmsStatusOut(BaseModel):
@@ -134,15 +162,33 @@ async def sms_status(_current: CurrentUserDep, session: SessionDep) -> SmsStatus
 async def save_sms(
     body: SmsConfigIn, current: CurrentUserDep, session: SessionDep
 ) -> MessageResponse:
+    try:
+        await auth_service.require_password_reauth(
+            session,
+            current.user,
+            body.current_password,
+            action="replace_notify_credentials",
+        )
+    except auth_service.AuthError as exc:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+    except auth_service.RateLimitedError as exc:
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, detail=str(exc)) from exc
     await notify_svc.save_notify_config(
-        session, user_id=body.user_id, api_key=body.api_key,
-        sender_id=body.sender_id, phone=body.phone,
+        session,
+        user_id=body.user_id,
+        api_key=body.api_key,
+        sender_id=body.sender_id,
+        phone=body.phone,
     )
     await record_event(
-        session, level="INFO", category="security",
-        message="notify.lk SMS credentials updated", ref="sms_config",
+        session,
+        level="INFO",
+        category="security",
+        message="notify.lk SMS credentials updated",
+        ref="sms_config",
         payload={"sender_id": body.sender_id},
     )
+    await session.commit()
     return MessageResponse(message="SMS credentials stored")
 
 
@@ -152,6 +198,17 @@ async def toggle_sms(
 ) -> MessageResponse:
     row = await get_settings_row(session)
     row.sms_enabled = body.enabled
+    await record_event(
+        session,
+        level="INFO",
+        category="security",
+        message=f"SMS alerts {'enabled' if body.enabled else 'disabled'}",
+        ref="sms_alerts_toggle",
+        payload={"enabled": body.enabled},
+    )
+    # Security-affecting state must be durable before the 200 response so an
+    # immediate read cannot observe the previous value.
+    await session.commit()
     return MessageResponse(message=f"SMS {'enabled' if body.enabled else 'disabled'}")
 
 
@@ -169,3 +226,60 @@ async def test_sms(_current: CurrentUserDep, session: SessionDep) -> ConnectionT
     finally:
         await gw.close()
     return ConnectionTestOut(ok=result.ok, detail=result.detail)
+
+
+# --- Two-factor authentication (SMS) ---
+
+
+@router.get("/security", response_model=SecurityStatusOut)
+async def security_status(current: CurrentUserDep, _session: SessionDep) -> SecurityStatusOut:
+    """Return the owner's 2FA state (masked phone hint only)."""
+    st = auth_service.security_status(current.user)
+    return SecurityStatusOut(twofa_enabled=bool(st["twofa_enabled"]), phone_hint=st["phone_hint"])
+
+
+@router.post("/security/2fa/start", response_model=SecurityChangeStartOut)
+async def security_change_start(
+    body: SecurityChangeStart, current: CurrentUserDep, session: SessionDep
+) -> SecurityChangeStartOut:
+    """Re-auth with the password and send an OTP to complete a 2FA change."""
+    try:
+        challenge = await auth_service.start_security_change(
+            session,
+            current.user,
+            action=body.action,
+            password=body.password,
+            new_phone=body.new_phone,
+        )
+    except auth_service.AuthError as exc:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+    except auth_service.RateLimitedError as exc:
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, detail=str(exc)) from exc
+    except auth_service.TwoFactorError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    hint = None
+    if body.new_phone:
+        from app.services.otp import normalize_phone, phone_hint
+
+        hint = phone_hint(normalize_phone(body.new_phone))
+    return SecurityChangeStartOut(challenge_id=challenge.id, phone_hint=hint)
+
+
+@router.post("/security/2fa/confirm", response_model=MessageResponse)
+async def security_change_confirm(
+    body: SecurityChangeConfirm, current: CurrentUserDep, session: SessionDep
+) -> MessageResponse:
+    """Verify the OTP and commit the pending 2FA change."""
+    try:
+        message = await auth_service.confirm_security_change(
+            session,
+            current.user,
+            body.challenge_id,
+            body.code,
+            current_sid=current.sid,
+        )
+    except auth_service.AuthError as exc:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+    except auth_service.TwoFactorError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return MessageResponse(message=message)

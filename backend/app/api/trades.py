@@ -137,20 +137,46 @@ async def export_csv(
     search: Annotated[str | None, Query()] = None,
 ) -> StreamingResponse:
     rows = (
-        await session.execute(_filtered_query(side, environment, strategy, month, search))
-    ).scalars().all()
+        (await session.execute(_filtered_query(side, environment, strategy, month, search)))
+        .scalars()
+        .all()
+    )
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow(
-        ["id", "opened_at", "closed_at", "side", "environment", "strategy",
-         "entry_px", "exit_px", "qty", "fees", "realized_pnl", "r_multiple", "exit_reason"]
+        [
+            "id",
+            "opened_at",
+            "closed_at",
+            "side",
+            "environment",
+            "strategy",
+            "entry_px",
+            "exit_px",
+            "qty",
+            "fees",
+            "realized_pnl",
+            "r_multiple",
+            "exit_reason",
+        ]
     )
     for t in rows:
         w.writerow(
-            [t.id, t.opened_at.isoformat(), t.closed_at.isoformat() if t.closed_at else "",
-             t.side, t.environment, t.strategy, t.entry_px, t.exit_px or "", t.qty, t.fees,
-             t.realized_pnl if t.realized_pnl is not None else "",
-             t.r_multiple if t.r_multiple is not None else "", t.exit_reason or ""]
+            [
+                t.id,
+                t.opened_at.isoformat(),
+                t.closed_at.isoformat() if t.closed_at else "",
+                t.side,
+                t.environment,
+                t.strategy,
+                t.entry_px,
+                t.exit_px or "",
+                t.qty,
+                t.fees,
+                t.realized_pnl if t.realized_pnl is not None else "",
+                t.r_multiple if t.r_multiple is not None else "",
+                t.exit_reason or "",
+            ]
         )
     buf.seek(0)
     return StreamingResponse(
@@ -168,8 +194,10 @@ async def trade_detail(
     if t is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="trade not found")
     orders = (
-        await session.execute(select(Order).where(Order.trade_id == trade_id).order_by(Order.id))
-    ).scalars().all()
+        (await session.execute(select(Order).where(Order.trade_id == trade_id).order_by(Order.id)))
+        .scalars()
+        .all()
+    )
     base = _to_out(t)
     return TradeDetailOut(
         **base.model_dump(),

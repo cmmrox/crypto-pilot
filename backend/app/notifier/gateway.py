@@ -60,10 +60,7 @@ class NotifyLkGateway:
             body: object = {"raw": resp.text}
             if resp.headers.get("content-type", "").startswith("application/json"):
                 body = resp.json()
-            status_ok = (
-                isinstance(body, dict)
-                and str(body.get("status", "")).lower() == "success"
-            )
+            status_ok = isinstance(body, dict) and str(body.get("status", "")).lower() == "success"
             if resp.status_code == 200 and status_ok:
                 return SmsResult(True, "delivered")
             # Provider bodies may reflect submitted form fields (including the

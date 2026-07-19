@@ -6,7 +6,12 @@ from decimal import Decimal
 
 import httpx
 import pytest
-from app.execution.binance_client import BinanceClient, BinanceError, Kline, sign_query
+from app.execution.binance_client import (
+    BinanceClient,
+    BinanceError,
+    Kline,
+    sign_query,
+)
 
 
 def test_sign_query_matches_binance_reference_vector() -> None:
@@ -55,8 +60,18 @@ def test_kline_from_rest_uses_decimal() -> None:
 
 def test_kline_from_rest_marks_still_forming_row_open() -> None:
     row = [
-        2000, "1", "2", "0.5", "1.5", "10", 5999,
-        "0", 1, "0", "0", "0",
+        2000,
+        "1",
+        "2",
+        "0.5",
+        "1.5",
+        "10",
+        5999,
+        "0",
+        1,
+        "0",
+        "0",
+        "0",
     ]
     assert not Kline.from_rest(row, now_ms=5000).is_closed
     assert Kline.from_rest(row, now_ms=6000).is_closed
@@ -82,6 +97,51 @@ async def test_signed_request_requires_credentials() -> None:
 
 
 @pytest.mark.asyncio
+async def test_public_mark_price_and_ticker_are_parsed_as_decimal() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/premiumIndex"):
+            return httpx.Response(
+                200,
+                json={
+                    "symbol": "BTCUSDT",
+                    "markPrice": "117742.84233695",
+                    "time": 1784450809123,
+                },
+            )
+        return httpx.Response(
+            200,
+            json={"symbol": "BTCUSDT", "priceChangePercent": "1.27"},
+        )
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+        base_url="https://example.invalid",
+    ) as raw:
+        client = BinanceClient("DEMO", client=raw)
+        mark = await client.get_mark_price("BTCUSDT")
+        ticker = await client.get_ticker_24h("BTCUSDT")
+
+    assert mark.price == Decimal("117742.84233695")
+    assert mark.observed_at_ms == 1784450809123
+    assert ticker.price_change_percent == Decimal("1.27")
+
+
+@pytest.mark.asyncio
+async def test_public_market_response_rejects_missing_required_fields() -> None:
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda _request: httpx.Response(200, json={"symbol": "BTCUSDT"})
+        ),
+        base_url="https://example.invalid",
+    ) as raw:
+        client = BinanceClient("DEMO", client=raw)
+        with pytest.raises(BinanceError, match="missing positive price/time"):
+            await client.get_mark_price("BTCUSDT")
+        with pytest.raises(BinanceError, match="missing priceChangePercent"):
+            await client.get_ticker_24h("BTCUSDT")
+
+
+@pytest.mark.asyncio
 async def test_signed_mutation_transport_failure_is_not_blindly_retried() -> None:
     attempts = 0
 
@@ -91,9 +151,7 @@ async def test_signed_mutation_transport_failure_is_not_blindly_retried() -> Non
         raise httpx.ConnectError("connection dropped", request=request)
 
     transport = httpx.MockTransport(fail)
-    async with httpx.AsyncClient(
-        transport=transport, base_url="https://example.invalid"
-    ) as raw:
+    async with httpx.AsyncClient(transport=transport, base_url="https://example.invalid") as raw:
         client = BinanceClient(
             "DEMO",
             api_key="key",

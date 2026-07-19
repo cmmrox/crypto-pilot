@@ -61,8 +61,7 @@ async def switch_environment(
         )
     runtime = get_settings()
     if body.environment == "LIVE" and not (
-        runtime.live_trading_approved
-        and runtime.live_key_permissions_verified
+        runtime.live_trading_approved and runtime.live_key_permissions_verified
     ):
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
@@ -74,9 +73,12 @@ async def switch_environment(
     old = row.active_environment
     row.active_environment = body.environment
     await record_event(
-        session, level="WARN" if body.environment == "LIVE" else "INFO", category="security",
+        session,
+        level="WARN" if body.environment == "LIVE" else "INFO",
+        category="security",
         message=f"Environment switched {old} → {body.environment}",
-        ref="env_switch", payload={"from": old, "to": body.environment, "by": current.user.email},
+        ref="env_switch",
+        payload={"from": old, "to": body.environment, "by": current.user.email},
     )
     await session.commit()
     return MessageOut(message=f"environment set to {body.environment}")
@@ -93,9 +95,12 @@ async def switch_strategy(
     old = row.active_strategy
     row.active_strategy = body.name
     await record_event(
-        session, level="INFO", category="strategy",
+        session,
+        level="INFO",
+        category="strategy",
         message=f"Active strategy switched {old} → {body.name}",
-        ref="strategy_switch", payload={"from": old, "to": body.name, "by": current.user.email},
+        ref="strategy_switch",
+        payload={"from": old, "to": body.name, "by": current.user.email},
     )
     await session.commit()
     return MessageOut(message=f"active strategy set to {body.name}")

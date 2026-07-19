@@ -161,9 +161,7 @@ async def test_parallel_resends_share_atomic_hourly_cap(db_session: object) -> N
     challenges = []
     for _ in range(otp_service.MAX_SENDS_PER_HOUR - 1):
         challenges.append(
-            await otp_service.start_challenge(
-                db_session, user=user, purpose="login", phone=PHONE
-            )
+            await otp_service.start_challenge(db_session, user=user, purpose="login", phone=PHONE)
         )
     old = dt.datetime.now(dt.UTC) - otp_service.RESEND_COOLDOWN - dt.timedelta(seconds=1)
     for challenge in challenges[:2]:

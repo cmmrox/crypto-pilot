@@ -14,9 +14,13 @@ from tests.fakes import FakeSmsGateway
 @pytest.mark.asyncio
 async def test_successful_send_marks_delivered(db_session: AsyncSession) -> None:
     gw = FakeSmsGateway()
-    status = await notify(db_session, gw, kind="bot_started", to="94711234567",
-                          payload={"environment": "DEMO", "strategy": "trend_rider_v6",
-                                   "equity": "5000"})
+    status = await notify(
+        db_session,
+        gw,
+        kind="bot_started",
+        to="94711234567",
+        payload={"environment": "DEMO", "strategy": "trend_rider_v6", "equity": "5000"},
+    )
     await db_session.commit()
     assert status == "delivered"
     assert len(gw.sent) == 1
@@ -35,8 +39,9 @@ async def test_retry_then_recover(db_session: AsyncSession) -> None:
 @pytest.mark.asyncio
 async def test_exhausted_retries_never_raise(db_session: AsyncSession) -> None:
     gw = FakeSmsGateway(always_fail=True)
-    status = await notify(db_session, gw, kind="error", to="94711234567",
-                          payload={"error": "order rejected"})
+    status = await notify(
+        db_session, gw, kind="error", to="94711234567", payload={"error": "order rejected"}
+    )
     await db_session.commit()
     assert status == "failed"
     assert gw.attempts == 3  # 3 attempts then give up

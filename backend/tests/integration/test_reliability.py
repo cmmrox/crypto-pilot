@@ -13,7 +13,16 @@ async def test_deep_health_shape(app_client: httpx.AsyncClient) -> None:
     resp = await app_client.get("/health/deep")
     assert resp.status_code == 200
     body = resp.json()
-    for key in ("status", "database", "ingest_overdue", "scheduler_alive", "version"):
+    for key in (
+        "status",
+        "database",
+        "worker_heartbeat_at",
+        "worker_heartbeat_age_seconds",
+        "worker_healthy",
+        "ingest_overdue",
+        "scheduler_alive",
+        "version",
+    ):
         assert key in body
 
 

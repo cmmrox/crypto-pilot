@@ -97,9 +97,7 @@ async def _sends_last_hour(session: AsyncSession, user_id: int) -> int:
     return int((await session.execute(stmt)).scalar_one())
 
 
-async def _deliver(
-    session: AsyncSession, phone: str, code: str, *, challenge_id: int
-) -> SmsResult:
+async def _deliver(session: AsyncSession, phone: str, code: str, *, challenge_id: int) -> SmsResult:
     """Send the code via notify.lk, independent of the alerts toggle."""
     settings = get_settings()
     if settings.otp_test_mode:
@@ -187,9 +185,7 @@ async def resend(
     # Lock the owner before the challenge. start_challenge uses the same owner
     # lock, making the hourly cap atomic across parallel challenges/resends.
     user = (
-        await session.execute(
-            select(User).where(User.id == user_id).with_for_update()
-        )
+        await session.execute(select(User).where(User.id == user_id).with_for_update())
     ).scalar_one_or_none()
     if user is None:
         raise OtpExpired("verification challenge not found")
@@ -273,9 +269,7 @@ async def verify(
 async def _load_active(session: AsyncSession, challenge_id: int) -> OtpChallenge:
     challenge = (
         await session.execute(
-            select(OtpChallenge)
-            .where(OtpChallenge.id == challenge_id)
-            .with_for_update()
+            select(OtpChallenge).where(OtpChallenge.id == challenge_id).with_for_update()
         )
     ).scalar_one_or_none()
     if challenge is None:

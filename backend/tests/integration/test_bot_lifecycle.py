@@ -28,7 +28,8 @@ def _bull_candles(n: int = 300) -> list[Candle]:
         price *= 1.004
         out.append(
             Candle(
-                symbol="BTCUSDT", interval="4h",
+                symbol="BTCUSDT",
+                interval="4h",
                 open_time=base + dt.timedelta(hours=4 * i),
                 open=Decimal(str(round(price * 0.999, 2))),
                 high=Decimal(str(round(price * 1.004, 2))),
@@ -158,13 +159,9 @@ async def test_every_close_reconciliation_blocks_new_risk(
     om = OrderManager(ex)
     await svc.start(db_session, ex, by="o")
     await db_session.commit()
-    await ex.place_market(
-        "BTCUSDT", "BUY", D("0.05"), client_order_id="out-of-band"
-    )
+    await ex.place_market("BTCUSDT", "BUY", D("0.05"), client_order_id="out-of-band")
 
-    actions = await svc.evaluate_once(
-        db_session, ex, om, candles=_bull_candles()
-    )
+    actions = await svc.evaluate_once(db_session, ex, om, candles=_bull_candles())
     await db_session.commit()
 
     assert actions == ["safe_mode"]

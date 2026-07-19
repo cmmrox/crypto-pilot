@@ -32,10 +32,7 @@ def upgrade() -> None:
 def downgrade() -> None:
     bind = op.get_bind()
     encrypted = bind.execute(
-        sa.text(
-            "SELECT count(*) FROM api_credentials "
-            "WHERE api_key_encrypted IS NOT NULL"
-        )
+        sa.text("SELECT count(*) FROM api_credentials WHERE api_key_encrypted IS NOT NULL")
     ).scalar_one()
     if encrypted:
         raise RuntimeError(

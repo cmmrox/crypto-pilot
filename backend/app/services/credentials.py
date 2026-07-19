@@ -69,9 +69,7 @@ async def migrate_plaintext_keys(session: AsyncSession) -> int:
     """
     rows = (
         await session.execute(
-            select(ApiCredential)
-            .where(ApiCredential.api_key.is_not(None))
-            .with_for_update()
+            select(ApiCredential).where(ApiCredential.api_key.is_not(None)).with_for_update()
         )
     ).scalars()
     master = get_settings().master_key
@@ -119,9 +117,7 @@ async def get_decrypted(
     return api_key, decrypt(row.secret_encrypted, get_settings().master_key)
 
 
-async def get_status(
-    session: AsyncSession, *, environment: str, service: str
-) -> CredentialStatus:
+async def get_status(session: AsyncSession, *, environment: str, service: str) -> CredentialStatus:
     """Return whether a credential is configured plus a masked key hint."""
     row = (
         await session.execute(

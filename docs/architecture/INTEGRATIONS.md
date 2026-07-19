@@ -18,7 +18,12 @@ row (BSD FR-01). Docs: [developers.binance.com — USDS-M futures](https://devel
 
 - **Auth:** HMAC-SHA256 signature over query/body + `timestamp` (ms) + optional `recvWindow` (default 5000 ms). Keys are case-sensitive; restrict to TRADE + USER_DATA (read).
 - **Rate limits:** three buckets — `RAW_REQUEST`, `REQUEST_WEIGHT`, `ORDER` (per account). HTTP 429 = back off (exponential + jitter); HTTP 418 = IP ban escalating 2 min → 3 days. Never retry-loop a 429 tightly.
-- **Market data:** 4h klines via REST backfill + kline WebSocket stream; act only when the kline `closed` flag is true (BSD FR-03). Cache candles in PostgreSQL.
+- **Market data:** 4h klines via REST backfill; act only on rows whose kline is closed
+  (BSD FR-03) and cache them in PostgreSQL. The owner command center also reads the
+  public USD-M mark price from `GET /fapi/v1/premiumIndex?symbol=BTCUSDT` and rolling
+  24-hour change from `GET /fapi/v1/ticker/24hr?symbol=BTCUSDT`. These observations
+  are display-only, carry freshness timestamps, require no account credential, and
+  never enter the strategy decision path.
 - **Orders:** long engine — MARKET entry, STOP_MARKET reduce-only protective stop, LIMIT reduce-only TP1; short sleeve — MARKET entry/resize, **no price stop by validated design**. Idempotent `newClientOrderId` on every order (`CP-<trade>-<seq>`), lot-size/min-notional filters respected via `exchangeInfo`.
 - **Account:** one-way position mode, isolated margin, explicit leverage (cap 3×). Margin error `-2019` → pause bot + SMS.
 - **Reconciliation:** on every start and every 4h close compare expected vs actual position/orders; mismatch → safe mode + SMS (BSD §8).

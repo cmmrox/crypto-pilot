@@ -37,15 +37,11 @@ def test_order_response_requires_matching_identity_and_valid_status() -> None:
         "executedQty": "0.01",
         "avgPrice": "65000",
     }
-    result = BinanceExchange._to_result(
-        valid, expected_client_order_id="CP-expected"
-    )
+    result = BinanceExchange._to_result(valid, expected_client_order_id="CP-expected")
     assert result.client_order_id == "CP-expected"
 
     with pytest.raises(BinanceError, match="identity mismatch"):
-        BinanceExchange._to_result(
-            valid, expected_client_order_id="CP-other"
-        )
+        BinanceExchange._to_result(valid, expected_client_order_id="CP-other")
 
     invalid = {**valid, "status": "SURPRISE"}
     with pytest.raises(BinanceError, match="invalid status"):

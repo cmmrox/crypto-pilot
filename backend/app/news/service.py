@@ -53,10 +53,16 @@ async def refresh_briefing(
         row = existing
     await session.flush()
     await record_event(
-        session, level="INFO", category="news",
+        session,
+        level="INFO",
+        category="news",
         message=f"Daily briefing published from {len(items)} source items",
-        ref="briefing", payload={"model": briefing.model, "sentiment": briefing.sentiment,
-                                 "bullets": len(briefing.bullets)},
+        ref="briefing",
+        payload={
+            "model": briefing.model,
+            "sentiment": briefing.sentiment,
+            "bullets": len(briefing.bullets),
+        },
     )
     return row
 

@@ -63,8 +63,7 @@ async def monthly_ledger(_current: CurrentUserDep, session: SessionDep) -> list[
     rows = (await session.execute(stmt)).all()
 
     marks = {
-        m.month: m.amount
-        for m in (await session.execute(select(WithdrawalMark))).scalars().all()
+        m.month: m.amount for m in (await session.execute(select(WithdrawalMark))).scalars().all()
     }
 
     out: list[MonthRow] = []
@@ -73,9 +72,7 @@ async def monthly_ledger(_current: CurrentUserDep, session: SessionDep) -> list[
         fees_d = Decimal(str(fees))
         net = realized_d - fees_d
         withdrawn = marks.get(m, Decimal("0"))
-        withdrawable = (
-            max(Decimal("0"), net) * WITHDRAWAL_RATE if withdrawn == 0 else Decimal("0")
-        )
+        withdrawable = max(Decimal("0"), net) * WITHDRAWAL_RATE if withdrawn == 0 else Decimal("0")
         out.append(
             MonthRow(
                 month=m,
@@ -98,9 +95,7 @@ async def mark_withdrawn(
 ) -> MessageOut:
     """Record a manual withdrawal for a month (idempotent per month; no funds move)."""
     existing = (
-        await session.execute(
-            select(WithdrawalMark).where(WithdrawalMark.month == body.month)
-        )
+        await session.execute(select(WithdrawalMark).where(WithdrawalMark.month == body.month))
     ).scalar_one_or_none()
     if existing is not None:
         return MessageOut(message="already marked")

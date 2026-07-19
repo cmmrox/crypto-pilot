@@ -60,9 +60,7 @@ class BodySizeLimitMiddleware:
             await self.app(scope, receive, send)
             return
 
-        headers = {
-            key.lower(): value for key, value in scope.get("headers", [])
-        }
+        headers = {key.lower(): value for key, value in scope.get("headers", [])}
         raw_length = headers.get(b"content-length")
         if raw_length is not None:
             try:
@@ -100,7 +98,5 @@ class BodySizeLimitMiddleware:
 
     @staticmethod
     async def _reject(scope: Any, receive: Any, send: Any) -> None:
-        response = JSONResponse(
-            {"detail": "request body too large"}, status_code=413
-        )
+        response = JSONResponse({"detail": "request body too large"}, status_code=413)
         await response(scope, receive, send)

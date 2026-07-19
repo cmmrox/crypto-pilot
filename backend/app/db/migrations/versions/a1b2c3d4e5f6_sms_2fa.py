@@ -30,16 +30,9 @@ def upgrade() -> None:
     op.add_column("users", sa.Column("phone_encrypted", sa.Text(), nullable=True))
     op.add_column(
         "users",
-        sa.Column(
-            "twofa_enabled", sa.Boolean(), nullable=False, server_default=sa.false()
-        ),
+        sa.Column("twofa_enabled", sa.Boolean(), nullable=False, server_default=sa.false()),
     )
-    op.execute(
-        sa.text(
-            "UPDATE users SET twofa_enabled = totp_enabled "
-            "WHERE totp_enabled IS TRUE"
-        )
-    )
+    op.execute(sa.text("UPDATE users SET twofa_enabled = totp_enabled WHERE totp_enabled IS TRUE"))
     op.drop_column("users", "totp_secret_encrypted")
     op.drop_column("users", "totp_enabled")
 

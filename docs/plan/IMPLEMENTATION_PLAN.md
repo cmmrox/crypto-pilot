@@ -170,6 +170,28 @@ assertions via mocked mark events; restart-resume drill scripted.
 **Exit:** bot runs unattended on DEMO through ≥2 real 4h closes with correct decisions,
 snapshots, and live UI.
 
+### Approved command-center enhancement — 2026-07-19
+
+The owner selected `docs/design/dashboard-command-center-reference.png` as the
+production Overview direction. The full implementation and merge gate are defined in
+`docs/plan/DASHBOARD_COMMAND_CENTER_IMPLEMENTATION_PLAN.md`.
+
+Additional acceptance cases:
+
+- **QA-5.05:** a fresh five-second worker pulse proves background liveness; stale or
+  missing pulses degrade honestly.
+- **QA-5.06:** BTCUSDT mark price, source time, 24h change, next UTC close, and
+  countdown come from live/persisted truth.
+- **QA-5.07:** the read-only strategy-watch projection explains long regime, pullback
+  resume, and deep-bear short conditions without predicting a trade.
+- **QA-5.08:** today's briefing and recent owner activity appear on Overview while
+  news remains isolated from trading.
+- **QA-5.09:** failed refreshes and unavailable market/account sources never leave
+  frozen values styled as live.
+- **QA-5.10:** the command center matches the selected desktop hierarchy and has no
+  horizontal overflow at 390px.
+- **QA-5.11:** existing guarded lifecycle controls remain server-confirmed and green.
+
 ---
 
 ## Stage 6 — Trades, Monthly & Events (audit surfaces)

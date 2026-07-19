@@ -39,9 +39,7 @@ class FakeExchange:
 
     async def get_account(self) -> AccountState:
         upnl = (self.mark - self._entry) * self._pos if self._pos != 0 else Decimal("0")
-        positions = (
-            [Position("BTCUSDT", self._pos, self._entry)] if self._pos != 0 else []
-        )
+        positions = [Position("BTCUSDT", self._pos, self._entry)] if self._pos != 0 else []
         return AccountState(self._balance, self._balance, upnl, positions)
 
     async def get_position(self, symbol: str) -> Position:

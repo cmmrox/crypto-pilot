@@ -251,9 +251,7 @@ async def test_plaintext_key_migration_clears_every_legacy_slot(
         await session.commit()
         rows = (
             await session.execute(
-                select(ApiCredential).order_by(
-                    ApiCredential.environment, ApiCredential.service
-                )
+                select(ApiCredential).order_by(ApiCredential.environment, ApiCredential.service)
             )
         ).scalars()
         values = list(rows)

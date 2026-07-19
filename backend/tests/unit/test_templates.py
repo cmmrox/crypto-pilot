@@ -7,8 +7,16 @@ from app.notifier.templates import render
 
 
 def test_trade_opened_renders_values() -> None:
-    msg = render("trade_opened", {"side": "LONG", "qty": "0.01", "price": "65000",
-                                  "risk_context": "Stop 63k", "environment": "DEMO"})
+    msg = render(
+        "trade_opened",
+        {
+            "side": "LONG",
+            "qty": "0.01",
+            "price": "65000",
+            "risk_context": "Stop 63k",
+            "environment": "DEMO",
+        },
+    )
     assert "LONG opened 0.01 BTC @ 65000" in msg
     assert "(DEMO)" in msg
 

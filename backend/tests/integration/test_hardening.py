@@ -27,9 +27,17 @@ async def test_authz_sweep_protected_routes_reject_anonymous(
     app_client: httpx.AsyncClient, owner: str
 ) -> None:
     protected_get = [
-        "/api/auth/me", "/api/events", "/api/market/status", "/api/trades",
-        "/api/monthly", "/api/bot/status", "/api/overview", "/api/news/latest",
-        "/api/strategies", "/api/settings/sms", "/api/settings/codex/status",
+        "/api/auth/me",
+        "/api/events",
+        "/api/market/status",
+        "/api/trades",
+        "/api/monthly",
+        "/api/bot/status",
+        "/api/overview",
+        "/api/news/latest",
+        "/api/strategies",
+        "/api/settings/sms",
+        "/api/settings/codex/status",
         "/api/settings/security",
     ]
     for path in protected_get:

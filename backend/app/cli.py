@@ -37,9 +37,7 @@ def _normalize_phone(phone: str) -> str:
         raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
-async def _record_security(
-    session: AsyncSession, message: str, ref: str, email: str
-) -> None:
+async def _record_security(session: AsyncSession, message: str, ref: str, email: str) -> None:
     session.add(
         Event(
             ts=dt.datetime.now(dt.UTC),
@@ -71,9 +69,7 @@ async def _create_owner(email: str, password: str, phone: str | None, force: boo
         if existing is not None and not force:
             print(f"Owner {email} already exists (use --force to reset).", file=sys.stderr)
             return 1
-        enc_phone = (
-            encrypt(_normalize_phone(phone), get_settings().master_key) if phone else None
-        )
+        enc_phone = encrypt(_normalize_phone(phone), get_settings().master_key) if phone else None
         twofa = phone is not None
         if existing is None:
             owner = User(
@@ -127,9 +123,7 @@ async def _set_phone(email: str, phone: str) -> int:
                 file=sys.stderr,
             )
             return 1
-        user = (
-            await session.execute(select(User).where(User.email == email))
-        ).scalar_one_or_none()
+        user = (await session.execute(select(User).where(User.email == email))).scalar_one_or_none()
         if user is None:
             print(f"No owner with email {email}.", file=sys.stderr)
             return 1
@@ -156,9 +150,7 @@ async def _set_phone(email: str, phone: str) -> int:
 
 async def _reset_2fa(email: str) -> int:
     async with get_sessionmaker()() as session:
-        user = (
-            await session.execute(select(User).where(User.email == email))
-        ).scalar_one_or_none()
+        user = (await session.execute(select(User).where(User.email == email))).scalar_one_or_none()
         if user is None:
             print(f"No owner with email {email}.", file=sys.stderr)
             return 1
@@ -208,9 +200,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.command == "create-owner":
-        return asyncio.run(
-            _create_owner(args.email, args.password, args.phone, args.force)
-        )
+        return asyncio.run(_create_owner(args.email, args.password, args.phone, args.force))
     if args.command == "set-phone":
         return asyncio.run(_set_phone(args.email, args.phone))
     if args.command == "reset-2fa":

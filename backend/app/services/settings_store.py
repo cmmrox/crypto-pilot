@@ -16,9 +16,7 @@ from app.db.models import AppSettings
 SINGLETON_ID = 1
 
 
-async def get_settings_row(
-    session: AsyncSession, *, for_update: bool = False
-) -> AppSettings:
+async def get_settings_row(session: AsyncSession, *, for_update: bool = False) -> AppSettings:
     """Return the singleton settings row, creating it with defaults if absent."""
     stmt = select(AppSettings).order_by(AppSettings.id).limit(1)
     if for_update:

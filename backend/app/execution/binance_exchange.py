@@ -42,9 +42,7 @@ class BinanceExchange:
         )
 
     async def get_position(self, symbol: str) -> Position:
-        data = await self._c.signed_request(
-            "GET", "/fapi/v2/positionRisk", {"symbol": symbol}
-        )
+        data = await self._c.signed_request("GET", "/fapi/v2/positionRisk", {"symbol": symbol})
         if not isinstance(data, list) or len(data) != 1:
             raise BinanceError(
                 f"unexpected position response for {symbol}: expected exactly one row"
@@ -156,10 +154,7 @@ class BinanceExchange:
         status = str(o.get("status", ""))
         if not client_order_id or not exchange_order_id:
             raise BinanceError("order response missing identity")
-        if (
-            expected_client_order_id is not None
-            and client_order_id != expected_client_order_id
-        ):
+        if expected_client_order_id is not None and client_order_id != expected_client_order_id:
             raise BinanceError("order response client identity mismatch")
         if status not in {
             "NEW",

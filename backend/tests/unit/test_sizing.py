@@ -114,20 +114,34 @@ def test_size_short_vol_scaled() -> None:
 def test_size_short_high_vol_shrinks() -> None:
     """A volatility spike shrinks the short (the sleeve's core risk control)."""
     calm = size_short(
-        equity=D("10000"), weight_pct=D("75"), vol_target=D("0.40"),
-        realized_vol=D("0.40"), price=D("65000"), leverage_cap=D("3"), filters=FILTERS,
+        equity=D("10000"),
+        weight_pct=D("75"),
+        vol_target=D("0.40"),
+        realized_vol=D("0.40"),
+        price=D("65000"),
+        leverage_cap=D("3"),
+        filters=FILTERS,
     )
     violent = size_short(
-        equity=D("10000"), weight_pct=D("75"), vol_target=D("0.40"),
-        realized_vol=D("1.20"), price=D("65000"), leverage_cap=D("3"), filters=FILTERS,
+        equity=D("10000"),
+        weight_pct=D("75"),
+        vol_target=D("0.40"),
+        realized_vol=D("1.20"),
+        price=D("65000"),
+        leverage_cap=D("3"),
+        filters=FILTERS,
     )
     assert violent.qty < calm.qty  # crash → smaller short automatically
 
 
 def test_all_money_is_decimal() -> None:
     r = size_long(
-        equity=D("10000"), risk_pct=D("2"), stop_distance=D("2000"),
-        price=D("65000"), leverage_cap=D("3"), filters=FILTERS,
+        equity=D("10000"),
+        risk_pct=D("2"),
+        stop_distance=D("2000"),
+        price=D("65000"),
+        leverage_cap=D("3"),
+        filters=FILTERS,
     )
     assert isinstance(r.qty, Decimal)
     assert isinstance(r.notional, Decimal)

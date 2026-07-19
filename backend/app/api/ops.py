@@ -60,9 +60,7 @@ async def self_check(current: CurrentUserDep, session: SessionDep) -> SelfCheckR
     try:
         async with exec_svc.execution_context(session) as ctx:
             if ctx.environment != "DEMO":
-                raise HTTPException(
-                    status.HTTP_403_FORBIDDEN, detail="self-check is DEMO-only"
-                )
+                raise HTTPException(status.HTTP_403_FORBIDDEN, detail="self-check is DEMO-only")
             filters = await ctx.exchange.get_filters(SYMBOL)
             price = (await ctx.exchange.get_position(SYMBOL)).entry_price
             if price <= 0:
@@ -81,20 +79,33 @@ async def self_check(current: CurrentUserDep, session: SessionDep) -> SelfCheckR
             flattened = False
             if pos.qty != 0:
                 await ctx.exchange.place_market(
-                    SYMBOL, "SELL", abs(pos.qty),
-                    client_order_id=new_client_order_id("SELFX"), reduce_only=True,
+                    SYMBOL,
+                    "SELL",
+                    abs(pos.qty),
+                    client_order_id=new_client_order_id("SELFX"),
+                    reduce_only=True,
                 )
                 flattened = abs((await ctx.exchange.get_position(SYMBOL)).qty) <= filters.step_size
             await record_event(
-                session, level="INFO", category="system",
+                session,
+                level="INFO",
+                category="system",
                 message="DEMO execution self-check round-trip completed",
                 ref="self_check",
-                payload={"qty": str(qty), "entry": str(entry.avg_price),
-                         "reconciled": rec.matched, "flattened": flattened},
+                payload={
+                    "qty": str(qty),
+                    "entry": str(entry.avg_price),
+                    "reconciled": rec.matched,
+                    "flattened": flattened,
+                },
             )
             return SelfCheckResult(
-                ok=True, filled_qty=str(entry.filled_qty), entry_price=str(entry.avg_price),
-                reconciled=rec.matched, flattened=flattened, detail="round-trip ok",
+                ok=True,
+                filled_qty=str(entry.filled_qty),
+                entry_price=str(entry.avg_price),
+                reconciled=rec.matched,
+                flattened=flattened,
+                detail="round-trip ok",
             )
     except exec_svc.NotConfiguredError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc

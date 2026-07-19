@@ -79,9 +79,7 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _test_otp_only_in_test_environment(self) -> Settings:
-        if (
-            self.otp_test_mode or self.otp_test_disable_throttle
-        ) and self.environment != "test":
+        if (self.otp_test_mode or self.otp_test_disable_throttle) and self.environment != "test":
             raise ValueError("OTP test controls are permitted only when CP_ENVIRONMENT=test")
         return self
 

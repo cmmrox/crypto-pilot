@@ -57,7 +57,10 @@ class OrderManager:
 
         try:
             stop = await self._ex.place_stop_market(
-                self._symbol, "SELL", sizing.qty, stop_price,
+                self._symbol,
+                "SELL",
+                sizing.qty,
+                stop_price,
                 client_order_id=new_client_order_id("CPS"),
             )
         except Exception as stop_error:
@@ -77,22 +80,33 @@ class OrderManager:
             raise RuntimeError(
                 "protective stop failed; long was emergency-flattened"
             ) from stop_error
-        await self._persist_order(session, stop, trade.id, "STOP_MARKET", reduce_only=True,
-                                  stop_price=stop_price)
+        await self._persist_order(
+            session, stop, trade.id, "STOP_MARKET", reduce_only=True, stop_price=stop_price
+        )
 
         tp_qty = _round_to(sizing.qty * tp1_fraction, sizing.qty)
         tp1 = await self._ex.place_take_profit(
-            self._symbol, "SELL", tp_qty, tp1_price,
+            self._symbol,
+            "SELL",
+            tp_qty,
+            tp1_price,
             client_order_id=new_client_order_id("CPT"),
         )
-        await self._persist_order(session, tp1, trade.id, "LIMIT", reduce_only=True,
-                                  price=tp1_price)
+        await self._persist_order(
+            session, tp1, trade.id, "LIMIT", reduce_only=True, price=tp1_price
+        )
         await record_event(
-            session, level="INFO", category="trade",
+            session,
+            level="INFO",
+            category="trade",
             message=f"LONG opened {sizing.qty} {self._symbol} @ {entry.avg_price}",
             ref=f"trade:{trade.id}",
-            payload={"qty": str(sizing.qty), "entry": str(entry.avg_price),
-                     "stop": str(stop_price), "tp1": str(tp1_price)},
+            payload={
+                "qty": str(sizing.qty),
+                "entry": str(entry.avg_price),
+                "stop": str(stop_price),
+                "tp1": str(tp1_price),
+            },
         )
         from app.services.notify_config import notify_event
 
@@ -124,19 +138,29 @@ class OrderManager:
         trade = await self._persist_trade(session, "SHORT", entry, sizing.qty, strategy, bot_run_id)
         await self._persist_order(session, entry, trade.id, "MARKET", reduce_only=False)
         await record_event(
-            session, level="INFO", category="trade",
+            session,
+            level="INFO",
+            category="trade",
             message=f"SHORT sleeve opened {sizing.qty} {self._symbol} @ {entry.avg_price} "
             f"({sizing.leverage:.2f}x, vol-scaled). No price stop.",
             ref=f"trade:{trade.id}",
-            payload={"qty": str(sizing.qty), "entry": str(entry.avg_price),
-                     "leverage": str(sizing.leverage), "price_stop": None},
+            payload={
+                "qty": str(sizing.qty),
+                "entry": str(entry.avg_price),
+                "leverage": str(sizing.leverage),
+                "price_stop": None,
+            },
         )
         from app.services.notify_config import notify_event
 
         await notify_event(
-            session, kind="short_opened",
-            payload={"qty": str(sizing.qty), "price": str(entry.avg_price),
-                     "weight": f"{sizing.leverage:.0%}"},
+            session,
+            kind="short_opened",
+            payload={
+                "qty": str(sizing.qty),
+                "price": str(entry.avg_price),
+                "weight": f"{sizing.leverage:.0%}",
+            },
         )
         return trade
 
@@ -147,13 +171,19 @@ class OrderManager:
         await self._ex.cancel_all(self._symbol)
         close_side = "SELL" if side == "LONG" else "BUY"
         result = await self._ex.place_market(
-            self._symbol, close_side, abs(qty), client_order_id=new_client_order_id("CPX"),
+            self._symbol,
+            close_side,
+            abs(qty),
+            client_order_id=new_client_order_id("CPX"),
             reduce_only=True,
         )
         await record_event(
-            session, level="INFO", category="trade",
+            session,
+            level="INFO",
+            category="trade",
             message=f"Flattened {side} {abs(qty)} {self._symbol} ({reason})",
-            ref="flatten", payload={"side": side, "qty": str(abs(qty)), "reason": reason},
+            ref="flatten",
+            payload={"side": side, "qty": str(abs(qty)), "reason": reason},
         )
         return result
 
@@ -165,17 +195,25 @@ class OrderManager:
             side = "LONG" if pos.qty > 0 else "SHORT"
             await self.flatten(session, side=side, qty=pos.qty, reason="kill switch")
         await record_event(
-            session, level="WARN", category="bot",
+            session,
+            level="WARN",
+            category="bot",
             message="Kill switch: orders cancelled and positions flattened",
-            ref="kill", payload={"cancelled_orders": cancelled, "position": str(pos.qty)},
+            ref="kill",
+            payload={"cancelled_orders": cancelled, "position": str(pos.qty)},
         )
         return cancelled
 
     # --- persistence ---
 
     async def _persist_trade(
-        self, session: AsyncSession, side: str, entry: OrderResult, qty: Decimal,
-        strategy: str, bot_run_id: int | None,
+        self,
+        session: AsyncSession,
+        side: str,
+        entry: OrderResult,
+        qty: Decimal,
+        strategy: str,
+        bot_run_id: int | None,
     ) -> Trade:
         trade = Trade(
             opened_at=dt.datetime.now(dt.UTC),
@@ -191,8 +229,15 @@ class OrderManager:
         return trade
 
     async def _persist_order(
-        self, session: AsyncSession, result: OrderResult, trade_id: int, order_type: str,
-        *, reduce_only: bool, price: Decimal | None = None, stop_price: Decimal | None = None,
+        self,
+        session: AsyncSession,
+        result: OrderResult,
+        trade_id: int,
+        order_type: str,
+        *,
+        reduce_only: bool,
+        price: Decimal | None = None,
+        stop_price: Decimal | None = None,
     ) -> None:
         session.add(
             Order(

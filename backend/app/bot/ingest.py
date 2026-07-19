@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import datetime as dt
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,6 +27,7 @@ _log = get_logger("ingest")
 SYMBOL = "BTCUSDT"
 INTERVAL = "4h"
 POST_CLOSE_DELAY_S = 8  # let the exchange finalize the candle before we fetch
+WORKER_HEARTBEAT_SECONDS = 5
 
 
 class CandleIngestService:
@@ -35,6 +37,7 @@ class CandleIngestService:
         self._task: asyncio.Task[None] | None = None
         self._dead_man = DeadMan(INTERVAL)
         self._stop = asyncio.Event()
+        self._worker_heartbeat_at: dt.datetime | None = None
 
     @property
     def dead_man(self) -> DeadMan:
@@ -44,9 +47,19 @@ class CandleIngestService:
     def is_running(self) -> bool:
         return self._task is not None and not self._task.done()
 
+    @property
+    def worker_heartbeat_at(self) -> dt.datetime | None:
+        return self._worker_heartbeat_at
+
+    def worker_heartbeat_age(self, now: dt.datetime) -> float | None:
+        if self._worker_heartbeat_at is None:
+            return None
+        return max(0.0, (now - self._worker_heartbeat_at).total_seconds())
+
     async def start(self) -> None:
         self._stop.clear()
         await self._ingest_once(reason="startup")
+        self._worker_heartbeat_at = utc_now()
         self._task = asyncio.create_task(self._run(), name="candle-ingest")
 
     async def stop(self) -> None:
@@ -60,11 +73,20 @@ class CandleIngestService:
     async def _run(self) -> None:
         while not self._stop.is_set():
             delay = seconds_until_next_close(utc_now(), INTERVAL) + POST_CLOSE_DELAY_S
-            try:
-                await asyncio.wait_for(self._stop.wait(), timeout=delay)
-                return  # stop requested
-            except TimeoutError:
-                pass  # a candle just closed
+            deadline = asyncio.get_running_loop().time() + delay
+            while not self._stop.is_set():
+                self._worker_heartbeat_at = utc_now()
+                remaining = deadline - asyncio.get_running_loop().time()
+                if remaining <= 0:
+                    break
+                try:
+                    await asyncio.wait_for(
+                        self._stop.wait(),
+                        timeout=min(WORKER_HEARTBEAT_SECONDS, remaining),
+                    )
+                    return
+                except TimeoutError:
+                    continue
             await self._ingest_once(reason="candle_close")
             await self._dead_man_check()
 
@@ -77,12 +99,16 @@ class CandleIngestService:
                 from app.services.notify_config import notify_event
 
                 await record_event(
-                    session, level="ERROR", category="error",
+                    session,
+                    level="ERROR",
+                    category="error",
                     message="Dead-man's switch: missed 4h candle tick",
-                    ref="dead_man", payload={"last_tick": str(self._dead_man.last_tick)},
+                    ref="dead_man",
+                    payload={"last_tick": str(self._dead_man.last_tick)},
                 )
                 await notify_event(
-                    session, kind="error",
+                    session,
+                    kind="error",
                     payload={"error": "missed 4h candle tick (dead-man)"},
                 )
                 await session.commit()
@@ -174,9 +200,7 @@ class CandleIngestService:
             await session.commit()
         except Exception as exc:
             await session.rollback()
-            await bot_service.enter_safe_mode(
-                session, reason="closed-candle evaluation failed"
-            )
+            await bot_service.enter_safe_mode(session, reason="closed-candle evaluation failed")
             await record_event(
                 session,
                 level="ERROR",

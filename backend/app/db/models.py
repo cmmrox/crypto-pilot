@@ -208,9 +208,7 @@ class Order(Base):
     id: Mapped[IntPk]
     binance_order_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     client_order_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
-    trade_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("trades.id"), nullable=True
-    )
+    trade_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("trades.id"), nullable=True)
     type: Mapped[str] = mapped_column(String(24), nullable=False)
     status: Mapped[str] = mapped_column(String(24), nullable=False)
     price: Mapped[Decimal | None] = mapped_column(nullable=True)

@@ -28,23 +28,54 @@ async def _seed_trades() -> None:
         t1 = Trade(
             opened_at=dt.datetime(2026, 7, 5, tzinfo=dt.UTC),
             closed_at=dt.datetime(2026, 7, 6, tzinfo=dt.UTC),
-            side="LONG", entry_px=D("60000"), exit_px=D("62000"), qty=D("0.01"),
-            fees=D("5"), realized_pnl=D("200"), r_multiple=D("1.5"),
-            exit_reason="4 ATR trail", strategy="trend_rider_v6", environment="DEMO",
+            side="LONG",
+            entry_px=D("60000"),
+            exit_px=D("62000"),
+            qty=D("0.01"),
+            fees=D("5"),
+            realized_pnl=D("200"),
+            r_multiple=D("1.5"),
+            exit_reason="4 ATR trail",
+            strategy="trend_rider_v6",
+            environment="DEMO",
         )
         t2 = Trade(
             opened_at=dt.datetime(2026, 7, 10, tzinfo=dt.UTC),
             closed_at=dt.datetime(2026, 7, 11, tzinfo=dt.UTC),
-            side="SHORT", entry_px=D("61000"), exit_px=D("61500"), qty=D("0.01"),
-            fees=D("4"), realized_pnl=D("-50"), r_multiple=D("-0.5"),
-            exit_reason="bear regime ended", strategy="trend_rider_v6", environment="DEMO",
+            side="SHORT",
+            entry_px=D("61000"),
+            exit_px=D("61500"),
+            qty=D("0.01"),
+            fees=D("4"),
+            realized_pnl=D("-50"),
+            r_multiple=D("-0.5"),
+            exit_reason="bear regime ended",
+            strategy="trend_rider_v6",
+            environment="DEMO",
         )
         s.add_all([t1, t2])
         await s.flush()
-        s.add(Order(client_order_id="CPL-1", trade_id=t1.id, type="MARKET",
-                    status="FILLED", qty=D("0.01"), reduce_only=False))
-        s.add(Order(client_order_id="CPS-1", trade_id=t1.id, type="STOP_MARKET",
-                    status="NEW", qty=D("0.01"), stop_price=D("58500"), reduce_only=True))
+        s.add(
+            Order(
+                client_order_id="CPL-1",
+                trade_id=t1.id,
+                type="MARKET",
+                status="FILLED",
+                qty=D("0.01"),
+                reduce_only=False,
+            )
+        )
+        s.add(
+            Order(
+                client_order_id="CPS-1",
+                trade_id=t1.id,
+                type="STOP_MARKET",
+                status="NEW",
+                qty=D("0.01"),
+                stop_price=D("58500"),
+                reduce_only=True,
+            )
+        )
         await s.commit()
     await engine.dispose()
 

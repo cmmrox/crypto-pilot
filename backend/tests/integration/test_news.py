@@ -16,8 +16,13 @@ from tests.fakes import FakeSummaryProvider
 async def _seed_items(session: AsyncSession) -> None:
     for i in range(3):
         session.add(
-            NewsItem(url=f"https://ex.com/{i}", source="CoinDesk", title=f"Story {i}",
-                     published_at=dt.datetime.now(dt.UTC), raw_text="...")
+            NewsItem(
+                url=f"https://ex.com/{i}",
+                source="CoinDesk",
+                title=f"Story {i}",
+                published_at=dt.datetime.now(dt.UTC),
+                raw_text="...",
+            )
         )
     await session.flush()
 
@@ -38,9 +43,7 @@ async def test_pipeline_publishes_briefing(db_session: AsyncSession) -> None:
 @pytest.mark.asyncio
 async def test_refresh_is_idempotent_per_day(db_session: AsyncSession) -> None:
     await _seed_items(db_session)
-    await news_svc.refresh_briefing(
-        db_session, provider=FakeSummaryProvider(), collect_first=False
-    )
+    await news_svc.refresh_briefing(db_session, provider=FakeSummaryProvider(), collect_first=False)
     await news_svc.refresh_briefing(
         db_session, provider=FakeSummaryProvider("Cautious"), collect_first=False
     )

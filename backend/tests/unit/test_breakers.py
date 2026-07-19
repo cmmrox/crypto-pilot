@@ -31,9 +31,7 @@ def test_breaker_positive_pnl_not_tripped() -> None:
 
 
 def test_breaker_custom_cap() -> None:
-    st = evaluate_breaker(
-        month_start_equity=D("10000"), month_to_date_pnl=D("-300"), cap=D("0.03")
-    )
+    st = evaluate_breaker(month_start_equity=D("10000"), month_to_date_pnl=D("-300"), cap=D("0.03"))
     assert st.tripped  # -3% hits a 3% cap
 
 

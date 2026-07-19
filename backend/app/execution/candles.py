@@ -78,21 +78,23 @@ async def backfill(
     return count
 
 
-async def detect_gaps(
-    session: AsyncSession, symbol: str, interval: str
-) -> list[dt.datetime]:
+async def detect_gaps(session: AsyncSession, symbol: str, interval: str) -> list[dt.datetime]:
     """Return expected candle open-times missing between the first and last stored.
 
     A healthy ingest has zero gaps (Stage 2 exit criterion).
     """
     step = INTERVAL_MS[interval]
     rows = (
-        await session.execute(
-            select(Candle.open_time)
-            .where(Candle.symbol == symbol, Candle.interval == interval)
-            .order_by(Candle.open_time)
+        (
+            await session.execute(
+                select(Candle.open_time)
+                .where(Candle.symbol == symbol, Candle.interval == interval)
+                .order_by(Candle.open_time)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     if len(rows) < 2:
         return []
     present = {r.replace(tzinfo=dt.UTC) if r.tzinfo is None else r for r in rows}
@@ -108,9 +110,7 @@ async def detect_gaps(
     return missing
 
 
-async def latest_open_time(
-    session: AsyncSession, symbol: str, interval: str
-) -> dt.datetime | None:
+async def latest_open_time(session: AsyncSession, symbol: str, interval: str) -> dt.datetime | None:
     """Return the newest stored candle open-time, or None."""
     return (
         await session.execute(

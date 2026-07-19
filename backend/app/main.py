@@ -53,6 +53,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     if settings.environment != "test":
         await ingest_service.start()
         from app.news.scheduler import news_scheduler
+
         await news_scheduler.start()
 
     yield
@@ -60,6 +61,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     if settings.environment != "test":
         await ingest_service.stop()
         from app.news.scheduler import news_scheduler
+
         await news_scheduler.stop()
     from app.db.session import dispose_engine
 

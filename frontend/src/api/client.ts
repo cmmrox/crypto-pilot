@@ -124,6 +124,9 @@ export interface DeepHealth {
   status: string;
   version: string;
   database: string;
+  worker_heartbeat_at: string | null;
+  worker_heartbeat_age_seconds: number | null;
+  worker_healthy: boolean;
   ingest_last_tick: string | null;
   ingest_overdue: boolean;
   scheduler_alive: boolean;
@@ -298,10 +301,10 @@ export interface BotStatus {
 }
 
 export interface Position {
-  side: string | null;
+  side: string;
   qty: string;
   entry_price: string;
-  mark_price: string;
+  mark_price: string | null;
   unrealized_pnl: string;
   leverage: string;
   has_price_stop: boolean;
@@ -311,20 +314,102 @@ export interface Breaker {
   book: string;
   month_to_date_pnl: string;
   drawdown_pct: string;
+  progress_pct: string;
   tripped: boolean;
+  available: boolean;
+}
+
+export interface EngineSnapshot {
+  worker_running: boolean;
+  worker_healthy: boolean;
+  heartbeat_at: string | null;
+  heartbeat_age_seconds: number | null;
+  scheduler_alive: boolean;
+  database: string;
+  ingest_last_tick: string | null;
+  ingest_overdue: boolean;
+  candle_gaps: number;
+}
+
+export interface SparkPoint {
+  ts: string;
+  close: string;
+  normalized_bps: number;
+}
+
+export interface MarketSnapshot {
+  symbol: string;
+  interval: string;
+  reachable: boolean;
+  mark_price: string | null;
+  price_change_24h_pct: string | null;
+  observed_at: string | null;
+  stale: boolean;
+  next_close_utc: string;
+  seconds_to_next_close: number;
+  sparkline: SparkPoint[];
+}
+
+export interface WatchRule {
+  key: string;
+  label: string;
+  status: string;
+  tone: "ok" | "warn" | "err" | "neutral";
+  active: boolean;
+  condition: string;
+  threshold_price: string | null;
+  distance: string | null;
+  distance_pct: string | null;
+}
+
+export interface StrategyWatch {
+  available: boolean;
+  last_closed_at: string | null;
+  close: string | null;
+  ema20: string | null;
+  ema50: string | null;
+  ema200: string | null;
+  sma200: string | null;
+  atr14: string | null;
+  rules: WatchRule[];
+  disclaimer: string;
+}
+
+export interface ActivitySnapshot {
+  ts: string;
+  label: string;
+  detail: string;
+  tone: string;
+  badge: string;
+}
+
+export interface BriefingSnapshot {
+  available: boolean;
+  sentiment: string | null;
+  generated_at: string | null;
+  bullets: { text: string; source: string }[];
+  isolation_notice: string;
 }
 
 export interface Overview {
+  checked_at: string;
+  fresh_for_seconds: number;
   environment: string;
   bot_status: string;
   strategy: string;
   exchange_reachable: boolean;
+  account_available: boolean;
   balance: string;
   equity: string;
   unrealized_pnl: string;
   position: Position | null;
   breakers: Breaker[];
   month_realized_pnl: string;
+  engine: EngineSnapshot;
+  market: MarketSnapshot;
+  watch: StrategyWatch;
+  activity: ActivitySnapshot[];
+  briefing: BriefingSnapshot;
 }
 
 export interface EquityPoint {

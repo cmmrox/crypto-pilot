@@ -37,9 +37,7 @@ def postgres_url() -> Iterator[str]:
 
 
 @pytest.fixture()
-async def app_client(
-    postgres_url: str, monkeypatch: pytest.MonkeyPatch
-) -> AsyncIterator[object]:
+async def app_client(postgres_url: str, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[object]:
     """Return an httpx AsyncClient wired to the app with migrations applied."""
     import base64
 
@@ -146,9 +144,7 @@ async def auth_headers(client: object) -> dict[str, str]:
 
 
 @pytest.fixture()
-async def db_session(
-    postgres_url: str, monkeypatch: pytest.MonkeyPatch
-) -> AsyncIterator[object]:
+async def db_session(postgres_url: str, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[object]:
     """Yield an AsyncSession against a freshly-created schema (for service tests)."""
     import base64
 

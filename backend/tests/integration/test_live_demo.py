@@ -69,8 +69,11 @@ async def test_live_long_round_trip(exchange: BinanceExchange) -> None:
         if pos.qty != 0:
             side = "SELL" if pos.qty > 0 else "BUY"
             await exchange.place_market(
-                SYMBOL, side, abs(pos.qty),
-                client_order_id=new_client_order_id("QAX"), reduce_only=True,
+                SYMBOL,
+                side,
+                abs(pos.qty),
+                client_order_id=new_client_order_id("QAX"),
+                reduce_only=True,
             )
     final = await exchange.get_position(SYMBOL)
     assert abs(final.qty) <= filters.step_size  # flat again
@@ -97,8 +100,10 @@ async def test_live_short_round_trip(exchange: BinanceExchange) -> None:
         if pos.qty != 0:
             side = "SELL" if pos.qty > 0 else "BUY"
             await exchange.place_market(
-                SYMBOL, side, abs(pos.qty),
-                client_order_id=new_client_order_id("QAXS"), reduce_only=True,
+                SYMBOL,
+                side,
+                abs(pos.qty),
+                client_order_id=new_client_order_id("QAXS"),
+                reduce_only=True,
             )
     assert abs((await exchange.get_position(SYMBOL)).qty) <= filters.step_size
-

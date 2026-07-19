@@ -119,3 +119,12 @@ unless hotfix-critical. Health endpoint + dead-man cron.
    revoke other sessions. Server-shell `reset-2fa` is the only recovery path. This
    accepts SIM-swap and optional-single-factor risk with the controls documented in
    `SECURITY_GUIDELINES.md` and `docs/plan/SMS_2FA_PLAN.md`.
+6. **The Overview command center exposes a read-only explainability projection.**
+   `/api/overview` combines the in-process worker heartbeat, public Binance market
+   observations, next closed-4h decision time, latest persisted indicator thresholds,
+   operational events, account truth, independent breakers, and the isolated news
+   briefing. `strategies/watch.py` may reuse pure indicator calculations, but it emits
+   no intents and is never imported by the trading path. Displayed threshold prices
+   are descriptive closed-candle conditions, never a promised trigger or execution
+   price. The five-second worker heartbeat is distinct from both the bot lifecycle
+   state and the four-hour ingest dead-man signal.

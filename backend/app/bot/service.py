@@ -43,19 +43,31 @@ class BotService:
         settings_row = await get_settings_row(session)
         if run is None:
             return BotSnapshot(
-                BotStatus.STOPPED, settings_row.active_environment,
-                settings_row.active_strategy, None, None, None,
+                BotStatus.STOPPED,
+                settings_row.active_environment,
+                settings_row.active_strategy,
+                None,
+                None,
+                None,
             )
         status = BotStatus.SAFE_MODE if run.stop_reason == "safe_mode" else BotStatus.RUNNING
         return BotSnapshot(
-            status, run.environment, run.strategy, run.id, run.started_at, None,
+            status,
+            run.environment,
+            run.strategy,
+            run.id,
+            run.started_at,
+            None,
         )
 
     async def _current_run(self, session: AsyncSession) -> BotRun | None:
         """The open run (no stopped_at) means the bot is running/safe-mode."""
         return (
             await session.execute(
-                select(BotRun).where(BotRun.stopped_at.is_(None)).order_by(BotRun.id.desc()).limit(1)
+                select(BotRun)
+                .where(BotRun.stopped_at.is_(None))
+                .order_by(BotRun.id.desc())
+                .limit(1)
             )
         ).scalar_one_or_none()
 
@@ -79,16 +91,23 @@ class BotService:
         session.add(run)
         await session.flush()
         await record_event(
-            session, level="INFO" if rec.matched else "WARN", category="bot",
+            session,
+            level="INFO" if rec.matched else "WARN",
+            category="bot",
             message="Bot started" + ("" if rec.matched else " in SAFE MODE (reconcile mismatch)"),
             ref=f"bot_run:{run.id}",
-            payload={"environment": run.environment, "strategy": run.strategy,
-                     "reconciled": rec.matched, "detail": rec.detail},
+            payload={
+                "environment": run.environment,
+                "strategy": run.strategy,
+                "reconciled": rec.matched,
+                "detail": rec.detail,
+            },
         )
         from app.services.notify_config import notify_event
 
         await notify_event(
-            session, kind="bot_started",
+            session,
+            kind="bot_started",
             payload={"environment": run.environment, "strategy": run.strategy, "equity": "—"},
         )
         return run
@@ -101,9 +120,12 @@ class BotService:
         run.stopped_at = dt.datetime.now(dt.UTC)
         run.stop_reason = reason
         await record_event(
-            session, level="INFO", category="bot",
+            session,
+            level="INFO",
+            category="bot",
             message="Bot stopped — open position left with its exchange stops",
-            ref=f"bot_run:{run.id}", payload={"reason": reason},
+            ref=f"bot_run:{run.id}",
+            payload={"reason": reason},
         )
         from app.services.notify_config import notify_event
 
@@ -133,8 +155,11 @@ class BotService:
         if run is not None:
             run.stop_reason = "safe_mode"
             await record_event(
-                session, level="WARN", category="bot",
-                message=f"Safe mode: {reason}", ref=f"bot_run:{run.id}",
+                session,
+                level="WARN",
+                category="bot",
+                message=f"Safe mode: {reason}",
+                ref=f"bot_run:{run.id}",
                 payload={"reason": reason},
             )
 
@@ -143,16 +168,14 @@ class BotService:
         from app.db.models import Trade
 
         rows = (
-            await session.execute(select(Trade).where(Trade.closed_at.is_(None)))
-        ).scalars().all()
+            (await session.execute(select(Trade).where(Trade.closed_at.is_(None)))).scalars().all()
+        )
         total = Decimal("0")
         for t in rows:
             total += t.qty if t.side == "LONG" else -t.qty
         return total
 
-    async def write_equity_snapshot(
-        self, session: AsyncSession, exchange: Exchange
-    ) -> None:
+    async def write_equity_snapshot(self, session: AsyncSession, exchange: Exchange) -> None:
         """Record an equity snapshot (every 4h close — FR-12)."""
         acct = await exchange.get_account()
         settings_row = await get_settings_row(session)
@@ -183,9 +206,7 @@ class BotService:
             return []
 
         expected = await self._expected_position(session)
-        reconciliation = await reconcile_position(
-            exchange, SYMBOL, expected_qty=expected
-        )
+        reconciliation = await reconcile_position(exchange, SYMBOL, expected_qty=expected)
         if not reconciliation.matched:
             await self.enter_safe_mode(
                 session, reason=f"every-close reconciliation: {reconciliation.detail}"
@@ -236,17 +257,25 @@ class BotService:
         for intent in intents:
             if isinstance(intent, EnterLong) and pos.qty == 0:
                 sizing = size_long(
-                    equity=equity, risk_pct=settings_row.risk_pct,
-                    stop_distance=Decimal(str(intent.stop_distance)), price=last_close,
-                    leverage_cap=settings_row.leverage_cap, filters=filters,
+                    equity=equity,
+                    risk_pct=settings_row.risk_pct,
+                    stop_distance=Decimal(str(intent.stop_distance)),
+                    price=last_close,
+                    leverage_cap=settings_row.leverage_cap,
+                    filters=filters,
                 )
                 if sizing.ok:
                     stop_price = last_close - Decimal(str(intent.stop_distance))
                     tp_r, tp_frac = intent.tp_levels[0]
                     tp1_price = last_close + Decimal(str(tp_r)) * Decimal(str(intent.stop_distance))
                     await orders.open_long(
-                        session, sizing=sizing, stop_price=stop_price, tp1_price=tp1_price,
-                        tp1_fraction=Decimal(str(tp_frac)), strategy=strat.name, bot_run_id=run.id,
+                        session,
+                        sizing=sizing,
+                        stop_price=stop_price,
+                        tp1_price=tp1_price,
+                        tp1_fraction=Decimal(str(tp_frac)),
+                        strategy=strat.name,
+                        bot_run_id=run.id,
                     )
                     actions.append("open_long")
             elif isinstance(intent, EnterShort) and pos.qty == 0:

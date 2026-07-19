@@ -30,12 +30,20 @@ async def test_open_long_places_entry_stop_and_tp(db_session: AsyncSession) -> N
     ex = FakeExchange(mark_price=D("65000"))
     om = OrderManager(ex)
     sizing = size_long(
-        equity=D("5000"), risk_pct=D("2"), stop_distance=D("2000"),
-        price=D("65000"), leverage_cap=D("3"), filters=await _filters(ex),
+        equity=D("5000"),
+        risk_pct=D("2"),
+        stop_distance=D("2000"),
+        price=D("65000"),
+        leverage_cap=D("3"),
+        filters=await _filters(ex),
     )
     trade = await om.open_long(
-        db_session, sizing=sizing, stop_price=D("63000"), tp1_price=D("67000"),
-        tp1_fraction=D("0.4"), strategy="trend_rider_v6",
+        db_session,
+        sizing=sizing,
+        stop_price=D("63000"),
+        tp1_price=D("67000"),
+        tp1_fraction=D("0.4"),
+        strategy="trend_rider_v6",
     )
     await db_session.commit()
     # Entry + stop + TP1 were placed.
@@ -68,8 +76,12 @@ async def test_open_long_emergency_flattens_when_stop_fails(
     ex = StopFailingExchange(mark_price=D("65000"))
     om = OrderManager(ex)
     sizing = size_long(
-        equity=D("5000"), risk_pct=D("2"), stop_distance=D("2000"),
-        price=D("65000"), leverage_cap=D("3"), filters=await _filters(ex),
+        equity=D("5000"),
+        risk_pct=D("2"),
+        stop_distance=D("2000"),
+        price=D("65000"),
+        leverage_cap=D("3"),
+        filters=await _filters(ex),
     )
     with pytest.raises(RuntimeError, match="emergency-flattened"):
         await om.open_long(
@@ -88,8 +100,12 @@ async def test_open_short_has_no_price_stop(db_session: AsyncSession) -> None:
     ex = FakeExchange(mark_price=D("60000"))
     om = OrderManager(ex)
     sizing = size_short(
-        equity=D("5000"), weight_pct=D("75"), vol_target=D("0.40"),
-        realized_vol=D("0.40"), price=D("60000"), leverage_cap=D("3"),
+        equity=D("5000"),
+        weight_pct=D("75"),
+        vol_target=D("0.40"),
+        realized_vol=D("0.40"),
+        price=D("60000"),
+        leverage_cap=D("3"),
         filters=await _filters(ex),
     )
     trade = await om.open_short(db_session, sizing=sizing, strategy="trend_rider_v6")
@@ -154,12 +170,20 @@ async def test_order_rows_store_decimal_and_client_id(db_session: AsyncSession) 
     ex = FakeExchange(mark_price=D("65000"))
     om = OrderManager(ex)
     sizing = size_long(
-        equity=D("5000"), risk_pct=D("2"), stop_distance=D("2000"),
-        price=D("65000"), leverage_cap=D("3"), filters=await _filters(ex),
+        equity=D("5000"),
+        risk_pct=D("2"),
+        stop_distance=D("2000"),
+        price=D("65000"),
+        leverage_cap=D("3"),
+        filters=await _filters(ex),
     )
     await om.open_long(
-        db_session, sizing=sizing, stop_price=D("63000"), tp1_price=D("67000"),
-        tp1_fraction=D("0.4"), strategy="trend_rider_v6",
+        db_session,
+        sizing=sizing,
+        stop_price=D("63000"),
+        tp1_price=D("67000"),
+        tp1_fraction=D("0.4"),
+        strategy="trend_rider_v6",
     )
     await db_session.commit()
     orders = (await db_session.execute(select(Order))).scalars().all()

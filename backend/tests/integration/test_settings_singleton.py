@@ -54,6 +54,21 @@ async def test_creates_single_pinned_row(fresh_engine: object) -> None:
     assert count == 1
 
 
+async def test_seeded_row_uses_approved_risk_profile(fresh_engine: object) -> None:
+    """A freshly seeded settings row must carry the owner-approved risk-defined
+    profile (ARCHITECTURE §8): 15% risk per long trade at up to 6x leverage.
+    Guards the money-path default against a silent revert to the old 2%/3x set."""
+    from decimal import Decimal
+
+    from app.services.settings_store import get_settings_row
+
+    async with AsyncSession(fresh_engine, expire_on_commit=False) as s:
+        row = await get_settings_row(s)
+        await s.commit()
+        assert row.risk_pct == Decimal("15")
+        assert row.leverage_cap == Decimal("6")
+
+
 async def test_write_then_read_resolve_same_row(fresh_engine: object) -> None:
     """The exact read-after-write bug: a committed write must be observed by a
     fresh session/connection reading the singleton."""

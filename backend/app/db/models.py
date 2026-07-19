@@ -106,10 +106,13 @@ class AppSettings(Base):
     active_strategy: Mapped[str] = mapped_column(
         String(64), default="trend_rider_v6", nullable=False
     )
-    risk_pct: Mapped[Decimal] = mapped_column(default=Decimal("2"))
+    # Owner-approved deviation (ARCHITECTURE §8): aggressive risk-defined profile.
+    # 15% risk per long trade at up to 6x, sized by the stop so a stop-out caps the
+    # loss near risk_pct of equity. The 4% LONG_MONTH_CAP engine constant is retained.
+    risk_pct: Mapped[Decimal] = mapped_column(default=Decimal("15"))
     sleeve_weight_pct: Mapped[Decimal] = mapped_column(default=Decimal("75"))
     sleeve_vol_target: Mapped[Decimal] = mapped_column(default=Decimal("40"))
-    leverage_cap: Mapped[Decimal] = mapped_column(default=Decimal("3"))
+    leverage_cap: Mapped[Decimal] = mapped_column(default=Decimal("6"))
     sms_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     news_sources: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
     news_time: Mapped[str] = mapped_column(String(5), default="06:30")

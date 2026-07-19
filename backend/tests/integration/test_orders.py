@@ -9,8 +9,13 @@ from __future__ import annotations
 from decimal import Decimal
 
 import pytest
-from app.db.models import Order
-from app.execution.orders import OrderManager, new_client_order_id
+from app.db.models import Event, Order, Trade
+from app.execution.orders import (
+    OrderManager,
+    ProtectiveStopFailed,
+    new_client_order_id,
+    persist_emergency_exit,
+)
 from app.execution.reconcile import reconcile_position
 from app.risk.sizing import size_long, size_short
 from sqlalchemy import select
@@ -83,7 +88,7 @@ async def test_open_long_emergency_flattens_when_stop_fails(
         leverage_cap=D("3"),
         filters=await _filters(ex),
     )
-    with pytest.raises(RuntimeError, match="emergency-flattened"):
+    with pytest.raises(ProtectiveStopFailed, match="emergency-flattened") as excinfo:
         await om.open_long(
             db_session,
             sizing=sizing,
@@ -93,6 +98,92 @@ async def test_open_long_emergency_flattens_when_stop_fails(
             strategy="trend_rider_v6",
         )
     assert (await ex.get_position("BTCUSDT")).qty == D("0")
+    record = excinfo.value.record
+    assert record.flattened is True
+    assert record.stop_error == "simulated stop rejection"
+
+    # Mirror the trading loop: it rolls back the poisoned decision transaction and
+    # then durably records the fills that really executed (audit trail, BSD G5).
+    await db_session.rollback()
+    await persist_emergency_exit(db_session, record)
+    await db_session.commit()
+
+    trades = (await db_session.execute(select(Trade))).scalars().all()
+    assert len(trades) == 1
+    assert trades[0].closed_at is not None  # recorded net-flat
+    assert trades[0].exit_reason == "protective_stop_failed_emergency_exit"
+    orders = (
+        (await db_session.execute(select(Order).where(Order.trade_id == trades[0].id)))
+        .scalars()
+        .all()
+    )
+    assert len(orders) == 2  # entry MARKET + emergency reduce-only MARKET
+    events = (
+        (await db_session.execute(select(Event).where(Event.ref == f"trade:{trades[0].id}")))
+        .scalars()
+        .all()
+    )
+    assert len(events) == 1
+    assert events[0].payload_json["stop_error"] == "simulated stop rejection"
+    assert events[0].payload_json["flattened"] is True
+
+
+@pytest.mark.asyncio
+async def test_open_long_records_open_trade_when_flatten_also_fails(
+    db_session: AsyncSession,
+) -> None:
+    """Stop fails AND the emergency flatten fails: the entry is recorded as an
+    OPEN trade so the next reconciliation treats the position as possibly held."""
+
+    class FullyFailingExchange(FakeExchange):
+        async def place_stop_market(
+            self, symbol, side, qty, stop_price, *, client_order_id, reduce_only=True
+        ):
+            raise RuntimeError("simulated stop rejection")
+
+        async def place_market(self, symbol, side, qty, *, client_order_id, reduce_only=False):
+            if reduce_only:
+                raise RuntimeError("simulated flatten rejection")
+            return await super().place_market(
+                symbol, side, qty, client_order_id=client_order_id, reduce_only=reduce_only
+            )
+
+    ex = FullyFailingExchange(mark_price=D("65000"))
+    om = OrderManager(ex)
+    sizing = size_long(
+        equity=D("5000"),
+        risk_pct=D("2"),
+        stop_distance=D("2000"),
+        price=D("65000"),
+        leverage_cap=D("3"),
+        filters=await _filters(ex),
+    )
+    with pytest.raises(ProtectiveStopFailed, match="not confirmed") as excinfo:
+        await om.open_long(
+            db_session,
+            sizing=sizing,
+            stop_price=D("63000"),
+            tp1_price=D("67000"),
+            tp1_fraction=D("0.4"),
+            strategy="trend_rider_v6",
+        )
+    record = excinfo.value.record
+    assert record.flattened is False
+
+    await db_session.rollback()
+    await persist_emergency_exit(db_session, record)
+    await db_session.commit()
+
+    trades = (await db_session.execute(select(Trade))).scalars().all()
+    assert len(trades) == 1
+    assert trades[0].closed_at is None  # left open: position may be unprotected
+    assert trades[0].exit_reason == "protective_stop_failed_flatten_unconfirmed"
+    orders = (
+        (await db_session.execute(select(Order).where(Order.trade_id == trades[0].id)))
+        .scalars()
+        .all()
+    )
+    assert len(orders) == 1  # only the entry executed; no confirmed exit
 
 
 @pytest.mark.asyncio

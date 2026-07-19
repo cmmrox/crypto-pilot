@@ -167,6 +167,7 @@ class CandleIngestService:
         from app.bot.service import bot_service
         from app.bot.state import BotStatus
         from app.db.models import Candle
+        from app.execution.orders import ProtectiveStopFailed, persist_emergency_exit
         from app.services.execution_service import NotConfiguredError, execution_context
 
         snap = await bot_service.status(session)
@@ -198,19 +199,52 @@ class CandleIngestService:
                 session, reason="Binance credentials unavailable at candle close"
             )
             await session.commit()
-        except Exception as exc:
+        except ProtectiveStopFailed as exc:
+            # A long filled but its protective stop could not be placed. Roll back the
+            # poisoned decision transaction first (releasing the entry order's
+            # uncommitted unique client_order_id), then durably re-record the fills
+            # that actually executed on the exchange plus safe mode — one clean commit.
             await session.rollback()
-            await bot_service.enter_safe_mode(session, reason="closed-candle evaluation failed")
+            await bot_service.enter_safe_mode(
+                session, reason="protective stop failed at candle close"
+            )
+            await persist_emergency_exit(session, exc.record)
+            cause = exc.__cause__
             await record_event(
                 session,
                 level="ERROR",
                 category="error",
                 message="Closed-candle evaluation failed; bot entered safe mode",
                 ref="bot_drive_failed",
-                payload={"error_type": type(exc).__name__},
+                payload={
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                    "cause": str(cause) if cause else None,
+                    "cause_type": type(cause).__name__ if cause else None,
+                    "flattened": exc.record.flattened,
+                },
             )
             await session.commit()
-            _log.error("bot_drive_failed", error=str(exc))
+            _log.error("bot_drive_failed", error=str(exc), cause=str(cause) if cause else None)
+        except Exception as exc:
+            await session.rollback()
+            await bot_service.enter_safe_mode(session, reason="closed-candle evaluation failed")
+            cause = exc.__cause__
+            await record_event(
+                session,
+                level="ERROR",
+                category="error",
+                message="Closed-candle evaluation failed; bot entered safe mode",
+                ref="bot_drive_failed",
+                payload={
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                    "cause": str(cause) if cause else None,
+                    "cause_type": type(cause).__name__ if cause else None,
+                },
+            )
+            await session.commit()
+            _log.error("bot_drive_failed", error=str(exc), cause=str(cause) if cause else None)
 
 
 ingest_service = CandleIngestService()

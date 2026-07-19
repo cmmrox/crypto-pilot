@@ -5,11 +5,18 @@ from __future__ import annotations
 import datetime as dt
 from decimal import Decimal
 
+import pandas as pd
 import pytest
 from app.bot.service import BotService
 from app.bot.state import BotStatus
-from app.db.models import Candle
-from app.execution.orders import OrderManager
+from app.db.models import Candle, Event, Trade
+from app.execution.orders import (
+    OrderManager,
+    ProtectiveStopFailed,
+    persist_emergency_exit,
+)
+from app.strategies.engine import add_indicators
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tests.conftest import OWNER_PHONE  # noqa: F401  (ensures conftest import)
@@ -166,6 +173,77 @@ async def test_every_close_reconciliation_blocks_new_risk(
 
     assert actions == ["safe_mode"]
     assert (await svc.status(db_session)).status == BotStatus.SAFE_MODE
+
+
+def _fresh_regime_index(candles: list[Candle]) -> int:
+    """First bar where the trend regime flips on (so on_candle emits EnterLong)."""
+    df = add_indicators(
+        pd.DataFrame(
+            {
+                "dt": [c.open_time for c in candles],
+                "open": [float(c.open) for c in candles],
+                "high": [float(c.high) for c in candles],
+                "low": [float(c.low) for c in candles],
+                "close": [float(c.close) for c in candles],
+                "volume": [float(c.volume) for c in candles],
+            }
+        )
+    )
+    regime = df["regime"].to_numpy()
+    return next(i for i in range(1, len(regime)) if regime[i] and not regime[i - 1])
+
+
+@pytest.mark.asyncio
+async def test_protective_stop_failure_enters_safe_mode_and_records_fills(
+    db_session: AsyncSession,
+) -> None:
+    """When the protective stop can't be placed, the closed-candle path enters safe
+    mode AND durably records the entry + emergency-exit fills (audit trail survives
+    the rollback), leaving a reconcilable flat position."""
+
+    class StopFailingExchange(FakeExchange):
+        async def place_stop_market(
+            self, symbol, side, qty, stop_price, *, client_order_id, reduce_only=True
+        ):
+            raise RuntimeError("would immediately trigger")
+
+    svc = BotService()
+    ex = StopFailingExchange(mark_price=D("150"))
+    om = OrderManager(ex)
+    await svc.start(db_session, ex, by="o")
+    await db_session.commit()
+
+    candles = _bull_candles(320)
+    fresh = _fresh_regime_index(candles)
+    ex.mark = Decimal(str(candles[fresh].close))
+
+    # The strategy emits EnterLong; the entry fills but the protective stop fails,
+    # so open_long emergency-flattens and raises ProtectiveStopFailed.
+    with pytest.raises(ProtectiveStopFailed) as excinfo:
+        await svc.evaluate_once(db_session, ex, om, candles=candles[: fresh + 1])
+
+    # Emulate _drive_bot's handler: roll back, enter safe mode, durably record, commit.
+    await db_session.rollback()
+    await svc.enter_safe_mode(db_session, reason="protective stop failed at candle close")
+    await persist_emergency_exit(db_session, excinfo.value.record)
+    await db_session.commit()
+
+    assert (await svc.status(db_session)).status == BotStatus.SAFE_MODE
+    assert (await ex.get_position("BTCUSDT")).qty == D("0")  # flattened on the exchange
+
+    trades = (await db_session.execute(select(Trade))).scalars().all()
+    assert len(trades) == 1
+    assert trades[0].closed_at is not None  # net-flat round trip recorded
+    # Expected position stays consistent with the flat exchange → reconciles clean.
+    assert await svc._expected_position(db_session) == D("0")
+
+    failure_events = (
+        (await db_session.execute(select(Event).where(Event.ref == f"trade:{trades[0].id}")))
+        .scalars()
+        .all()
+    )
+    assert len(failure_events) == 1
+    assert failure_events[0].payload_json["stop_error"] == "would immediately trigger"
 
 
 @pytest.mark.asyncio

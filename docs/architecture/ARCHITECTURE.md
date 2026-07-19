@@ -128,3 +128,16 @@ unless hotfix-critical. Health endpoint + dead-man cron.
    are descriptive closed-candle conditions, never a promised trigger or execution
    price. The five-second worker heartbeat is distinct from both the bot lifecycle
    state and the four-hour ingest dead-man signal.
+7. **Aggressive risk-defined sizing profile (`risk_pct` 15%, `leverage_cap` 6x).**
+   Supersedes the original validated 2%/3x defaults. Each long trade is sized so a
+   stop-out loses ~15% of equity (`risk_pct ÷ stop%` ⇒ ~4.7x median leverage, capped
+   at 6x). The `LONG_MONTH_CAP` engine constant stays 4%, so a single losing long
+   halts longs for the remainder of that month. Backtest (2023-06→2026-07, faithful
+   stop/breaker model, funding included): $100 → ~$1,330 with a ~-40% max drawdown and
+   no liquidation. This accepts materially higher single-trade and drawdown risk than
+   the validated set; it relies on stops filling near their price (gap risk) and on the
+   short sleeve remaining at its native vol-targeted sizing. Owner-acknowledged, DEMO
+   only. `risk_pct`/`leverage_cap` sit outside the parity gate (which locks the engine
+   constants), so this preserves bar-for-bar strategy parity. Delivered as migration
+   `d3e4f5a6b7c8`; the seeded default is guarded by
+   `test_seeded_row_uses_approved_risk_profile`.

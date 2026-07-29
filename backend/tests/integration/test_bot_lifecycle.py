@@ -61,6 +61,78 @@ async def test_start_creates_run_and_status_running(db_session: AsyncSession) ->
 
 
 @pytest.mark.asyncio
+async def test_manual_start_baselines_latest_closed_candle_and_does_not_chase_it(
+    db_session: AsyncSession,
+) -> None:
+    candles = _bull_candles(320)
+    db_session.add_all(candles)
+    await db_session.flush()
+    svc = BotService()
+    exchange = FakeExchange(mark_price=candles[-1].close)
+    manager = OrderManager(exchange, symbol="BTCUSDT")
+
+    run = await svc.start(db_session, exchange, by="owner")
+    actions = await svc.evaluate_once(
+        db_session,
+        exchange,
+        manager,
+        candles=candles,
+    )
+
+    assert run.last_evaluated_candle_at == candles[-1].open_time
+    assert actions == []
+    assert (await exchange.get_position("BTCUSDT")).qty == 0
+
+
+@pytest.mark.asyncio
+async def test_missed_candle_gap_blocks_stale_entry_and_enters_safe_mode(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.services import notify_config
+
+    notifications: list[str] = []
+
+    async def capture(
+        _session: AsyncSession,
+        *,
+        kind: str,
+        payload: dict[str, object],
+    ) -> str:
+        notifications.append(kind)
+        return "delivered"
+
+    monkeypatch.setattr(notify_config, "notify_event", capture)
+    candles = _bull_candles(320)
+    svc = BotService()
+    exchange = FakeExchange(mark_price=candles[-1].close)
+    manager = OrderManager(exchange, symbol="BTCUSDT")
+    run = await svc.start(db_session, exchange, by="owner")
+    run.last_evaluated_candle_at = candles[-3].open_time
+
+    actions = await svc.evaluate_once(
+        db_session,
+        exchange,
+        manager,
+        candles=candles,
+    )
+
+    assert actions == []
+    assert (await svc.status(db_session)).status == BotStatus.SAFE_MODE
+    assert (await exchange.get_position("BTCUSDT")).qty == 0
+    assert run.last_evaluated_candle_at == candles[-1].open_time
+    event = (
+        await db_session.execute(
+            select(Event).where(
+                Event.message == "Missed closed-candle decision; stale entries blocked"
+            )
+        )
+    ).scalar_one()
+    assert event.payload_json["previous_candle"] == candles[-3].open_time.isoformat()
+    assert notifications == ["bot_started", "error"]
+
+
+@pytest.mark.asyncio
 async def test_start_twice_conflicts(db_session: AsyncSession) -> None:
     svc = BotService()
     ex = FakeExchange()

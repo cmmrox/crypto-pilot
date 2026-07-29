@@ -17,9 +17,11 @@
 	}
 
 	header {
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' wss:; font-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'"
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 		X-Content-Type-Options nosniff
 		X-Frame-Options DENY
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
 		Referrer-Policy strict-origin-when-cross-origin
 		-Server
 	}

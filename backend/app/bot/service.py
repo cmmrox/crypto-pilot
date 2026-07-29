@@ -107,12 +107,26 @@ class BotService:
         # Reconcile before acting (account is source of truth).
         expected = await self._expected_position(session)
         rec = await reconcile_position(exchange, market.symbol, expected_qty=expected)
+        latest_closed_candle = await session.scalar(
+            select(Candle.open_time)
+            .where(
+                Candle.symbol == market.symbol,
+                Candle.interval == market.interval,
+                Candle.closed.is_(True),
+            )
+            .order_by(Candle.open_time.desc())
+            .limit(1)
+        )
         run = BotRun(
             started_at=dt.datetime.now(dt.UTC),
             environment=settings_row.active_environment,
             strategy=strategy.manifest.strategy_id,
             strategy_release=strategy.manifest.release,
             strategy_interval=market.interval,
+            # A manual start never chases a signal whose validated next-open
+            # execution point has already passed. The next newly closed candle is
+            # the first one this run may evaluate.
+            last_evaluated_candle_at=latest_closed_candle,
             started_by=by,
             stop_reason="safe_mode" if not rec.matched else None,
         )
@@ -129,6 +143,9 @@ class BotService:
                 "strategy": run.strategy,
                 "reconciled": rec.matched,
                 "detail": rec.detail,
+                "decision_baseline": (
+                    latest_closed_candle.isoformat() if latest_closed_candle is not None else None
+                ),
             },
         )
         from app.services.notify_config import notify_event
@@ -255,6 +272,7 @@ class BotService:
         orders: OrderManager,
         *,
         candles: list[Candle],
+        allow_new_entries: bool = True,
     ) -> list[str]:
         """Synchronize fills, reconcile, enforce breakers, then manage/execute."""
         run = await self._current_run(session)
@@ -264,6 +282,7 @@ class BotService:
         strategy = get_strategy(run.strategy)
         market = strategy.manifest.market
         risk = strategy.manifest.risk
+        decision_candle_at = candles[-1].open_time
         synced = await sync_open_trade(
             session,
             exchange,
@@ -288,7 +307,52 @@ class BotService:
                     "actual_qty": str(reconciliation.actual_qty),
                 },
             )
+            run.last_evaluated_candle_at = decision_candle_at
             return ["safe_mode"]
+
+        previous_decision = run.last_evaluated_candle_at
+        if previous_decision is not None and decision_candle_at <= previous_decision:
+            return []
+
+        interval = dt.timedelta(seconds=INTERVAL_SECONDS[market.interval])
+        missed_decision = (
+            previous_decision is not None and decision_candle_at > previous_decision + interval
+        )
+        if missed_decision:
+            assert previous_decision is not None
+            allow_new_entries = False
+            await self.enter_safe_mode(
+                session,
+                reason=(
+                    "one or more closed-candle decisions were missed; "
+                    "stale entries are blocked pending owner review"
+                ),
+            )
+            await record_event(
+                session,
+                level="ERROR",
+                category="reconciliation",
+                message="Missed closed-candle decision; stale entries blocked",
+                ref=f"bot_run:{run.id}",
+                payload={
+                    "previous_candle": previous_decision.isoformat(),
+                    "current_candle": decision_candle_at.isoformat(),
+                    "strategy": run.strategy,
+                    "interval": market.interval,
+                },
+            )
+            from app.services.notify_config import notify_event
+
+            await notify_event(
+                session,
+                kind="error",
+                payload={
+                    "error": (
+                        "missed closed-candle decision; stale entries blocked "
+                        "and bot entered safe mode"
+                    )
+                },
+            )
 
         acct = await exchange.get_account()
         equity = acct.balance + acct.unrealized_pnl
@@ -363,6 +427,7 @@ class BotService:
                 long_month_pnl=monthly.long_pnl,
                 short_month_pnl=monthly.short_pnl,
             )
+            run.last_evaluated_candle_at = decision_candle_at
             return actions
 
         strat = strategy
@@ -420,7 +485,7 @@ class BotService:
             halted_short=monthly.halted_short or short_trip,
         )
         intents = strat.on_candle(strat_candles, state)
-        entries_allowed = run.stop_reason != "safe_mode"
+        entries_allowed = run.stop_reason != "safe_mode" and allow_new_entries
 
         for intent in intents:
             if (
@@ -533,6 +598,28 @@ class BotService:
                 )
                 actions.append("halt")
 
+        stale_entry_intents = [
+            intent
+            for intent in intents
+            if isinstance(intent, EnterLong | EnterShort)
+        ]
+        if not allow_new_entries and stale_entry_intents:
+            await record_event(
+                session,
+                level="WARN",
+                category="reconciliation",
+                message="Stale entry signal skipped outside its validated execution window",
+                ref=f"bot_run:{run.id}",
+                payload={
+                    "candle_open_time": decision_candle_at.isoformat(),
+                    "strategy": run.strategy,
+                    "intents": [
+                        type(intent).__name__ for intent in stale_entry_intents
+                    ],
+                },
+            )
+            actions.append("stale_entry_skipped")
+
         await self.write_equity_snapshot(
             session,
             exchange,
@@ -540,6 +627,7 @@ class BotService:
             long_month_pnl=monthly.long_pnl,
             short_month_pnl=monthly.short_pnl,
         )
+        run.last_evaluated_candle_at = decision_candle_at
         return actions
 
     async def _monthly_risk_state(

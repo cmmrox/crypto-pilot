@@ -1,0 +1,70 @@
+name: cryptopilot
+
+services:
+  deadman:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    restart: always
+    command: ["python", "-m", "app.bot.deadman_monitor"]
+    environment:
+      CP_ENVIRONMENT: ${CP_ENVIRONMENT}
+      CP_DATABASE_URL: ${CP_DATABASE_URL}
+      CP_MASTER_KEY: ${CP_MASTER_KEY}
+      CP_JWT_SECRET: ${CP_JWT_SECRET}
+      CP_FRONTEND_ORIGIN: ${CP_FRONTEND_ORIGIN}
+      CP_LOG_LEVEL: ${CP_LOG_LEVEL}
+      CP_LOG_JSON: ${CP_LOG_JSON}
+      CP_DEADMAN_URL: http://backend:8000/health/deep
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - default
+      - database
+
+  backup:
+    image: postgres:16-alpine
+    restart: always
+    environment:
+      CP_DB_HOST: ${CP_DB_HOST}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_DB: ${POSTGRES_DB}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      CP_MASTER_KEY: ${CP_MASTER_KEY}
+      CP_BACKUP_BUCKET: ${CP_BACKUP_BUCKET:-}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-us-east-1}
+      AWS_ENDPOINT_URL: ${AWS_ENDPOINT_URL:-}
+    volumes:
+      - ./scripts/backup_auth.py:/usr/local/bin/backup_auth.py:ro
+      - ${CP_BACKUP_DIR:-./backups}:/backups
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        set -o pipefail
+        umask 077
+        apk add --no-cache openssl python3 >/dev/null
+        if [ -n "$${CP_BACKUP_BUCKET}" ]; then apk add --no-cache aws-cli >/dev/null; fi
+        while true; do
+          TS=$$(date -u +%Y%m%dT%H%M%SZ)
+          OUT="/backups/cryptopilot-$$TS.sql.gz.enc"
+          MAC="$$OUT.mac"
+          pg_dump -h "$$CP_DB_HOST" -U "$$POSTGRES_USER" "$$POSTGRES_DB" \
+            | gzip \
+            | openssl enc -aes-256-cbc -pbkdf2 -iter 600000 \
+                -pass env:CP_MASTER_KEY -out "$$OUT"
+          python3 /usr/local/bin/backup_auth.py create "$$OUT" "$$MAC"
+          if [ -n "$${CP_BACKUP_BUCKET}" ]; then
+            aws s3 cp "$$MAC" "$$CP_BACKUP_BUCKET/"
+            aws s3 cp "$$OUT" "$$CP_BACKUP_BUCKET/"
+          fi
+          find /backups -type f -name 'cryptopilot-*.enc*' -mtime +30 -delete
+          echo "backup $$TS done"
+          sleep 86400
+        done
+    networks:
+      - database

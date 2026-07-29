@@ -47,6 +47,10 @@ class RateLimitError(BinanceError):
     """HTTP 429/418 — back off before retrying."""
 
 
+class AmbiguousMutationError(BinanceError):
+    """A write may have reached Binance; query its idempotency key before acting."""
+
+
 @dataclass(frozen=True)
 class Kline:
     """A single 4h candle from Binance (Decimal money, UTC ms open time)."""
@@ -235,6 +239,12 @@ class BinanceClient:
                     raise RateLimitError(
                         f"rate limited ({resp.status_code})", status=resp.status_code
                     )
+                if mutation and resp.status_code >= 500:
+                    raise AmbiguousMutationError(
+                        "ambiguous exchange mutation outcome; query order truth "
+                        "and reconcile before acting",
+                        status=resp.status_code,
+                    )
                 if resp.status_code >= 400:
                     self._raise_api_error(resp)
                 return resp.json()
@@ -247,7 +257,7 @@ class BinanceClient:
             except (httpx.TransportError, httpx.TimeoutException) as exc:
                 last_exc = exc
                 if mutation:
-                    raise BinanceError(
+                    raise AmbiguousMutationError(
                         "ambiguous exchange mutation outcome; reconciliation required"
                     ) from exc
                 _log.warning("binance_transport_error", attempt=attempt, error=str(exc))

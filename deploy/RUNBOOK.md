@@ -52,6 +52,17 @@ docker compose exec backend python -m app.cli create-owner --email you@example.c
 
 Caddy obtains a Let's Encrypt cert automatically. Visit `https://pilot.yourdomain.com`.
 
+If a trusted domain is not available, keep HTTP loopback-only and run the
+independent monitor plus encrypted local backups:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.ops.yml up -d --build
+ssh -L 8090:127.0.0.1:8090 user@server
+```
+
+Use `http://localhost:8090` through that tunnel. Set `CP_BACKUP_DIR` to an
+absolute host directory. `CP_BACKUP_BUCKET` remains the off-host upload switch.
+
 ## 5. Configure in the dashboard
 
 - Settings → **DEMO credentials** (Binance testnet key/secret) → Test connection.

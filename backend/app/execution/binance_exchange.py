@@ -12,7 +12,11 @@ from dataclasses import replace
 from decimal import Decimal
 from typing import Any
 
-from app.execution.binance_client import BinanceClient, BinanceError
+from app.execution.binance_client import (
+    AmbiguousMutationError,
+    BinanceClient,
+    BinanceError,
+)
 from app.execution.exchange import (
     AccountState,
     Fill,
@@ -160,10 +164,15 @@ class BinanceExchange:
         }
         if reduce_only:
             params["reduceOnly"] = "true"
-        result = self._to_result(
-            await self._c.signed_request("POST", "/fapi/v1/order", params),
-            expected_client_order_id=client_order_id,
-        )
+        try:
+            data = await self._c.signed_request("POST", "/fapi/v1/order", params)
+            result = self._to_result(data, expected_client_order_id=client_order_id)
+        except AmbiguousMutationError as exc:
+            result = await self._recover_ambiguous_order(
+                symbol,
+                client_order_id,
+                cause=exc,
+            )
         if result.status == "FILLED" and result.filled_qty > 0 and result.avg_price <= 0:
             result = await self._resolve_market_avg_price(symbol, result)
         return result
@@ -189,10 +198,15 @@ class BinanceExchange:
             "reduceOnly": "true" if reduce_only else "false",
             "workingType": "MARK_PRICE",
         }
-        return self._to_algo_result(
-            await self._c.signed_request("POST", "/fapi/v1/algoOrder", params),
-            expected_client_order_id=client_order_id,
-        )
+        try:
+            data = await self._c.signed_request("POST", "/fapi/v1/algoOrder", params)
+            return self._to_algo_result(data, expected_client_order_id=client_order_id)
+        except AmbiguousMutationError as exc:
+            return await self._recover_ambiguous_order(
+                symbol,
+                client_order_id,
+                cause=exc,
+            )
 
     async def place_take_profit(
         self,
@@ -214,10 +228,15 @@ class BinanceExchange:
             "newClientOrderId": client_order_id,
             "reduceOnly": "true" if reduce_only else "false",
         }
-        return self._to_result(
-            await self._c.signed_request("POST", "/fapi/v1/order", params),
-            expected_client_order_id=client_order_id,
-        )
+        try:
+            data = await self._c.signed_request("POST", "/fapi/v1/order", params)
+            return self._to_result(data, expected_client_order_id=client_order_id)
+        except AmbiguousMutationError as exc:
+            return await self._recover_ambiguous_order(
+                symbol,
+                client_order_id,
+                cause=exc,
+            )
 
     async def cancel_all(self, symbol: str) -> int:
         before = await self.get_open_orders(symbol)
@@ -256,6 +275,29 @@ class BinanceExchange:
         await self._c.signed_request(
             "POST", "/fapi/v1/leverage", {"symbol": symbol, "leverage": leverage}
         )
+
+    async def _recover_ambiguous_order(
+        self,
+        symbol: str,
+        client_order_id: str,
+        *,
+        cause: AmbiguousMutationError,
+    ) -> OrderResult:
+        """Resolve an uncertain placement from Binance using its idempotent ID.
+
+        Binance's matching engine and query replicas are eventually consistent.
+        Query a bounded number of times; if the order is still not visible, preserve
+        the ambiguous error so the bot's failure boundary can flatten any exposure.
+        """
+        for attempt in range(4):
+            try:
+                return await self.get_order(symbol, client_order_id)
+            except BinanceError as exc:
+                if exc.code not in {-2011, -2013}:
+                    raise
+            if attempt < 3:
+                await asyncio.sleep(0.1 * (2**attempt))
+        raise cause
 
     async def _resolve_market_avg_price(self, symbol: str, result: OrderResult) -> OrderResult:
         """Recover a zero RESULT avgPrice from order truth or account trades.

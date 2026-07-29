@@ -158,9 +158,13 @@ class CandleIngestService:
                     },
                 )
                 await session.commit()
-                # Drive the bot on a real candle close (not on startup catch-up).
+                # A real close may create entries. Startup recovery reconciles and
+                # manages positions, but never chases an entry whose next-open
+                # execution point has already passed.
                 if reason == "candle_close" and not gaps:
-                    await self._drive_bot(session)
+                    await self._drive_bot(session, allow_new_entries=True)
+                elif reason == "startup" and not gaps:
+                    await self._drive_bot(session, allow_new_entries=False)
                 elif reason == "candle_close" and gaps:
                     await record_event(
                         session,
@@ -186,13 +190,19 @@ class CandleIngestService:
         except Exception as exc:
             _log.error("ingest_failed", reason=reason, error=str(exc))
 
-    async def _drive_bot(self, session: AsyncSession) -> None:
+    async def _drive_bot(
+        self,
+        session: AsyncSession,
+        *,
+        allow_new_entries: bool,
+    ) -> None:
         """If the bot is running and credentials exist, evaluate the closed candle."""
         from sqlalchemy import select
 
         from app.bot.service import bot_service
         from app.bot.state import BotStatus
         from app.db.models import Candle
+        from app.execution.binance_client import AmbiguousMutationError
         from app.execution.orders import ProtectiveStopFailed, persist_emergency_exit
         from app.services.execution_service import NotConfiguredError, execution_context
 
@@ -222,7 +232,11 @@ class CandleIngestService:
         try:
             async with execution_context(session) as ctx:
                 actions = await bot_service.evaluate_once(
-                    session, ctx.exchange, ctx.orders, candles=candles
+                    session,
+                    ctx.exchange,
+                    ctx.orders,
+                    candles=candles,
+                    allow_new_entries=allow_new_entries,
                 )
                 if actions:
                     _log.info("bot_actions", actions=actions)
@@ -259,6 +273,70 @@ class CandleIngestService:
             )
             await session.commit()
             _log.error("bot_drive_failed", error=str(exc), cause=str(cause) if cause else None)
+        except AmbiguousMutationError as exc:
+            # Binance documents mutation timeouts/5xx as UNKNOWN, not failed. The
+            # idempotent order query already had its bounded consistency window.
+            # If truth is still unavailable, cancel and flatten from account truth
+            # immediately rather than leaving possible exposure until the next 4h tick.
+            await session.rollback()
+            recovery_error: Exception | None = None
+            flattened = False
+            cancelled = 0
+            try:
+                async with execution_context(session) as ctx:
+                    cancelled = await ctx.orders.kill(session)
+                    position = await ctx.exchange.get_position(ctx.market.symbol)
+                    open_orders = await ctx.exchange.get_open_orders(ctx.market.symbol)
+                    flattened = position.qty == 0 and not open_orders
+            except Exception as recovery_exc:
+                recovery_error = recovery_exc
+            await bot_service.enter_safe_mode(
+                session,
+                reason="ambiguous Binance mutation outcome; emergency recovery executed",
+            )
+            await record_event(
+                session,
+                level="ERROR",
+                category="reconciliation",
+                message=(
+                    "Ambiguous Binance mutation recovered to flat"
+                    if flattened
+                    else "Ambiguous Binance mutation; emergency recovery unconfirmed"
+                ),
+                ref="ambiguous_mutation",
+                payload={
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                    "cancelled_orders": cancelled,
+                    "flattened": flattened,
+                    "recovery_error_type": (
+                        type(recovery_error).__name__ if recovery_error is not None else None
+                    ),
+                    "recovery_error": str(recovery_error) if recovery_error is not None else None,
+                },
+            )
+            from app.services.notify_config import notify_event
+
+            await notify_event(
+                session,
+                kind="error",
+                payload={
+                    "error": (
+                        "ambiguous Binance mutation recovered to flat"
+                        if flattened
+                        else "URGENT: ambiguous Binance mutation recovery unconfirmed"
+                    )
+                },
+            )
+            await session.commit()
+            _log.error(
+                "ambiguous_mutation_recovery",
+                flattened=flattened,
+                cancelled_orders=cancelled,
+                recovery_error=(
+                    str(recovery_error) if recovery_error is not None else None
+                ),
+            )
         except Exception as exc:
             await session.rollback()
             await bot_service.enter_safe_mode(session, reason="closed-candle evaluation failed")

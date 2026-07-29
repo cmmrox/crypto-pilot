@@ -7,6 +7,7 @@ from decimal import Decimal
 import httpx
 import pytest
 from app.execution.binance_client import (
+    AmbiguousMutationError,
     BinanceClient,
     BinanceError,
     Kline,
@@ -159,10 +160,44 @@ async def test_signed_mutation_transport_failure_is_not_blindly_retried() -> Non
             client=raw,
             max_retries=4,
         )
-        with pytest.raises(BinanceError, match="ambiguous"):
+        with pytest.raises(AmbiguousMutationError, match="ambiguous"):
             await client.signed_request(
                 "POST",
                 "/fapi/v1/order",
                 {"symbol": "BTCUSDT", "newClientOrderId": "CP-test"},
             )
     assert attempts == 1
+
+
+@pytest.mark.asyncio
+async def test_signed_mutation_5xx_is_ambiguous_and_not_blindly_retried() -> None:
+    attempts = 0
+
+    def fail(_request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(
+            503,
+            json={"code": -1000, "msg": "execution status unknown"},
+        )
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(fail),
+        base_url="https://example.invalid",
+    ) as raw:
+        client = BinanceClient(
+            "LIVE",
+            api_key="key",
+            api_secret="secret",
+            client=raw,
+            max_retries=4,
+        )
+        with pytest.raises(AmbiguousMutationError, match="query order truth") as excinfo:
+            await client.signed_request(
+                "POST",
+                "/fapi/v1/order",
+                {"symbol": "BTCUSDT", "newClientOrderId": "CP-test"},
+            )
+
+    assert attempts == 1
+    assert excinfo.value.status == 503

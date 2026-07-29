@@ -50,7 +50,9 @@ services:
       - backend
       - frontend
     ports:
-      - "8090:80"
+      # Safe default when no trusted TLS domain is configured. Reach it with:
+      # ssh -L 8090:127.0.0.1:8090 <host>
+      - "127.0.0.1:${CP_HTTP_PORT:-8090}:80"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

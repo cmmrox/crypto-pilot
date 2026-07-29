@@ -137,6 +137,7 @@ class BotRun(Base):
     strategy: Mapped[str] = mapped_column(String(64), nullable=False)
     strategy_release: Mapped[str] = mapped_column(String(32), default="legacy", nullable=False)
     strategy_interval: Mapped[str] = mapped_column(String(8), default="4h", nullable=False)
+    last_evaluated_candle_at: Mapped[dt.datetime | None] = mapped_column(nullable=True)
     stop_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
     started_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
 

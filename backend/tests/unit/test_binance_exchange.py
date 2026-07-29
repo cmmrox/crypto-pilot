@@ -7,7 +7,7 @@ from decimal import Decimal
 from typing import Any
 
 import pytest
-from app.execution.binance_client import BinanceError
+from app.execution.binance_client import AmbiguousMutationError, BinanceError
 from app.execution.binance_exchange import BinanceExchange
 
 
@@ -119,6 +119,27 @@ class AlgoStubClient:
         raise AssertionError(f"unexpected request: {method} {path}")
 
 
+class AmbiguousPlacementStubClient:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str, dict[str, Any] | None]] = []
+
+    async def signed_request(
+        self, method: str, path: str, params: dict[str, Any] | None = None
+    ) -> Any:
+        self.calls.append((method, path, params))
+        if method == "POST":
+            raise AmbiguousMutationError("execution status unknown", status=503)
+        if method == "GET" and path == "/fapi/v1/order":
+            return {
+                "clientOrderId": "CP-recovered",
+                "orderId": 9001,
+                "status": "FILLED",
+                "executedQty": "0.001",
+                "avgPrice": "65000",
+            }
+        raise AssertionError(f"unexpected request: {method} {path}")
+
+
 @pytest.mark.asyncio
 async def test_position_response_rejects_empty_and_cross_symbol_rows() -> None:
     with pytest.raises(BinanceError, match="exactly one"):
@@ -185,6 +206,26 @@ async def test_market_order_recovers_zero_average_from_account_trades() -> None:
     assert result.filled_qty == Decimal("0.002")
     assert result.avg_price == Decimal("65000")
     assert result.raw["price_source"] == "account_trades"
+
+
+@pytest.mark.asyncio
+async def test_market_order_recovers_ambiguous_5xx_from_idempotent_order_query() -> None:
+    client = AmbiguousPlacementStubClient()
+
+    result = await BinanceExchange(client).place_market(  # type: ignore[arg-type]
+        "BTCUSDT",
+        "BUY",
+        Decimal("0.001"),
+        client_order_id="CP-recovered",
+    )
+
+    assert result.status == "FILLED"
+    assert result.filled_qty == Decimal("0.001")
+    assert result.avg_price == Decimal("65000")
+    assert [call[:2] for call in client.calls] == [
+        ("POST", "/fapi/v1/order"),
+        ("GET", "/fapi/v1/order"),
+    ]
 
 
 @pytest.mark.asyncio

@@ -103,7 +103,7 @@ def audit(repo_root: Path) -> LivePathAudit:
     )
     next_open_execution = (
         'reason == "candle_close"' in ingest_source
-        and "_drive_bot(session)" in ingest_source
+        and "_drive_bot(session, allow_new_entries=True)" in ingest_source
         and "get_mark_price(" in bot_source
     )
     relevant = handled & REQUIRED_INTENTS

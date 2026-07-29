@@ -53,6 +53,9 @@ Runtime-equivalence fields are persisted rather than reconstructed from process
 memory: `trades.remaining_qty`, `trades.highest_high`, `orders.filled_qty`, and
 `orders.avg_fill_px`. Conditional stop rows retain the Binance Algo ID in
 `orders.binance_order_id` and the original Algo payload in `raw_json`.
+`bot_runs.last_evaluated_candle_at` is the durable closed-candle decision cursor:
+startup baselines the latest already-closed candle and any later gap enters safe
+mode instead of chasing an expired entry signal.
 - `events (ts desc, id desc)`, `events (category, ts desc)`,
   `events (level, ts desc)` — stable paginated ledger queries.
 - `otp_challenges (user_id, purpose, created_at)` — send cap and challenge lookup.

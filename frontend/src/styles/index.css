@@ -962,6 +962,24 @@ a {
   gap: 8px;
   align-items: center;
 }
+.strategy-list details {
+  grid-column: 1 / -1;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+  color: var(--text-soft);
+}
+.strategy-list details summary {
+  cursor: pointer;
+  color: var(--text);
+  font-weight: 600;
+}
+.strategy-list details h4 {
+  margin: 10px 0 4px;
+}
+.strategy-list details ul {
+  margin: 4px 0;
+  padding-left: 20px;
+}
 .pill.ok svg,
 .pill.warn svg {
   vertical-align: -2px;

@@ -98,7 +98,7 @@ validated research engine. This is the G1 success criterion and the highest-risk
 
 **Deliverables**
 - Intent types + `Strategy` protocol + registry (BSD §7 vocabulary, exactly).
-- `trend_rider_v6.py` / `trend_rider_v52.py`: pure, deterministic, Decimal-safe ports
+- `trend_rider_v6_4h.py` / `trend_rider_v52_4h.py`: pure, deterministic ports
   of the validated logic (regime, pullback state, TP1/breakeven/trail state machine,
   deep-bear sleeve, vol targeting math, both breakers' decisions).
 - **Parity harness** (`backend/tests/parity/`): replays `research/data/btc_4h.csv`

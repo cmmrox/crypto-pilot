@@ -11,6 +11,7 @@ All money is Decimal.
 
 from __future__ import annotations
 
+import datetime as dt
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Protocol
@@ -28,6 +29,29 @@ class OrderResult:
     filled_qty: Decimal
     avg_price: Decimal
     raw: dict[str, object] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class Fill:
+    """One exchange trade fill, including exact fee and realized P&L."""
+
+    exchange_order_id: str
+    exchange_trade_id: str
+    side: str
+    qty: Decimal
+    price: Decimal
+    commission: Decimal
+    realized_pnl: Decimal
+    filled_at: dt.datetime
+
+
+@dataclass(frozen=True)
+class FundingIncome:
+    """One funding-fee income row attributable to the symbol."""
+
+    exchange_income_id: str
+    amount: Decimal
+    occurred_at: dt.datetime
 
 
 @dataclass(frozen=True)
@@ -59,7 +83,17 @@ class Exchange(Protocol):
 
     async def get_position(self, symbol: str) -> Position: ...
 
+    async def get_mark_price(self, symbol: str) -> Decimal: ...
+
     async def get_open_orders(self, symbol: str) -> list[OrderResult]: ...
+
+    async def get_order(self, symbol: str, client_order_id: str) -> OrderResult: ...
+
+    async def get_order_fills(self, symbol: str, exchange_order_id: str) -> list[Fill]: ...
+
+    async def get_funding_income(
+        self, symbol: str, *, start_at: dt.datetime
+    ) -> list[FundingIncome]: ...
 
     async def place_market(
         self,
@@ -94,5 +128,7 @@ class Exchange(Protocol):
     ) -> OrderResult: ...
 
     async def cancel_all(self, symbol: str) -> int: ...
+
+    async def cancel_order(self, symbol: str, client_order_id: str) -> OrderResult: ...
 
     async def set_leverage(self, symbol: str, leverage: int) -> None: ...

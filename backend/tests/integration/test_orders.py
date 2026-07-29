@@ -33,7 +33,7 @@ async def _filters(ex: FakeExchange):
 @pytest.mark.asyncio
 async def test_open_long_places_entry_stop_and_tp(db_session: AsyncSession) -> None:
     ex = FakeExchange(mark_price=D("65000"))
-    om = OrderManager(ex)
+    om = OrderManager(ex, symbol="BTCUSDT")
     sizing = size_long(
         equity=D("5000"),
         risk_pct=D("2"),
@@ -48,7 +48,9 @@ async def test_open_long_places_entry_stop_and_tp(db_session: AsyncSession) -> N
         stop_price=D("63000"),
         tp1_price=D("67000"),
         tp1_fraction=D("0.4"),
-        strategy="trend_rider_v6",
+        strategy="trend_rider_v6_4h",
+        strategy_release="6.0",
+        strategy_interval="4h",
     )
     await db_session.commit()
     # Entry + stop + TP1 were placed.
@@ -79,7 +81,7 @@ async def test_open_long_emergency_flattens_when_stop_fails(
             raise RuntimeError("simulated stop rejection")
 
     ex = StopFailingExchange(mark_price=D("65000"))
-    om = OrderManager(ex)
+    om = OrderManager(ex, symbol="BTCUSDT")
     sizing = size_long(
         equity=D("5000"),
         risk_pct=D("2"),
@@ -95,7 +97,9 @@ async def test_open_long_emergency_flattens_when_stop_fails(
             stop_price=D("63000"),
             tp1_price=D("67000"),
             tp1_fraction=D("0.4"),
-            strategy="trend_rider_v6",
+            strategy="trend_rider_v6_4h",
+            strategy_release="6.0",
+            strategy_interval="4h",
         )
     assert (await ex.get_position("BTCUSDT")).qty == D("0")
     record = excinfo.value.record
@@ -149,7 +153,7 @@ async def test_open_long_records_open_trade_when_flatten_also_fails(
             )
 
     ex = FullyFailingExchange(mark_price=D("65000"))
-    om = OrderManager(ex)
+    om = OrderManager(ex, symbol="BTCUSDT")
     sizing = size_long(
         equity=D("5000"),
         risk_pct=D("2"),
@@ -165,7 +169,9 @@ async def test_open_long_records_open_trade_when_flatten_also_fails(
             stop_price=D("63000"),
             tp1_price=D("67000"),
             tp1_fraction=D("0.4"),
-            strategy="trend_rider_v6",
+            strategy="trend_rider_v6_4h",
+            strategy_release="6.0",
+            strategy_interval="4h",
         )
     record = excinfo.value.record
     assert record.flattened is False
@@ -189,7 +195,7 @@ async def test_open_long_records_open_trade_when_flatten_also_fails(
 @pytest.mark.asyncio
 async def test_open_short_has_no_price_stop(db_session: AsyncSession) -> None:
     ex = FakeExchange(mark_price=D("60000"))
-    om = OrderManager(ex)
+    om = OrderManager(ex, symbol="BTCUSDT")
     sizing = size_short(
         equity=D("5000"),
         weight_pct=D("75"),
@@ -199,7 +205,13 @@ async def test_open_short_has_no_price_stop(db_session: AsyncSession) -> None:
         leverage_cap=D("3"),
         filters=await _filters(ex),
     )
-    trade = await om.open_short(db_session, sizing=sizing, strategy="trend_rider_v6")
+    trade = await om.open_short(
+        db_session,
+        sizing=sizing,
+        strategy="trend_rider_v6_4h",
+        strategy_release="6.0",
+        strategy_interval="4h",
+    )
     await db_session.commit()
     # Only a MARKET entry — no STOP_MARKET by validated design.
     assert [t[0] for t in ex.placed] == ["MARKET"]
@@ -236,7 +248,7 @@ async def test_flatten_cancels_and_closes(db_session: AsyncSession) -> None:
     ex = FakeExchange(mark_price=D("65000"))
     await ex.place_market("BTCUSDT", "BUY", D("0.1"), client_order_id="e")
     await ex.place_stop_market("BTCUSDT", "SELL", D("0.1"), D("63000"), client_order_id="s")
-    om = OrderManager(ex)
+    om = OrderManager(ex, symbol="BTCUSDT")
     await om.flatten(db_session, side="LONG", qty=D("0.1"), reason="test")
     await db_session.commit()
     pos = await ex.get_position("BTCUSDT")
@@ -249,7 +261,7 @@ async def test_kill_switch_flattens_from_short(db_session: AsyncSession) -> None
     ex = FakeExchange(mark_price=D("60000"))
     await ex.place_market("BTCUSDT", "SELL", D("0.08"), client_order_id="e")
     await ex.place_take_profit("BTCUSDT", "BUY", D("0.08"), D("55000"), client_order_id="t")
-    om = OrderManager(ex)
+    om = OrderManager(ex, symbol="BTCUSDT")
     await om.kill(db_session)
     await db_session.commit()
     assert (await ex.get_position("BTCUSDT")).qty == D("0")
@@ -259,7 +271,7 @@ async def test_kill_switch_flattens_from_short(db_session: AsyncSession) -> None
 @pytest.mark.asyncio
 async def test_order_rows_store_decimal_and_client_id(db_session: AsyncSession) -> None:
     ex = FakeExchange(mark_price=D("65000"))
-    om = OrderManager(ex)
+    om = OrderManager(ex, symbol="BTCUSDT")
     sizing = size_long(
         equity=D("5000"),
         risk_pct=D("2"),
@@ -274,10 +286,100 @@ async def test_order_rows_store_decimal_and_client_id(db_session: AsyncSession) 
         stop_price=D("63000"),
         tp1_price=D("67000"),
         tp1_fraction=D("0.4"),
-        strategy="trend_rider_v6",
+        strategy="trend_rider_v6_4h",
+        strategy_release="6.0",
+        strategy_interval="4h",
     )
     await db_session.commit()
     orders = (await db_session.execute(select(Order))).scalars().all()
     for o in orders:
         assert o.client_order_id  # every order has an idempotent client id
         assert isinstance(o.qty, Decimal)
+
+
+@pytest.mark.asyncio
+async def test_long_stop_ratchets_and_never_lowers(db_session: AsyncSession) -> None:
+    ex = FakeExchange(mark_price=D("65000"))
+    om = OrderManager(ex, symbol="BTCUSDT")
+    sizing = size_long(
+        equity=D("5000"),
+        risk_pct=D("2"),
+        stop_distance=D("2000"),
+        price=D("65000"),
+        leverage_cap=D("3"),
+        filters=await _filters(ex),
+    )
+    trade = await om.open_long(
+        db_session,
+        sizing=sizing,
+        stop_price=D("63000"),
+        tp1_price=D("67000"),
+        tp1_fraction=D("0.4"),
+        strategy="trend_rider_v6_4h",
+        strategy_release="6.0",
+        strategy_interval="4h",
+    )
+
+    moved = await om.move_long_stop(
+        db_session,
+        trade=trade,
+        new_stop_price=D("64000"),
+        remaining_qty=trade.remaining_qty,
+        filters=await _filters(ex),
+    )
+    lowered = await om.move_long_stop(
+        db_session,
+        trade=trade,
+        new_stop_price=D("63500"),
+        remaining_qty=trade.remaining_qty,
+        filters=await _filters(ex),
+    )
+
+    assert moved is True
+    assert lowered is False
+    active = [
+        row for row in await ex.get_open_orders("BTCUSDT") if row.client_order_id.startswith("CPS")
+    ]
+    assert len(active) == 1
+
+
+@pytest.mark.asyncio
+async def test_short_resize_increases_and_reduces_to_exact_target(
+    db_session: AsyncSession,
+) -> None:
+    ex = FakeExchange(mark_price=D("60000"))
+    om = OrderManager(ex, symbol="BTCUSDT")
+    sizing = size_short(
+        equity=D("5000"),
+        weight_pct=D("75"),
+        vol_target=D("0.40"),
+        realized_vol=D("0.40"),
+        price=D("60000"),
+        leverage_cap=D("3"),
+        filters=await _filters(ex),
+    )
+    trade = await om.open_short(
+        db_session,
+        sizing=sizing,
+        strategy="trend_rider_v6_4h",
+        strategy_release="6.0",
+        strategy_interval="4h",
+    )
+
+    increased = trade.remaining_qty + D("0.001")
+    assert await om.resize_short(
+        db_session,
+        trade=trade,
+        current_qty=-trade.remaining_qty,
+        target_qty=increased,
+    )
+    reduced = increased - D("0.002")
+    assert await om.resize_short(
+        db_session,
+        trade=trade,
+        current_qty=-increased,
+        target_qty=reduced,
+    )
+
+    assert (await ex.get_position("BTCUSDT")).qty == -reduced
+    assert trade.remaining_qty == reduced

@@ -137,12 +137,29 @@ class BinanceClient:
         data = await self._request("GET", "/fapi/v1/time")
         return int(data["serverTime"])
 
-    async def get_klines(self, symbol: str, interval: str, *, limit: int = 500) -> list[Kline]:
+    async def get_klines(
+        self,
+        symbol: str,
+        interval: str,
+        *,
+        limit: int = 500,
+        start_time_ms: int | None = None,
+        end_time_ms: int | None = None,
+    ) -> list[Kline]:
         """Fetch closed klines (most recent last). Public endpoint."""
+        params: dict[str, Any] = {
+            "symbol": symbol,
+            "interval": interval,
+            "limit": limit,
+        }
+        if start_time_ms is not None:
+            params["startTime"] = start_time_ms
+        if end_time_ms is not None:
+            params["endTime"] = end_time_ms
         data = await self._request(
             "GET",
             "/fapi/v1/klines",
-            params={"symbol": symbol, "interval": interval, "limit": limit},
+            params=params,
         )
         observed_at = int(time.time() * 1000)
         return [Kline.from_rest(row, now_ms=observed_at) for row in data]

@@ -93,7 +93,9 @@ async def seed() -> None:
                 "realized_pnl": Decimal("200.00000000"),
                 "r_multiple": Decimal("2.00000000"),
                 "exit_reason": "4 ATR trail",
-                "strategy": "trend_rider_v6",
+                "strategy": "trend_rider_v6_4h",
+                "strategy_release": "6.0",
+                "strategy_interval": "4h",
                 "environment": "DEMO",
             },
             {
@@ -109,7 +111,9 @@ async def seed() -> None:
                 "realized_pnl": Decimal("-50.00000000"),
                 "r_multiple": Decimal("-0.50000000"),
                 "exit_reason": "bear regime ended",
-                "strategy": "trend_rider_v6",
+                "strategy": "trend_rider_v6_4h",
+                "strategy_release": "6.0",
+                "strategy_interval": "4h",
                 "environment": "DEMO",
             },
         ]
@@ -132,6 +136,8 @@ async def seed() -> None:
                         "r_multiple",
                         "exit_reason",
                         "strategy",
+                        "strategy_release",
+                        "strategy_interval",
                         "environment",
                     )
                 },

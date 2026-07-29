@@ -1,8 +1,7 @@
-"""Strategy plugins. Importing this package registers the built-in strategies."""
+"""Public strategy contract and automatically discovered plugin catalog."""
 
 from __future__ import annotations
 
-from app.strategies import trend_rider_v6, trend_rider_v52  # noqa: F401  (registers)
 from app.strategies.base import (
     Candle,
     EnterLong,
@@ -13,10 +12,24 @@ from app.strategies.base import (
     MoveStop,
     ResizeShort,
     Strategy,
+    StrategyWatch,
     TakePartial,
     TradeState,
+    WatchRule,
+)
+from app.strategies.catalog import (
+    canonical_strategy_id,
+    default_strategy,
     get_strategy,
     registered_names,
+    registered_strategies,
+)
+from app.strategies.manifest import (
+    MarketSpec,
+    RiskSpec,
+    StrategyEducation,
+    StrategyManifest,
+    ValidationEvidence,
 )
 
 __all__ = [
@@ -26,11 +39,21 @@ __all__ = [
     "ExitAll",
     "Halt",
     "Intent",
+    "MarketSpec",
     "MoveStop",
     "ResizeShort",
+    "RiskSpec",
     "Strategy",
+    "StrategyEducation",
+    "StrategyManifest",
+    "StrategyWatch",
     "TakePartial",
     "TradeState",
+    "ValidationEvidence",
+    "WatchRule",
+    "canonical_strategy_id",
+    "default_strategy",
     "get_strategy",
     "registered_names",
+    "registered_strategies",
 ]

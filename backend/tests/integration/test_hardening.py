@@ -95,10 +95,50 @@ async def test_live_switch_requires_typed_confirm(
 @pytest.mark.asyncio
 async def test_strategy_switch_guarded(app_client: httpx.AsyncClient, owner: str) -> None:
     h = await _headers(app_client, owner)
-    ok = await app_client.put("/api/settings/strategy", json={"name": "trend_rider_v52"}, headers=h)
+    ok = await app_client.put(
+        "/api/settings/strategy",
+        json={"name": "trend_rider_v52_4h"},
+        headers=h,
+    )
     assert ok.status_code == 200
     bad = await app_client.put("/api/settings/strategy", json={"name": "nope"}, headers=h)
     assert bad.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_strategy_switch_rejects_open_trade(
+    app_client: httpx.AsyncClient, owner: str
+) -> None:
+    import datetime as dt
+    from decimal import Decimal
+
+    from app.db.models import Trade
+    from app.db.session import get_sessionmaker
+
+    async with get_sessionmaker()() as session:
+        session.add(
+            Trade(
+                opened_at=dt.datetime.now(dt.UTC),
+                side="LONG",
+                entry_px=Decimal("50000"),
+                qty=Decimal("0.001"),
+                remaining_qty=Decimal("0.001"),
+                strategy="trend_rider_v6_4h",
+                strategy_release="6.0",
+                strategy_interval="4h",
+                environment="DEMO",
+            )
+        )
+        await session.commit()
+
+    response = await app_client.put(
+        "/api/settings/strategy",
+        json={"name": "trend_rider_v52_4h"},
+        headers=await _headers(app_client, owner),
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == ("Close the active position before changing strategy.")
 
 
 @pytest.mark.asyncio

@@ -25,7 +25,6 @@ from app.services.events import record_event
 router = APIRouter(prefix="/api/ops", tags=["ops"])
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
-SYMBOL = "BTCUSDT"
 
 
 class KillResult(BaseModel):
@@ -61,31 +60,42 @@ async def self_check(current: CurrentUserDep, session: SessionDep) -> SelfCheckR
         async with exec_svc.execution_context(session) as ctx:
             if ctx.environment != "DEMO":
                 raise HTTPException(status.HTTP_403_FORBIDDEN, detail="self-check is DEMO-only")
-            filters = await ctx.exchange.get_filters(SYMBOL)
-            price = (await ctx.exchange.get_position(SYMBOL)).entry_price
+            symbol = ctx.market.symbol
+            filters = await ctx.exchange.get_filters(symbol)
+            price = (await ctx.exchange.get_position(symbol)).entry_price
             if price <= 0:
                 # flat → use account mark via a tiny public kline fetch
                 from app.execution.binance_client import BinanceClient
 
                 async with BinanceClient(ctx.environment) as md:
-                    price = Decimal(str((await md.get_klines(SYMBOL, "4h", limit=1))[0].close))
+                    price = Decimal(
+                        str(
+                            (
+                                await md.get_klines(
+                                    symbol,
+                                    ctx.market.interval,
+                                    limit=1,
+                                )
+                            )[0].close
+                        )
+                    )
             qty = clamp_qty((filters.min_notional * Decimal("1.2")) / price, filters)
             entry = await ctx.exchange.place_market(
-                SYMBOL, "BUY", qty, client_order_id=new_client_order_id("SELF")
+                symbol, "BUY", qty, client_order_id=new_client_order_id("SELF")
             )
-            pos = await ctx.exchange.get_position(SYMBOL)
-            rec = await reconcile_position(ctx.exchange, SYMBOL, expected_qty=pos.qty)
+            pos = await ctx.exchange.get_position(symbol)
+            rec = await reconcile_position(ctx.exchange, symbol, expected_qty=pos.qty)
             # Always flatten.
             flattened = False
             if pos.qty != 0:
                 await ctx.exchange.place_market(
-                    SYMBOL,
+                    symbol,
                     "SELL",
                     abs(pos.qty),
                     client_order_id=new_client_order_id("SELFX"),
                     reduce_only=True,
                 )
-                flattened = abs((await ctx.exchange.get_position(SYMBOL)).qty) <= filters.step_size
+                flattened = abs((await ctx.exchange.get_position(symbol)).qty) <= filters.step_size
             await record_event(
                 session,
                 level="INFO",

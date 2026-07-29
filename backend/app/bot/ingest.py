@@ -21,11 +21,10 @@ from app.execution import candles as candle_svc
 from app.execution.binance_client import BinanceClient
 from app.services.events import record_event
 from app.services.settings_store import get_settings_row
+from app.strategies import default_strategy, get_strategy
 
 _log = get_logger("ingest")
 
-SYMBOL = "BTCUSDT"
-INTERVAL = "4h"
 POST_CLOSE_DELAY_S = 8  # let the exchange finalize the candle before we fetch
 WORKER_HEARTBEAT_SECONDS = 5
 
@@ -35,7 +34,7 @@ class CandleIngestService:
 
     def __init__(self) -> None:
         self._task: asyncio.Task[None] | None = None
-        self._dead_man = DeadMan(INTERVAL)
+        self._dead_man = DeadMan(default_strategy().manifest.market.interval)
         self._stop = asyncio.Event()
         self._worker_heartbeat_at: dt.datetime | None = None
 
@@ -72,7 +71,10 @@ class CandleIngestService:
 
     async def _run(self) -> None:
         while not self._stop.is_set():
-            delay = seconds_until_next_close(utc_now(), INTERVAL) + POST_CLOSE_DELAY_S
+            async with get_sessionmaker()() as session:
+                settings_row = await get_settings_row(session)
+                market = get_strategy(settings_row.active_strategy).manifest.market
+            delay = seconds_until_next_close(utc_now(), market.interval) + POST_CLOSE_DELAY_S
             deadline = asyncio.get_running_loop().time() + delay
             while not self._stop.is_set():
                 self._worker_heartbeat_at = utc_now()
@@ -120,16 +122,40 @@ class CandleIngestService:
             async with get_sessionmaker()() as session:
                 settings_row = await get_settings_row(session)
                 env = settings_row.active_environment
+                strategy = get_strategy(settings_row.active_strategy)
+                market = strategy.manifest.market
                 async with BinanceClient(env) as client:
-                    await candle_svc.backfill(session, client, SYMBOL, INTERVAL, limit=500)
-                gaps = await candle_svc.detect_gaps(session, SYMBOL, INTERVAL)
+                    if reason == "startup":
+                        await candle_svc.backfill_history(
+                            session,
+                            client,
+                            market.symbol,
+                            market.interval,
+                            bars=market.history_bars,
+                        )
+                    else:
+                        await candle_svc.backfill(
+                            session,
+                            client,
+                            market.symbol,
+                            market.interval,
+                            limit=500,
+                        )
+                gaps = await candle_svc.detect_gaps(session, market.symbol, market.interval)
                 await record_event(
                     session,
                     level="INFO" if not gaps else "WARN",
                     category="system",
                     message=f"Candle ingest ({reason}) — {len(gaps)} gap(s)",
                     ref="ingest",
-                    payload={"reason": reason, "gaps": len(gaps), "environment": env},
+                    payload={
+                        "reason": reason,
+                        "gaps": len(gaps),
+                        "environment": env,
+                        "strategy": strategy.manifest.strategy_id,
+                        "symbol": market.symbol,
+                        "interval": market.interval,
+                    },
                 )
                 await session.commit()
                 # Drive the bot on a real candle close (not on startup catch-up).
@@ -171,15 +197,22 @@ class CandleIngestService:
         from app.services.execution_service import NotConfiguredError, execution_context
 
         snap = await bot_service.status(session)
-        if snap.status != BotStatus.RUNNING:
+        # Safe mode blocks new entries, but protective position management and
+        # reconciliation must continue on every closed candle.
+        if snap.status == BotStatus.STOPPED:
             return
+        strategy = get_strategy(snap.strategy)
+        market = strategy.manifest.market
         candles = (
             (
                 await session.execute(
                     select(Candle)
-                    .where(Candle.symbol == SYMBOL, Candle.interval == INTERVAL)
+                    .where(
+                        Candle.symbol == market.symbol,
+                        Candle.interval == market.interval,
+                    )
                     .order_by(Candle.open_time.desc())
-                    .limit(400)
+                    .limit(market.history_bars)
                 )
             )
             .scalars()

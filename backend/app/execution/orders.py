@@ -12,11 +12,13 @@ import uuid
 from dataclasses import dataclass
 from decimal import Decimal
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.db.models import Order, Trade
 from app.execution.exchange import Exchange, OrderResult
+from app.execution.filters import SymbolFilters, clamp_qty, round_price
 from app.risk.sizing import SizingResult
 from app.services.events import record_event
 
@@ -42,6 +44,8 @@ class EmergencyExitRecord:
     exit_result: OrderResult | None
     qty: Decimal
     strategy: str
+    strategy_release: str
+    strategy_interval: str
     environment: str
     bot_run_id: int | None
     stop_price: Decimal
@@ -69,12 +73,14 @@ class ProtectiveStopFailed(RuntimeError):
         self.record = record
 
 
+class StopMoveFailed(RuntimeError):
+    """The requested ratchet failed while the previous stop remained protected."""
+
+
 class OrderManager:
     """Places and records orders for one symbol via an Exchange."""
 
-    def __init__(
-        self, exchange: Exchange, symbol: str = "BTCUSDT", environment: str = "DEMO"
-    ) -> None:
+    def __init__(self, exchange: Exchange, symbol: str, environment: str = "DEMO") -> None:
         self._ex = exchange
         self._symbol = symbol
         self._env = environment
@@ -88,14 +94,32 @@ class OrderManager:
         tp1_price: Decimal,
         tp1_fraction: Decimal,
         strategy: str,
+        strategy_release: str,
+        strategy_interval: str,
         bot_run_id: int | None = None,
     ) -> Trade:
         """MARKET entry + STOP_MARKET protective stop + LIMIT TP1 (all reduce-only)."""
         entry = await self._ex.place_market(
             self._symbol, "BUY", sizing.qty, client_order_id=new_client_order_id("CPL")
         )
-        trade = await self._persist_trade(session, "LONG", entry, sizing.qty, strategy, bot_run_id)
-        await self._persist_order(session, entry, trade.id, "MARKET", reduce_only=False)
+        _require_confirmed_market_fill(entry, sizing.qty)
+        trade = await self._persist_trade(
+            session,
+            "LONG",
+            entry,
+            strategy,
+            strategy_release,
+            strategy_interval,
+            bot_run_id,
+        )
+        await self._persist_order(
+            session,
+            entry,
+            trade.id,
+            "MARKET",
+            requested_qty=sizing.qty,
+            reduce_only=False,
+        )
 
         try:
             stop = await self._ex.place_stop_market(
@@ -143,6 +167,8 @@ class OrderManager:
                         None,
                         sizing.qty,
                         strategy,
+                        strategy_release,
+                        strategy_interval,
                         bot_run_id,
                         stop_price,
                         stop_error,
@@ -156,6 +182,8 @@ class OrderManager:
                     emergency,
                     sizing.qty,
                     strategy,
+                    strategy_release,
+                    strategy_interval,
                     bot_run_id,
                     stop_price,
                     stop_error,
@@ -163,7 +191,13 @@ class OrderManager:
                 ),
             ) from stop_error
         await self._persist_order(
-            session, stop, trade.id, "STOP_MARKET", reduce_only=True, stop_price=stop_price
+            session,
+            stop,
+            trade.id,
+            "STOP_MARKET",
+            requested_qty=sizing.qty,
+            reduce_only=True,
+            stop_price=stop_price,
         )
 
         tp_qty = _round_to(sizing.qty * tp1_fraction, sizing.qty)
@@ -175,7 +209,13 @@ class OrderManager:
             client_order_id=new_client_order_id("CPT"),
         )
         await self._persist_order(
-            session, tp1, trade.id, "LIMIT", reduce_only=True, price=tp1_price
+            session,
+            tp1,
+            trade.id,
+            "LIMIT",
+            requested_qty=tp_qty,
+            reduce_only=True,
+            price=tp1_price,
         )
         await record_event(
             session,
@@ -203,6 +243,7 @@ class OrderManager:
                 "environment": self._env,
             },
         )
+        await self._refresh_trade_money(session, trade)
         return trade
 
     async def open_short(
@@ -211,14 +252,32 @@ class OrderManager:
         *,
         sizing: SizingResult,
         strategy: str,
+        strategy_release: str,
+        strategy_interval: str,
         bot_run_id: int | None = None,
     ) -> Trade:
         """MARKET short entry. No price stop by validated design (size-managed)."""
         entry = await self._ex.place_market(
             self._symbol, "SELL", sizing.qty, client_order_id=new_client_order_id("CPSH")
         )
-        trade = await self._persist_trade(session, "SHORT", entry, sizing.qty, strategy, bot_run_id)
-        await self._persist_order(session, entry, trade.id, "MARKET", reduce_only=False)
+        _require_confirmed_market_fill(entry, sizing.qty)
+        trade = await self._persist_trade(
+            session,
+            "SHORT",
+            entry,
+            strategy,
+            strategy_release,
+            strategy_interval,
+            bot_run_id,
+        )
+        await self._persist_order(
+            session,
+            entry,
+            trade.id,
+            "MARKET",
+            requested_qty=sizing.qty,
+            reduce_only=False,
+        )
         await record_event(
             session,
             level="INFO",
@@ -244,6 +303,7 @@ class OrderManager:
                 "weight": f"{sizing.leverage:.0%}",
             },
         )
+        await self._refresh_trade_money(session, trade)
         return trade
 
     async def flatten(
@@ -259,6 +319,29 @@ class OrderManager:
             client_order_id=new_client_order_id("CPX"),
             reduce_only=True,
         )
+        _require_confirmed_market_fill(result, abs(qty))
+        trade = await self._open_trade(session, side)
+        if trade is not None:
+            await self._persist_order(
+                session,
+                result,
+                trade.id,
+                "MARKET",
+                requested_qty=abs(qty),
+                reduce_only=True,
+            )
+            await self._refresh_trade_money(session, trade)
+            trade.closed_at = dt.datetime.now(dt.UTC)
+            trade.exit_px = result.avg_price
+            trade.remaining_qty = Decimal("0")
+            if trade.realized_pnl is None:
+                trade.realized_pnl = _gross_realized(
+                    side=trade.side,
+                    entry_px=trade.entry_px,
+                    exit_px=result.avg_price,
+                    qty=abs(qty),
+                )
+            trade.exit_reason = reason[:64]
         await record_event(
             session,
             level="INFO",
@@ -268,6 +351,176 @@ class OrderManager:
             payload={"side": side, "qty": str(abs(qty)), "reason": reason},
         )
         return result
+
+    async def move_long_stop(
+        self,
+        session: AsyncSession,
+        *,
+        trade: Trade,
+        new_stop_price: Decimal,
+        remaining_qty: Decimal,
+        filters: SymbolFilters,
+    ) -> bool:
+        """Ratchet a long stop by placing the replacement before cancelling the old."""
+        active = (
+            await session.execute(
+                select(Order)
+                .where(
+                    Order.trade_id == trade.id,
+                    Order.type == "STOP_MARKET",
+                    Order.status.in_(("NEW", "PARTIALLY_FILLED")),
+                )
+                .order_by(Order.id.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if active is None or active.stop_price is None:
+            raise StopMoveFailed("cannot ratchet long stop: active stop is missing")
+        rounded_stop = round_price(new_stop_price, filters.tick_size)
+        if rounded_stop <= active.stop_price:
+            return False
+        qty = clamp_qty(remaining_qty, filters)
+        if qty <= 0:
+            raise StopMoveFailed("cannot ratchet long stop: remaining quantity is below minimum")
+
+        replacement = await self._ex.place_stop_market(
+            self._symbol,
+            "SELL",
+            qty,
+            rounded_stop,
+            client_order_id=new_client_order_id("CPSR"),
+        )
+        await self._persist_order(
+            session,
+            replacement,
+            trade.id,
+            "STOP_MARKET",
+            requested_qty=qty,
+            reduce_only=True,
+            stop_price=rounded_stop,
+        )
+        try:
+            cancelled = await self._ex.cancel_order(self._symbol, active.client_order_id)
+        except Exception as exc:
+            # Determine which stop survived an ambiguous cancel. Never blindly
+            # cancel the replacement and risk leaving the long unprotected.
+            old_truth = await self._ex.get_order(self._symbol, active.client_order_id)
+            if old_truth.status in {"NEW", "PARTIALLY_FILLED"}:
+                await self._ex.cancel_order(self._symbol, replacement.client_order_id)
+                raise StopMoveFailed(
+                    "stop ratchet failed; previous protective stop remains active"
+                ) from exc
+            cancelled = old_truth
+        active.status = cancelled.status
+        active.raw_json = cancelled.raw
+        await record_event(
+            session,
+            level="INFO",
+            category="trade",
+            message=f"LONG stop ratcheted to {rounded_stop}",
+            ref=f"trade:{trade.id}",
+            payload={
+                "previous_stop": str(active.stop_price),
+                "new_stop": str(rounded_stop),
+                "qty": str(qty),
+            },
+        )
+        return True
+
+    async def resize_short(
+        self,
+        session: AsyncSession,
+        *,
+        trade: Trade,
+        current_qty: Decimal,
+        target_qty: Decimal,
+    ) -> bool:
+        """Resize the stop-free short sleeve toward an exchange-rounded target."""
+        current = abs(current_qty)
+        target = abs(target_qty)
+        if target == current:
+            return False
+        increase = target > current
+        delta = abs(target - current)
+        result = await self._ex.place_market(
+            self._symbol,
+            "SELL" if increase else "BUY",
+            delta,
+            client_order_id=new_client_order_id("CPSHR"),
+            reduce_only=not increase,
+        )
+        _require_confirmed_market_fill(result, delta)
+        await self._persist_order(
+            session,
+            result,
+            trade.id,
+            "MARKET",
+            requested_qty=delta,
+            reduce_only=not increase,
+        )
+        position = await self._ex.get_position(self._symbol)
+        if position.qty > 0 or abs(position.qty) != target:
+            raise RuntimeError("short resize position mismatch; reconciliation required")
+        trade.remaining_qty = target
+        if increase:
+            trade.entry_px = position.entry_price
+        await record_event(
+            session,
+            level="INFO",
+            category="trade",
+            message=f"SHORT sleeve resized to {target} {self._symbol}",
+            ref=f"trade:{trade.id}",
+            payload={
+                "previous_qty": str(current),
+                "target_qty": str(target),
+                "delta": str(delta),
+                "direction": "increase" if increase else "reduce",
+            },
+        )
+        return True
+
+    async def _open_trade(self, session: AsyncSession, side: str) -> Trade | None:
+        return (
+            await session.execute(
+                select(Trade)
+                .where(
+                    Trade.environment == self._env,
+                    Trade.side == side,
+                    Trade.closed_at.is_(None),
+                )
+                .order_by(Trade.id.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+
+    async def _refresh_trade_money(self, session: AsyncSession, trade: Trade) -> None:
+        """Refresh order truth and exact fees/P&L/funding for one trade."""
+        rows = (
+            (
+                await session.execute(
+                    select(Order).where(Order.trade_id == trade.id).order_by(Order.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        fees = Decimal("0")
+        realized = Decimal("0")
+        for row in rows:
+            truth = await self._ex.get_order(self._symbol, row.client_order_id)
+            row.status = truth.status
+            row.filled_qty = truth.filled_qty
+            row.avg_fill_px = truth.avg_price if truth.avg_price > 0 else None
+            row.raw_json = truth.raw
+            if truth.filled_qty <= 0 or not truth.exchange_order_id:
+                continue
+            fills = await self._ex.get_order_fills(self._symbol, truth.exchange_order_id)
+            fees += sum((abs(fill.commission) for fill in fills), Decimal("0"))
+            realized += sum((fill.realized_pnl for fill in fills), Decimal("0"))
+        trade.fees = fees
+        trade.realized_pnl = realized
+        funding = await self._ex.get_funding_income(self._symbol, start_at=trade.opened_at)
+        trade.funding = sum((row.amount for row in funding), Decimal("0"))
 
     async def kill(self, session: AsyncSession) -> int:
         """Kill switch: cancel all orders and flatten any position at market."""
@@ -294,6 +547,8 @@ class OrderManager:
         exit_result: OrderResult | None,
         qty: Decimal,
         strategy: str,
+        strategy_release: str,
+        strategy_interval: str,
         bot_run_id: int | None,
         stop_price: Decimal,
         stop_error: BaseException,
@@ -305,6 +560,8 @@ class OrderManager:
             exit_result=exit_result,
             qty=qty,
             strategy=strategy,
+            strategy_release=strategy_release,
+            strategy_interval=strategy_interval,
             environment=self._env,
             bot_run_id=bot_run_id,
             stop_price=stop_price,
@@ -318,16 +575,21 @@ class OrderManager:
         session: AsyncSession,
         side: str,
         entry: OrderResult,
-        qty: Decimal,
         strategy: str,
+        strategy_release: str,
+        strategy_interval: str,
         bot_run_id: int | None,
     ) -> Trade:
         trade = Trade(
             opened_at=dt.datetime.now(dt.UTC),
             side=side,
-            entry_px=entry.avg_price if entry.avg_price > 0 else Decimal("0"),
-            qty=qty,
+            entry_px=entry.avg_price,
+            qty=entry.filled_qty,
+            remaining_qty=entry.filled_qty,
+            highest_high=entry.avg_price if side == "LONG" else None,
             strategy=strategy,
+            strategy_release=strategy_release,
+            strategy_interval=strategy_interval,
             environment=self._env,
             bot_run_id=bot_run_id,
         )
@@ -342,6 +604,7 @@ class OrderManager:
         trade_id: int,
         order_type: str,
         *,
+        requested_qty: Decimal,
         reduce_only: bool,
         price: Decimal | None = None,
         stop_price: Decimal | None = None,
@@ -351,6 +614,7 @@ class OrderManager:
             result,
             trade_id,
             order_type,
+            requested_qty=requested_qty,
             reduce_only=reduce_only,
             price=price,
             stop_price=stop_price,
@@ -363,6 +627,7 @@ async def _persist_order_row(
     trade_id: int,
     order_type: str,
     *,
+    requested_qty: Decimal,
     reduce_only: bool,
     price: Decimal | None = None,
     stop_price: Decimal | None = None,
@@ -377,7 +642,9 @@ async def _persist_order_row(
             status=result.status,
             price=price,
             stop_price=stop_price,
-            qty=result.filled_qty if result.filled_qty > 0 else Decimal("0"),
+            qty=requested_qty,
+            filled_qty=result.filled_qty,
+            avg_fill_px=result.avg_price if result.avg_price > 0 else None,
             reduce_only=reduce_only,
             placed_at=dt.datetime.now(dt.UTC),
             filled_at=dt.datetime.now(dt.UTC) if result.status == "FILLED" else None,
@@ -417,6 +684,7 @@ async def persist_emergency_exit(session: AsyncSession, record: EmergencyExitRec
         entry_px=entry_px,
         exit_px=exit_px,
         qty=record.qty,
+        remaining_qty=Decimal("0") if flattened else record.qty,
         realized_pnl=realized,
         exit_reason=(
             "protective_stop_failed_emergency_exit"
@@ -424,14 +692,30 @@ async def persist_emergency_exit(session: AsyncSession, record: EmergencyExitRec
             else "protective_stop_failed_flatten_unconfirmed"
         ),
         strategy=record.strategy,
+        strategy_release=record.strategy_release,
+        strategy_interval=record.strategy_interval,
         environment=record.environment,
         bot_run_id=record.bot_run_id,
     )
     session.add(trade)
     await session.flush()
-    await _persist_order_row(session, record.entry, trade.id, "MARKET", reduce_only=False)
+    await _persist_order_row(
+        session,
+        record.entry,
+        trade.id,
+        "MARKET",
+        requested_qty=record.qty,
+        reduce_only=False,
+    )
     if record.exit_result is not None:
-        await _persist_order_row(session, record.exit_result, trade.id, "MARKET", reduce_only=True)
+        await _persist_order_row(
+            session,
+            record.exit_result,
+            trade.id,
+            "MARKET",
+            requested_qty=record.qty,
+            reduce_only=True,
+        )
     await record_event(
         session,
         level="ERROR",
@@ -462,3 +746,15 @@ def _round_to(value: Decimal, reference: Decimal) -> Decimal:
     if isinstance(exp, int) and exp < 0:
         return value.quantize(Decimal(1).scaleb(exp))
     return value
+
+
+def _require_confirmed_market_fill(result: OrderResult, requested_qty: Decimal) -> None:
+    """Refuse to persist or manage an entry whose final fill is unknown."""
+    if result.status != "FILLED" or result.filled_qty != requested_qty or result.avg_price <= 0:
+        raise RuntimeError("market order fill was not fully confirmed; reconciliation required")
+
+
+def _gross_realized(*, side: str, entry_px: Decimal, exit_px: Decimal, qty: Decimal) -> Decimal:
+    if side == "LONG":
+        return (exit_px - entry_px) * qty
+    return (entry_px - exit_px) * qty

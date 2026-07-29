@@ -8,7 +8,12 @@ from decimal import Decimal
 import pytest
 from app.db.models import Candle
 from app.execution.binance_client import Kline
-from app.execution.candles import detect_gaps, latest_open_time, upsert_klines
+from app.execution.candles import (
+    backfill_history,
+    detect_gaps,
+    latest_open_time,
+    upsert_klines,
+)
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -83,3 +88,46 @@ async def test_latest_open_time(db_session: AsyncSession) -> None:
     latest = await latest_open_time(db_session, "BTCUSDT", "4h")
     assert latest is not None
     assert int(latest.timestamp() * 1000) == BASE_MS + STEP_MS
+
+
+@pytest.mark.asyncio
+async def test_history_backfill_reverse_paginates_exact_window(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("app.execution.candles.BINANCE_KLINE_LIMIT", 3)
+
+    class HistoryClient:
+        def __init__(self) -> None:
+            self.rows = [_kline(i) for i in range(12)]
+            self.calls = 0
+
+        async def get_klines(
+            self,
+            symbol: str,
+            interval: str,
+            *,
+            limit: int,
+            start_time_ms: int | None = None,
+            end_time_ms: int | None = None,
+        ) -> list[Kline]:
+            del symbol, interval, start_time_ms
+            self.calls += 1
+            eligible = [
+                row for row in self.rows if end_time_ms is None or row.open_time_ms <= end_time_ms
+            ]
+            return eligible[-limit:]
+
+    client = HistoryClient()
+    await backfill_history(
+        db_session,
+        client,  # type: ignore[arg-type]
+        "BTCUSDT",
+        "4h",
+        bars=8,
+    )
+
+    rows = (await db_session.execute(select(Candle).order_by(Candle.open_time))).scalars().all()
+    assert client.calls == 3
+    assert len(rows) == 8
+    assert int(rows[0].open_time.timestamp() * 1000) == BASE_MS + 4 * STEP_MS

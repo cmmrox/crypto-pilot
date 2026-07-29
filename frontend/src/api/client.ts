@@ -3,12 +3,6 @@
  * Tokens live in sessionStorage (survive reload, cleared on sign-out).
  */
 
-export interface Health {
-  status: string;
-  version: string;
-  database: string;
-}
-
 export interface Tokens {
   access_token: string;
   refresh_token: string;
@@ -115,10 +109,6 @@ export async function apiRequest<T>(
 }
 
 // --- Endpoints ---
-
-export function getHealth(): Promise<Health> {
-  return apiRequest<Health>("/health", {}, { auth: false });
-}
 
 export interface DeepHealth {
   status: string;
@@ -277,11 +267,27 @@ export function testBinanceConnection(
 
 export interface StrategyInfo {
   name: string;
+  display_name: string;
   validated_release: string;
+  contract_version: number;
   direction: string;
+  symbol: string;
+  interval: string;
+  decision_point: string;
   warmup_bars: number;
+  history_bars: number;
+  capabilities: string[];
   params: Record<string, number>;
   parity_verified: boolean;
+  validation_method: string;
+  validation_reference: string;
+  summary: string;
+  description: string;
+  entries: string[];
+  exits: string[];
+  risk_controls: string[];
+  caveats: string[];
+  risk: Record<string, string>;
   active: boolean;
 }
 
@@ -365,12 +371,6 @@ export interface WatchRule {
 export interface StrategyWatch {
   available: boolean;
   last_closed_at: string | null;
-  close: string | null;
-  ema20: string | null;
-  ema50: string | null;
-  ema200: string | null;
-  sma200: string | null;
-  atr14: string | null;
   rules: WatchRule[];
   disclaimer: string;
 }
@@ -412,20 +412,12 @@ export interface Overview {
   briefing: BriefingSnapshot;
 }
 
-export interface EquityPoint {
-  ts: string;
-  equity: string;
-}
-
 export const getOverview = () => apiRequest<Overview>("/api/overview");
-export const getEquityCurve = () => apiRequest<EquityPoint[]>("/api/overview/equity");
 export const getBotStatus = () => apiRequest<BotStatus>("/api/bot/status");
 export const startBot = () => apiRequest<{ message: string }>("/api/bot/start", { method: "POST" });
 export const stopBot = () => apiRequest<{ message: string }>("/api/bot/stop", { method: "POST" });
 export const stopCloseBot = () =>
   apiRequest<{ message: string }>("/api/bot/stop-close", { method: "POST" });
-export const safeModeBot = () =>
-  apiRequest<{ message: string }>("/api/bot/safe-mode", { method: "POST" });
 export const killSwitch = () => apiRequest<{ ok: boolean }>("/api/ops/kill", { method: "POST" });
 
 // --- Trades ---

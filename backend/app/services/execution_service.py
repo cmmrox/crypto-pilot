@@ -18,6 +18,7 @@ from app.execution.binance_exchange import BinanceExchange
 from app.execution.orders import OrderManager
 from app.services import credentials as cred_svc
 from app.services.settings_store import get_settings_row
+from app.strategies import MarketSpec, get_strategy
 
 
 class NotConfiguredError(Exception):
@@ -27,6 +28,7 @@ class NotConfiguredError(Exception):
 @dataclass
 class ExecutionContext:
     environment: str
+    market: MarketSpec
     exchange: BinanceExchange
     orders: OrderManager
 
@@ -39,6 +41,7 @@ async def execution_context(session: AsyncSession) -> AsyncIterator[ExecutionCon
     """
     settings_row = await get_settings_row(session)
     env = settings_row.active_environment
+    market = get_strategy(settings_row.active_strategy).manifest.market
     creds = await cred_svc.get_decrypted(session, environment=env, service="binance")
     if creds is None:
         raise NotConfiguredError(f"no Binance credentials configured for {env}")
@@ -47,6 +50,11 @@ async def execution_context(session: AsyncSession) -> AsyncIterator[ExecutionCon
         exchange = BinanceExchange(client)
         yield ExecutionContext(
             environment=env,
+            market=market,
             exchange=exchange,
-            orders=OrderManager(exchange, environment=env),
+            orders=OrderManager(
+                exchange,
+                symbol=market.symbol,
+                environment=env,
+            ),
         )

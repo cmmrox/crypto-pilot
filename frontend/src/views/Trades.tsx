@@ -4,6 +4,8 @@ import {
   getTradeDetail,
   getTrades,
   getTradesCsv,
+  getStrategies,
+  type StrategyInfo,
   type TradeDetail,
   type TradeFilters,
   type TradeRow,
@@ -13,6 +15,7 @@ export function Trades() {
   const [rows, setRows] = useState<TradeRow[]>([]);
   const [filters, setFilters] = useState<TradeFilters>({});
   const [selected, setSelected] = useState<TradeDetail | null>(null);
+  const [strategies, setStrategies] = useState<StrategyInfo[]>([]);
   const loadSeq = useRef(0);
 
   const load = useCallback(async () => {
@@ -28,6 +31,9 @@ export function Trades() {
   useEffect(() => {
     void load();
   }, [load]);
+  useEffect(() => {
+    getStrategies().then(setStrategies).catch(() => setStrategies([]));
+  }, []);
 
   const setF = (k: keyof TradeFilters, v: string) => setFilters((f) => ({ ...f, [k]: v }));
   const reset = () => setFilters({});
@@ -86,8 +92,11 @@ export function Trades() {
           onChange={(e) => setF("strategy", e.target.value)}
         >
           <option value="">All strategies</option>
-          <option value="trend_rider_v6">Trend Rider v6</option>
-          <option value="trend_rider_v52">Trend Rider v5.2</option>
+          {strategies.map((strategy) => (
+            <option key={strategy.name} value={strategy.name}>
+              {strategy.display_name}
+            </option>
+          ))}
         </select>
         <input
           aria-label="Filter by month"

@@ -104,15 +104,8 @@ class AppSettings(Base):
     id: Mapped[IntPk]
     active_environment: Mapped[str] = mapped_column(String(8), default="DEMO", nullable=False)
     active_strategy: Mapped[str] = mapped_column(
-        String(64), default="trend_rider_v6", nullable=False
+        String(64), default="trend_rider_v6_4h", nullable=False
     )
-    # Owner-approved deviation (ARCHITECTURE §8): aggressive risk-defined profile.
-    # 15% risk per long trade at up to 6x, sized by the stop so a stop-out caps the
-    # loss near risk_pct of equity. The 4% LONG_MONTH_CAP engine constant is retained.
-    risk_pct: Mapped[Decimal] = mapped_column(default=Decimal("15"))
-    sleeve_weight_pct: Mapped[Decimal] = mapped_column(default=Decimal("75"))
-    sleeve_vol_target: Mapped[Decimal] = mapped_column(default=Decimal("40"))
-    leverage_cap: Mapped[Decimal] = mapped_column(default=Decimal("6"))
     sms_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     news_sources: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
     news_time: Mapped[str] = mapped_column(String(5), default="06:30")
@@ -134,17 +127,6 @@ class ApiCredential(Base):
     secret_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
 
 
-class Strategy(Base):
-    __tablename__ = "strategies"
-
-    id: Mapped[IntPk]
-    name: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
-    class_path: Mapped[str] = mapped_column(String(255), nullable=False)
-    params_json: Mapped[dict[str, Any]] = mapped_column(JSONB, default=dict)
-    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    validated_release: Mapped[str | None] = mapped_column(String(32), nullable=True)
-
-
 class BotRun(Base):
     __tablename__ = "bot_runs"
 
@@ -153,6 +135,8 @@ class BotRun(Base):
     stopped_at: Mapped[dt.datetime | None] = mapped_column(nullable=True)
     environment: Mapped[str] = mapped_column(String(8), nullable=False)
     strategy: Mapped[str] = mapped_column(String(64), nullable=False)
+    strategy_release: Mapped[str] = mapped_column(String(32), default="legacy", nullable=False)
+    strategy_interval: Mapped[str] = mapped_column(String(8), default="4h", nullable=False)
     stop_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
     started_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
@@ -191,12 +175,16 @@ class Trade(Base):
     entry_px: Mapped[Decimal]
     exit_px: Mapped[Decimal | None] = mapped_column(nullable=True)
     qty: Mapped[Decimal]
+    remaining_qty: Mapped[Decimal] = mapped_column(default=Decimal("0"))
+    highest_high: Mapped[Decimal | None] = mapped_column(nullable=True)
     fees: Mapped[Decimal] = mapped_column(default=Decimal("0"))
     funding: Mapped[Decimal] = mapped_column(default=Decimal("0"))
     realized_pnl: Mapped[Decimal | None] = mapped_column(nullable=True)
     r_multiple: Mapped[Decimal | None] = mapped_column(nullable=True)
     exit_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
     strategy: Mapped[str] = mapped_column(String(64), nullable=False)
+    strategy_release: Mapped[str] = mapped_column(String(32), default="legacy", nullable=False)
+    strategy_interval: Mapped[str] = mapped_column(String(8), default="4h", nullable=False)
     environment: Mapped[str] = mapped_column(String(8), nullable=False)
     bot_run_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("bot_runs.id"), nullable=True
@@ -217,6 +205,8 @@ class Order(Base):
     price: Mapped[Decimal | None] = mapped_column(nullable=True)
     stop_price: Mapped[Decimal | None] = mapped_column(nullable=True)
     qty: Mapped[Decimal]
+    filled_qty: Mapped[Decimal] = mapped_column(default=Decimal("0"))
+    avg_fill_px: Mapped[Decimal | None] = mapped_column(nullable=True)
     reduce_only: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     placed_at: Mapped[dt.datetime | None] = mapped_column(nullable=True)
     filled_at: Mapped[dt.datetime | None] = mapped_column(nullable=True)
@@ -303,7 +293,6 @@ __all__ = [
     "Order",
     "OtpChallenge",
     "Session",
-    "Strategy",
     "Trade",
     "User",
     "WithdrawalMark",

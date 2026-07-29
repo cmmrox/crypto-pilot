@@ -14,13 +14,13 @@ from decimal import Decimal
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.bot.ingest import (
-    INTERVAL,
-    SYMBOL,
-    WORKER_HEARTBEAT_SECONDS,
-    ingest_service,
+from app.bot.ingest import WORKER_HEARTBEAT_SECONDS, ingest_service
+from app.bot.scheduler import (
+    INTERVAL_SECONDS,
+    next_close_time,
+    seconds_until_next_close,
+    utc_now,
 )
-from app.bot.scheduler import next_close_time, seconds_until_next_close, utc_now
 from app.bot.service import bot_service
 from app.db.models import Briefing, Candle, Event, Trade
 from app.execution import candles as candle_svc
@@ -29,12 +29,17 @@ from app.execution.binance_exchange import BinanceExchange
 from app.risk.breakers import evaluate_breaker
 from app.services import credentials as cred_svc
 from app.services.settings_store import get_settings_row
-from app.strategies.base import Candle as StrategyCandle
-from app.strategies.watch import StrategyWatch, inspect_strategy_watch
+from app.strategies import MarketSpec, RiskSpec, get_strategy
+from app.strategies.base import (
+    Candle as StrategyCandle,
+)
+from app.strategies.base import (
+    Strategy,
+    WatchRule,
+)
 
 FRESH_FOR_SECONDS = 10
 SPARKLINE_POINTS = 24
-WATCH_CANDLES = 400
 RECENT_EVENTS = 3
 PRICE_PLACES = Decimal("0.00000001")
 
@@ -111,12 +116,6 @@ class WatchRuleSnapshot:
 class StrategyWatchSnapshot:
     available: bool
     last_closed_at: str | None
-    close: str | None
-    ema20: str | None
-    ema50: str | None
-    ema200: str | None
-    sma200: str | None
-    atr14: str | None
     rules: list[WatchRuleSnapshot]
     disclaimer: str
 
@@ -171,17 +170,24 @@ async def build_overview(session: AsyncSession) -> OverviewSnapshot:
     """Build one coherent command-center response for the current UTC instant."""
     settings_row = await get_settings_row(session)
     environment = settings_row.active_environment
-    strategy = settings_row.active_strategy
+    strategy_plugin = get_strategy(settings_row.active_strategy)
+    strategy = strategy_plugin.manifest.strategy_id
+    strategy_market = strategy_plugin.manifest.market
+    strategy_risk = strategy_plugin.manifest.risk
     bot = await bot_service.status(session)
-    candles = await _recent_candles(session)
-    gaps = await candle_svc.detect_gaps(session, SYMBOL, INTERVAL)
+    candles = await _recent_candles(session, strategy_market)
+    gaps = await candle_svc.detect_gaps(
+        session,
+        strategy_market.symbol,
+        strategy_market.interval,
+    )
     gap_count = len(gaps)
     for candle in candles:
         session.expunge(candle)
     await session.rollback()
     market, account = await asyncio.gather(
-        _market_snapshot(environment, candles),
-        _account_snapshot(session, environment),
+        _market_snapshot(environment, candles, strategy_market),
+        _account_snapshot(session, environment, strategy_market.symbol),
     )
     if account.position is not None:
         account = replace(
@@ -189,8 +195,17 @@ async def build_overview(session: AsyncSession) -> OverviewSnapshot:
             position=replace(account.position, mark_price=market.mark_price),
         )
     now = utc_now()
-    breakers, month_realized = await _breaker_snapshots(session, now, account.equity)
-    watch = _watch_snapshot(candles, market.mark_price)
+    breakers, month_realized = await _breaker_snapshots(
+        session,
+        now,
+        account.equity,
+        strategy_risk,
+    )
+    watch = _watch_snapshot(
+        candles,
+        market.mark_price,
+        strategy_plugin,
+    )
     engine = _engine_snapshot(now, gap_count)
     activity = await _activity_snapshots(session, engine, market)
     briefing = await _briefing_snapshot(session)
@@ -229,6 +244,7 @@ class _AccountSnapshot:
 async def _account_snapshot(
     session: AsyncSession,
     environment: str,
+    symbol: str,
 ) -> _AccountSnapshot:
     credentials = await cred_svc.get_decrypted(
         session,
@@ -252,7 +268,7 @@ async def _account_snapshot(
 
     position_out: PositionSnapshot | None = None
     position = next(
-        (item for item in account.positions if item.symbol == SYMBOL),
+        (item for item in account.positions if item.symbol == symbol),
         None,
     )
     if position is not None and position.qty != 0:
@@ -291,7 +307,11 @@ def _unavailable_account() -> _AccountSnapshot:
     )
 
 
-async def _market_snapshot(environment: str, candles: list[Candle]) -> MarketSnapshot:
+async def _market_snapshot(
+    environment: str,
+    candles: list[Candle],
+    market: MarketSpec,
+) -> MarketSnapshot:
     mark_price: str | None = None
     change_pct: str | None = None
     observed_at: str | None = None
@@ -301,8 +321,8 @@ async def _market_snapshot(environment: str, candles: list[Candle]) -> MarketSna
     try:
         async with BinanceClient(environment) as client:
             mark, ticker = await asyncio.gather(
-                client.get_mark_price(SYMBOL),
-                client.get_ticker_24h(SYMBOL),
+                client.get_mark_price(market.symbol),
+                client.get_ticker_24h(market.symbol),
             )
         now = utc_now()
         observed = dt.datetime.fromtimestamp(mark.observed_at_ms / 1000, tz=dt.UTC)
@@ -316,27 +336,30 @@ async def _market_snapshot(environment: str, candles: list[Candle]) -> MarketSna
     now = utc_now()
 
     return MarketSnapshot(
-        symbol=SYMBOL,
-        interval=INTERVAL,
+        symbol=market.symbol,
+        interval=market.interval,
         reachable=reachable,
         mark_price=mark_price,
         price_change_24h_pct=change_pct,
         observed_at=observed_at,
         stale=stale,
-        next_close_utc=next_close_time(now, INTERVAL).isoformat(),
-        seconds_to_next_close=round(seconds_until_next_close(now, INTERVAL), 1),
+        next_close_utc=next_close_time(now, market.interval).isoformat(),
+        seconds_to_next_close=round(seconds_until_next_close(now, market.interval), 1),
         sparkline=_sparkline(candles),
     )
 
 
-async def _recent_candles(session: AsyncSession) -> list[Candle]:
+async def _recent_candles(session: AsyncSession, market: MarketSpec) -> list[Candle]:
     rows = (
         (
             await session.execute(
                 select(Candle)
-                .where(Candle.symbol == SYMBOL, Candle.interval == INTERVAL)
+                .where(
+                    Candle.symbol == market.symbol,
+                    Candle.interval == market.interval,
+                )
                 .order_by(Candle.open_time.desc())
-                .limit(WATCH_CANDLES)
+                .limit(market.history_bars)
             )
         )
         .scalars()
@@ -346,14 +369,20 @@ async def _recent_candles(session: AsyncSession) -> list[Candle]:
 
 
 async def _breaker_snapshots(
-    session: AsyncSession, now: dt.datetime, equity: Decimal
+    session: AsyncSession,
+    now: dt.datetime,
+    equity: Decimal,
+    risk: RiskSpec,
 ) -> tuple[list[BreakerSnapshot], Decimal]:
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     output: list[BreakerSnapshot] = []
     month_realized = Decimal("0")
     available = equity > 0
 
-    for book, sides in (("Long book", ("LONG",)), ("Short sleeve", ("SHORT",))):
+    for book, sides, cap in (
+        ("Long book", ("LONG",), risk.long_monthly_loss_cap),
+        ("Short sleeve", ("SHORT",), risk.short_monthly_loss_cap),
+    ):
         statement = select(func.coalesce(func.sum(Trade.realized_pnl), 0)).where(
             Trade.closed_at >= month_start, Trade.side.in_(sides)
         )
@@ -362,6 +391,7 @@ async def _breaker_snapshots(
         state = evaluate_breaker(
             month_start_equity=equity if available else Decimal("1"),
             month_to_date_pnl=pnl,
+            cap=cap,
         )
         output.append(
             BreakerSnapshot(
@@ -399,7 +429,12 @@ def _engine_snapshot(now: dt.datetime, gap_count: int) -> EngineSnapshot:
     )
 
 
-def _watch_snapshot(candles: list[Candle], mark_price: str | None) -> StrategyWatchSnapshot:
+def _watch_snapshot(
+    candles: list[Candle],
+    mark_price: str | None,
+    strategy: Strategy,
+) -> StrategyWatchSnapshot:
+    market = strategy.manifest.market
     strategy_candles = [
         StrategyCandle(
             open_time_ms=int(row.open_time.timestamp() * 1000),
@@ -411,23 +446,18 @@ def _watch_snapshot(candles: list[Candle], mark_price: str | None) -> StrategyWa
         )
         for row in candles
     ]
-    watch = inspect_strategy_watch(strategy_candles)
-    disclaimer = (
-        "Thresholds are evaluated on a closed 4h candle; they are not a "
-        "guaranteed trade or execution price."
-    )
+    watch = strategy.inspect(strategy_candles)
     if watch is None:
         return StrategyWatchSnapshot(
             available=False,
             last_closed_at=None,
-            close=None,
-            ema20=None,
-            ema50=None,
-            ema200=None,
-            sma200=None,
-            atr14=None,
             rules=[],
-            disclaimer=disclaimer,
+            disclaimer=(
+                f"Waiting for {market.warmup_bars} closed {market.interval} "
+                "candles required by this strategy. Thresholds shown after "
+                "warm-up are descriptive and not a guaranteed trade or "
+                "execution price."
+            ),
         )
 
     mark = Decimal(mark_price) if mark_price is not None else None
@@ -435,89 +465,32 @@ def _watch_snapshot(candles: list[Candle], mark_price: str | None) -> StrategyWa
         available=True,
         last_closed_at=(
             dt.datetime.fromtimestamp(watch.last_closed_open_time_ms / 1000, tz=dt.UTC)
-            + dt.timedelta(hours=4)
+            + dt.timedelta(seconds=INTERVAL_SECONDS[market.interval])
         ).isoformat(),
-        close=_price(watch.close),
-        ema20=_price(watch.ema20),
-        ema50=_price(watch.ema50),
-        ema200=_price(watch.ema200),
-        sma200=_price(watch.sma200),
-        atr14=_price(watch.atr14),
-        rules=_watch_rules(watch, mark),
-        disclaimer=disclaimer,
+        rules=[_watch_rule(rule, mark) for rule in watch.rules],
+        disclaimer=watch.disclaimer,
     )
-
-
-def _watch_rules(watch: StrategyWatch, mark: Decimal | None) -> list[WatchRuleSnapshot]:
-    long_status = "Active" if watch.long_regime else "Waiting"
-    pullback_status = (
-        "Ready at last close"
-        if watch.pullback_resume
-        else "Monitoring"
-        if watch.long_regime
-        else "Waiting"
-    )
-    short_status = "Active" if watch.deep_bear else "Not active"
-    return [
-        _watch_rule(
-            key="long_regime",
-            label="Long regime",
-            status=long_status,
-            tone="ok" if watch.long_regime else "neutral",
-            active=watch.long_regime,
-            condition="Close > SMA200 and EMA50 > EMA200",
-            threshold=watch.sma200,
-            mark=mark,
-        ),
-        _watch_rule(
-            key="pullback_resume",
-            label="Pullback resume",
-            status=pullback_status,
-            tone="ok" if watch.pullback_resume else "warn",
-            active=watch.pullback_resume,
-            condition="A closed 4h candle reclaims EMA20 after a bull-regime pullback",
-            threshold=watch.ema20,
-            mark=mark,
-        ),
-        _watch_rule(
-            key="deep_bear_short",
-            label="Deep-bear short",
-            status=short_status,
-            tone="err" if watch.deep_bear else "neutral",
-            active=watch.deep_bear,
-            condition="Close < SMA200, EMA50 < EMA200, and close < SMA200 - 0.5 ATR",
-            threshold=watch.deep_bear_threshold,
-            mark=mark,
-        ),
-    ]
 
 
 def _watch_rule(
-    *,
-    key: str,
-    label: str,
-    status: str,
-    tone: str,
-    active: bool,
-    condition: str,
-    threshold: float,
+    rule: WatchRule,
     mark: Decimal | None,
 ) -> WatchRuleSnapshot:
-    threshold_decimal = Decimal(str(threshold))
-    distance = mark - threshold_decimal if mark is not None else None
+    threshold = Decimal(str(rule.threshold)) if rule.threshold is not None else None
+    distance = mark - threshold if mark is not None and threshold is not None else None
     distance_pct = (
-        distance / threshold_decimal * Decimal("100")
-        if distance is not None and threshold_decimal != 0
+        distance / threshold * Decimal("100")
+        if distance is not None and threshold is not None and threshold != 0
         else None
     )
     return WatchRuleSnapshot(
-        key=key,
-        label=label,
-        status=status,
-        tone=tone,
-        active=active,
-        condition=condition,
-        threshold_price=_decimal(threshold_decimal),
+        key=rule.key,
+        label=rule.label,
+        status=rule.status,
+        tone=rule.tone,
+        active=rule.active,
+        condition=rule.condition,
+        threshold_price=_decimal(threshold) if threshold is not None else None,
         distance=_decimal(distance) if distance is not None else None,
         distance_pct=_decimal(distance_pct) if distance_pct is not None else None,
     )
@@ -544,7 +517,7 @@ async def _activity_snapshots(
             ActivitySnapshot(
                 ts=market.observed_at,
                 label="Market price refreshed",
-                detail=f"{SYMBOL} mark {market.mark_price}",
+                detail=f"{market.symbol} mark {market.mark_price}",
                 tone="ok" if not market.stale else "warn",
                 badge="Live" if not market.stale else "Stale",
             )
@@ -609,10 +582,6 @@ async def _briefing_snapshot(session: AsyncSession) -> BriefingSnapshot:
         bullets=bullets,
         isolation_notice=isolation,
     )
-
-
-def _price(value: float) -> str:
-    return _decimal(Decimal(str(value)))
 
 
 def _decimal(value: Decimal) -> str:

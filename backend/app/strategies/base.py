@@ -14,6 +14,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
+from app.strategies.manifest import StrategyManifest
+
 # --- Intents (the complete vocabulary — do not extend casually) ---
 
 
@@ -96,45 +98,79 @@ class TradeState:
     equity: float
     long_position: bool = False
     short_weight: float = 0.0  # current short exposure fraction (>=0)
+    long_entry: float | None = None
     long_stop: float | None = None
+    highest_high: float | None = None
     tp1_done: bool = False
+    last_long_closed_at_ms: int | None = None
     halted_long: bool = False
     halted_short: bool = False
     extra: dict[str, float] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class WatchRule:
+    """One strategy-owned, read-only condition shown in the owner console."""
+
+    key: str
+    label: str
+    status: str
+    tone: str
+    active: bool
+    condition: str
+    threshold: float | None
+
+
+@dataclass(frozen=True)
+class StrategyWatch:
+    """Generic explainability projection for the latest closed candle."""
+
+    last_closed_open_time_ms: int
+    rules: tuple[WatchRule, ...]
+    disclaimer: str
 
 
 @runtime_checkable
 class Strategy(Protocol):
     """The plugin interface. Implementations must be pure and deterministic."""
 
-    name: str
     params: dict[str, float]
-
-    def warmup_bars(self) -> int:
-        """History required before the first decision (v6: 200 for SMA200)."""
-        ...
+    manifest: StrategyManifest
 
     def on_candle(self, candles: list[Candle], state: TradeState) -> list[Intent]:
         """Return intents for the just-closed candle (candles[-1])."""
+        ...
+
+    def inspect(self, candles: list[Candle]) -> StrategyWatch | None:
+        """Explain the latest closed-candle state without emitting intents."""
         ...
 
 
 # --- Registry ---
 
 _REGISTRY: dict[str, Strategy] = {}
+_ALIASES: dict[str, str] = {}
 
 
 def register(strategy: Strategy) -> Strategy:
-    """Register a strategy by its name."""
-    _REGISTRY[strategy.name] = strategy
+    """Register one canonical strategy and its persisted legacy aliases."""
+    strategy_id = strategy.manifest.strategy_id
+    if strategy_id in _REGISTRY or strategy_id in _ALIASES:
+        raise RuntimeError(f"strategy already registered: {strategy_id}")
+    _REGISTRY[strategy_id] = strategy
+    for alias in strategy.manifest.legacy_ids:
+        if alias in _ALIASES or alias in _REGISTRY:
+            raise RuntimeError(f"strategy alias already registered: {alias}")
+        _ALIASES[alias] = strategy_id
     return strategy
 
 
-def get_strategy(name: str) -> Strategy:
-    if name not in _REGISTRY:
+def get_registered(name: str) -> Strategy:
+    canonical = _ALIASES.get(name, name)
+    if canonical not in _REGISTRY:
         raise KeyError(f"strategy not registered: {name}")
-    return _REGISTRY[name]
+    return _REGISTRY[canonical]
 
 
-def registered_names() -> list[str]:
-    return sorted(_REGISTRY)
+def registered_items() -> tuple[tuple[str, Strategy], ...]:
+    return tuple(sorted(_REGISTRY.items()))

@@ -450,10 +450,13 @@ tbl(
     [
         ["Interface element", "Meaning"],
         [
-            "Strategy.name / params",
-            "Registered name + parameters editable in Settings (validated defaults).",
+            "Strategy manifest",
+            "Canonical timeframe-qualified identity, immutable validated parameters, market contract, education and risk policy.",
         ],
-        ["warmup_bars()", "History needed before first decision (v6: 200 bars for SMA200)."],
+        [
+            "manifest.market.warmup_bars",
+            "Strategy-owned history needed before the first decision (v6: 200 bars for SMA200).",
+        ],
         [
             "on_candle(candles, state) → [Intent]",
             "Called once per closed 4h candle with full account/trade state.",
@@ -478,8 +481,9 @@ tbl(
     [6.5 * cm, 10 * cm],
 )
 p(
-    "Registered strategies at launch: <b>trend_rider_v6</b> (default), <b>trend_rider_v52</b> (long-only fallback). "
-    "Both are pinned to the exact parameter sets validated in the backtests."
+    "Registered strategies at launch: <b>trend_rider_v6_4h</b> (default), "
+    "<b>trend_rider_v52_4h</b> (long-only fallback). Both are pinned to the "
+    "exact parameter sets validated in the backtests."
 )
 
 h1("8. Binance integration design (DEMO / LIVE)")
@@ -586,7 +590,7 @@ tbl(
         ["Short resized", "CryptoPilot: SHORT reduced to 31% of equity (vol spike)."],
         [
             "Bot started",
-            "CryptoPilot: bot STARTED on LIVE, strategy trend_rider_v6, equity $1,024.",
+            "CryptoPilot: bot STARTED on LIVE, strategy trend_rider_v6_4h, equity $1,024.",
         ],
         [
             "Bot stopped",

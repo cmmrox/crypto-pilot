@@ -36,7 +36,7 @@ async def _seed_trades() -> None:
             realized_pnl=D("200"),
             r_multiple=D("1.5"),
             exit_reason="4 ATR trail",
-            strategy="trend_rider_v6",
+            strategy="trend_rider_v6_4h",
             environment="DEMO",
         )
         t2 = Trade(
@@ -50,7 +50,7 @@ async def _seed_trades() -> None:
             realized_pnl=D("-50"),
             r_multiple=D("-0.5"),
             exit_reason="bear regime ended",
-            strategy="trend_rider_v6",
+            strategy="trend_rider_v6_4h",
             environment="DEMO",
         )
         s.add_all([t1, t2])

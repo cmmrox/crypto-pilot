@@ -17,6 +17,7 @@ from app.db.models import Candle
 from app.execution.binance_client import BinanceClient, Kline
 
 _log = get_logger("candles")
+BINANCE_KLINE_LIMIT = 1500
 
 INTERVAL_MS: dict[str, int] = {
     "4h": 4 * 60 * 60 * 1000,
@@ -75,6 +76,51 @@ async def backfill(
     # carries a close-time-derived flag, so `upsert_klines` drops it.
     count = await upsert_klines(session, symbol, interval, klines)
     _log.info("candles_backfilled", symbol=symbol, interval=interval, count=len(klines))
+    return count
+
+
+async def backfill_history(
+    session: AsyncSession,
+    client: BinanceClient,
+    symbol: str,
+    interval: str,
+    *,
+    bars: int,
+) -> int:
+    """Backfill an exact recent history window using bounded reverse pagination."""
+    if bars <= 0:
+        return 0
+    by_open_time: dict[int, Kline] = {}
+    end_time_ms: int | None = None
+    while len(by_open_time) < bars:
+        limit = min(BINANCE_KLINE_LIMIT, bars - len(by_open_time) + 1)
+        batch = await client.get_klines(
+            symbol,
+            interval,
+            limit=limit,
+            end_time_ms=end_time_ms,
+        )
+        closed = [row for row in batch if row.is_closed]
+        if not closed:
+            break
+        for row in closed:
+            by_open_time[row.open_time_ms] = row
+        earliest = min(row.open_time_ms for row in closed)
+        next_end = earliest - 1
+        if end_time_ms is not None and next_end >= end_time_ms:
+            raise RuntimeError("Binance kline history pagination did not advance")
+        end_time_ms = next_end
+        if len(batch) < limit:
+            break
+    rows = [by_open_time[key] for key in sorted(by_open_time)[-bars:]]
+    count = await upsert_klines(session, symbol, interval, rows)
+    _log.info(
+        "candle_history_backfilled",
+        symbol=symbol,
+        interval=interval,
+        requested=bars,
+        received=len(rows),
+    )
     return count
 
 

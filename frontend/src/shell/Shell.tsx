@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { NavLink, Route, Routes, Navigate } from "react-router-dom";
 import {
   Bitcoin,
@@ -21,6 +21,7 @@ import { News } from "../views/News";
 import { Overview } from "../views/Overview";
 import { Settings as SettingsView } from "../views/Settings";
 import { Trades } from "../views/Trades";
+import { getStrategies, type StrategyInfo } from "../api/client";
 
 const NAV = [
   { to: "/overview", label: "Overview", icon: LayoutDashboard, stage: "Stage 5" },
@@ -33,8 +34,18 @@ const NAV = [
 
 export function Shell() {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [activeStrategy, setActiveStrategy] = useState<StrategyInfo | null>(null);
   const user = useAuth((s) => s.user);
   const signOut = useAuth((s) => s.signOut);
+  useEffect(() => {
+    const loadStrategy = () =>
+      getStrategies()
+        .then((items) => setActiveStrategy(items.find((item) => item.active) ?? null))
+        .catch(() => setActiveStrategy(null));
+    void loadStrategy();
+    window.addEventListener("strategy-changed", loadStrategy);
+    return () => window.removeEventListener("strategy-changed", loadStrategy);
+  }, []);
 
   return (
     <div className="app-shell">
@@ -76,11 +87,17 @@ export function Shell() {
         <div className="sidebar-status">
           <div className="strategy-card-mini">
             <p className="kicker">ACTIVE STRATEGY</p>
-            <strong>Trend Rider v6</strong>
-            <small>BTCUSDT · 4h · LONG + SHORT</small>
+            <strong>{activeStrategy?.display_name ?? "Loading strategy…"}</strong>
+            <small>
+              {activeStrategy
+                ? `${activeStrategy.symbol} · ${activeStrategy.interval} · ${activeStrategy.direction}`
+                : "Registered plugin"}
+            </small>
             <span>
               <ShieldCheck size={13} />
-              Validated release 6.0
+              {activeStrategy
+                ? `Validated release ${activeStrategy.validated_release}`
+                : "Reading manifest"}
             </span>
           </div>
           <button className="sign-out-button" onClick={() => void signOut()}>

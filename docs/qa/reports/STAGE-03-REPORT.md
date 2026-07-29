@@ -12,8 +12,9 @@ identical** to the validated research engine.
 - **Composite engine** (`strategies/engine.py`): faithful port of the research engine —
   the v5.2 managed long engine + 4% monthly breaker, the deep-bear vol-targeted short
   sleeve (+ turnover costs + 4% sleeve breaker), composed as `r_long + 0.75·r_short`.
-- **Plugins** (`trend_rider_v6.py`, `trend_rider_v52.py`): registered, validated params
-  pinned, `on_candle` emitting intents; v5.2 is long-only.
+- **Plugins** (`trend_rider_v6_4h.py`, `trend_rider_v52_4h.py`): registered,
+  timeframe-qualified, validated params pinned, `on_candle` emitting intents;
+  v5.2 is long-only.
 - **Strategy library API** (`api/strategies_api.py` + `services/strategies.py`) and the
   Settings strategy-library UI with parity status.
 - **Numeric policy:** strategy *decisions* use float64 (identical to the validated

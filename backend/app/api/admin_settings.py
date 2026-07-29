@@ -17,9 +17,13 @@ from app.bot.service import bot_service
 from app.bot.state import BotStatus
 from app.core.config import get_settings
 from app.db.session import get_session
-from app.services import strategies as strat_svc
 from app.services.events import record_event
 from app.services.settings_store import get_settings_row
+from app.services.strategy_selection import (
+    StrategySelectionBlockedError,
+    UnknownStrategyError,
+    select_active_strategy,
+)
 
 router = APIRouter(prefix="/api/settings", tags=["settings-admin"])
 
@@ -88,19 +92,14 @@ async def switch_environment(
 async def switch_strategy(
     body: StrategyIn, current: CurrentUserDep, session: SessionDep
 ) -> MessageOut:
-    row = await get_settings_row(session, for_update=True)
-    await _require_stopped(session)
-    if body.name not in {s.name for s in strat_svc.list_registered()}:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="unknown strategy")
-    old = row.active_strategy
-    row.active_strategy = body.name
-    await record_event(
-        session,
-        level="INFO",
-        category="strategy",
-        message=f"Active strategy switched {old} → {body.name}",
-        ref="strategy_switch",
-        payload={"from": old, "to": body.name, "by": current.user.email},
-    )
-    await session.commit()
-    return MessageOut(message=f"active strategy set to {body.name}")
+    try:
+        selected = await select_active_strategy(
+            session,
+            requested_name=body.name,
+            actor_email=current.user.email,
+        )
+    except UnknownStrategyError:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="unknown strategy") from None
+    except StrategySelectionBlockedError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from None
+    return MessageOut(message=f"active strategy set to {selected}")

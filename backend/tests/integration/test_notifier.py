@@ -19,7 +19,11 @@ async def test_successful_send_marks_delivered(db_session: AsyncSession) -> None
         gw,
         kind="bot_started",
         to="94711234567",
-        payload={"environment": "DEMO", "strategy": "trend_rider_v6", "equity": "5000"},
+        payload={
+            "environment": "DEMO",
+            "strategy": "trend_rider_v6_4h",
+            "equity": "5000",
+        },
     )
     await db_session.commit()
     assert status == "delivered"

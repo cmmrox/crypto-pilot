@@ -24,7 +24,16 @@ row (BSD FR-01). Docs: [developers.binance.com — USDS-M futures](https://devel
   24-hour change from `GET /fapi/v1/ticker/24hr?symbol=BTCUSDT`. These observations
   are display-only, carry freshness timestamps, require no account credential, and
   never enter the strategy decision path.
-- **Orders:** long engine — MARKET entry, STOP_MARKET reduce-only protective stop, LIMIT reduce-only TP1; short sleeve — MARKET entry/resize, **no price stop by validated design**. Idempotent `newClientOrderId` on every order (`CP-<trade>-<seq>`), lot-size/min-notional filters respected via `exchangeInfo`.
+- **Orders:** long engine — MARKET entry, STOP_MARKET reduce-only protective stop,
+  LIMIT reduce-only TP1; short sleeve — MARKET entry/resize, **no price stop by
+  validated design**. Binance USD-M conditional stops use `/fapi/v1/algoOrder`
+  with idempotent `clientAlgoId`; regular orders use `newClientOrderId`.
+  Open-order, query, individual cancel, and cancel-all operations combine both
+  APIs. Lot-size/min-notional filters are respected via `exchangeInfo`.
+- **Fill truth:** a filled MARKET response with zero `avgPrice` is resolved from
+  order truth or weighted account-trade fills before persistence. Every 4h
+  decision synchronizes order status, fills, fees, realized PnL, funding, and
+  remaining quantity before position reconciliation.
 - **Account:** one-way position mode, isolated margin, explicit leverage (cap 3×). Margin error `-2019` → pause bot + SMS.
 - **Reconciliation:** on every start and every 4h close compare expected vs actual position/orders; mismatch → safe mode + SMS (BSD §8).
 

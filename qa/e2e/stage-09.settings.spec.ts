@@ -59,27 +59,46 @@ test("QA-9.04 strategy fallback can be selected (guarded)", async ({
 }) => {
   await login(page);
   await gotoSettings(page);
-  const select = page.getByTestId("select-trend_rider_v52");
-  if ((await select.count()) > 0) {
-    await select.click();
+  const fallbackCard = page.getByTestId("strategy-trend_rider_v52_4h");
+  const defaultCard = page.getByTestId("strategy-trend_rider_v6_4h");
+  await expect(fallbackCard).toBeVisible();
+  await expect(defaultCard).toBeVisible();
+
+  const fallbackSelect = page.getByTestId("select-trend_rider_v52_4h");
+  if ((await fallbackSelect.count()) > 0) {
+    await fallbackSelect.click();
+    const switched = page.waitForResponse(
+      (response) =>
+        response.request().method() === "PUT" &&
+        response.url().endsWith("/api/settings/strategy"),
+    );
     await page
       .getByRole("dialog")
       .getByRole("button", { name: /select release/i })
       .click();
-    await expect(page.getByTestId("strategy-trend_rider_v52")).toContainText(
-      /active/i,
-    );
-    // Restore v6 as active.
-    const back = page.getByTestId("select-trend_rider_v6");
-    if ((await back.count()) > 0) {
-      await back.click();
-      await page
-        .getByRole("dialog")
-        .getByRole("button", { name: /select release/i })
-        .click();
-    }
+    expect((await switched).ok()).toBeTruthy();
   }
-  await expect(page.getByTestId("strategy-trend_rider_v6")).toBeVisible();
+  await expect(
+    fallbackCard.getByText("Active", { exact: true }),
+  ).toBeVisible();
+
+  // Always restore the default so later tests do not inherit mutable state.
+  const defaultSelect = page.getByTestId("select-trend_rider_v6_4h");
+  await expect(defaultSelect).toBeVisible();
+  await defaultSelect.click();
+  const restored = page.waitForResponse(
+    (response) =>
+      response.request().method() === "PUT" &&
+      response.url().endsWith("/api/settings/strategy"),
+  );
+  await page
+    .getByRole("dialog")
+    .getByRole("button", { name: /select release/i })
+    .click();
+  expect((await restored).ok()).toBeTruthy();
+  await expect(
+    defaultCard.getByText("Active", { exact: true }),
+  ).toBeVisible();
 });
 
 test("QA-9.05 authz sweep: protected APIs reject anonymous", async ({

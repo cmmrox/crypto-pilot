@@ -16,13 +16,11 @@ from app.db.session import get_session
 from app.execution import candles as candle_svc
 from app.execution.binance_client import BinanceClient
 from app.services.settings_store import get_settings_row
+from app.strategies import get_strategy
 
 router = APIRouter(prefix="/api/market", tags=["market"])
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
-
-SYMBOL = "BTCUSDT"
-INTERVAL = "4h"
 
 
 @router.get("/status", response_model=MarketStatus)
@@ -30,16 +28,20 @@ async def market_status(_current: CurrentUserDep, session: SessionDep) -> Market
     """Connection + ingest health for the active environment."""
     settings_row = await get_settings_row(session)
     env = settings_row.active_environment
+    market = get_strategy(settings_row.active_strategy).manifest.market
 
     stored = (
         await session.execute(
             select(func.count())
             .select_from(Candle)
-            .where(Candle.symbol == SYMBOL, Candle.interval == INTERVAL)
+            .where(
+                Candle.symbol == market.symbol,
+                Candle.interval == market.interval,
+            )
         )
     ).scalar_one()
-    latest = await candle_svc.latest_open_time(session, SYMBOL, INTERVAL)
-    gaps = await candle_svc.detect_gaps(session, SYMBOL, INTERVAL)
+    latest = await candle_svc.latest_open_time(session, market.symbol, market.interval)
+    gaps = await candle_svc.detect_gaps(session, market.symbol, market.interval)
 
     drift: int | None = None
     reachable = False
@@ -52,14 +54,14 @@ async def market_status(_current: CurrentUserDep, session: SessionDep) -> Market
 
     now = utc_now()
     return MarketStatus(
-        symbol=SYMBOL,
-        interval=INTERVAL,
+        symbol=market.symbol,
+        interval=market.interval,
         environment=env,
         candles_stored=int(stored),
         latest_open_time=latest.isoformat() if latest else None,
         gaps=len(gaps),
-        next_close_utc=next_close_time(now).isoformat(),
-        seconds_to_next_close=round(seconds_until_next_close(now), 1),
+        next_close_utc=next_close_time(now, market.interval).isoformat(),
+        seconds_to_next_close=round(seconds_until_next_close(now, market.interval), 1),
         clock_drift_ms=drift,
         exchange_reachable=reachable,
     )
@@ -70,11 +72,16 @@ async def recent_candles(
     _current: CurrentUserDep, session: SessionDep, limit: int = 200
 ) -> list[CandleOut]:
     """Return the most recent stored candles (oldest first)."""
+    settings_row = await get_settings_row(session)
+    market = get_strategy(settings_row.active_strategy).manifest.market
     rows = (
         (
             await session.execute(
                 select(Candle)
-                .where(Candle.symbol == SYMBOL, Candle.interval == INTERVAL)
+                .where(
+                    Candle.symbol == market.symbol,
+                    Candle.interval == market.interval,
+                )
                 .order_by(Candle.open_time.desc())
                 .limit(limit)
             )
@@ -101,6 +108,13 @@ async def trigger_backfill(current: CurrentUserDep, session: SessionDep) -> Mark
     """Backfill recent closed candles from Binance (public REST)."""
     settings_row = await get_settings_row(session)
     env = settings_row.active_environment
+    market = get_strategy(settings_row.active_strategy).manifest.market
     async with BinanceClient(env) as client:
-        await candle_svc.backfill(session, client, SYMBOL, INTERVAL, limit=500)
+        await candle_svc.backfill(
+            session,
+            client,
+            market.symbol,
+            market.interval,
+            limit=500,
+        )
     return await market_status(current, session)

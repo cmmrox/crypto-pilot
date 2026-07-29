@@ -21,8 +21,8 @@ backend/app
 ├── db/           SQLAlchemy models · Alembic migrations · session management
 ├── bot/          BotService: 24/7 loop · lifecycle (start/stop/stop-close/kill/safe-mode)
 │                 scheduler (4h ticks UTC, health, reconnect) · persisted state/resume
-├── strategies/   Strategy interface + intent types + registry
-│                 trend_rider_v6.py · trend_rider_v52.py  (pure functions, no I/O)
+├── strategies/   Contract v2 + auto-discovered, strategy-owned manifests
+│   └── plugins/  trend_rider_v6_4h.py · trend_rider_v52_4h.py (pure, no I/O)
 ├── risk/         RiskEngine: risk-% sizing · sleeve vol targeting · leverage cap
 │                 both monthly breakers (independent)
 ├── execution/    BinanceClient (REST+WS, DEMO/LIVE) · OrderManager (idempotent orders,
@@ -47,9 +47,10 @@ backend/app
 ```python
 class Strategy(Protocol):
     name: str
+    manifest: StrategyManifest  # market, timeframe, risk, education, validation
     params: dict          # validated defaults; read-only in the operator UI
-    def warmup_bars(self) -> int: ...                    # v6: 200
     def on_candle(self, candles: CandleWindow, state: TradeState) -> list[Intent]: ...
+    def inspect(self, candles: CandleWindow) -> StrategyWatch | None: ...
 
 # Intents (complete vocabulary — do not extend casually):
 EnterLong(stop_distance, tp_levels)      # engine sizes from risk %, places stop+TP
@@ -61,9 +62,9 @@ ExitAll(reason)                          # regime death, breaker, manual, kill
 Halt(until)                              # monthly breakers stand-aside
 ```
 
-Registered at launch: `trend_rider_v6` (default), `trend_rider_v52` (long-only
+Registered at launch: `trend_rider_v6_4h` (default), `trend_rider_v52_4h` (long-only
 fallback), both pinned to the validated parameter sets. **Parity is law:** the
-production `trend_rider_v6` must reproduce `research/backtests/final_composite.py`
+production `trend_rider_v6_4h` must reproduce `research/backtests/final_composite.py`
 decisions bar-for-bar over the full 3-year history (CI-enforced, Stage 3).
 
 ## 4. Runtime model
@@ -123,11 +124,12 @@ unless hotfix-critical. Health endpoint + dead-man cron.
    `/api/overview` combines the in-process worker heartbeat, public Binance market
    observations, next closed-4h decision time, latest persisted indicator thresholds,
    operational events, account truth, independent breakers, and the isolated news
-   briefing. `strategies/watch.py` may reuse pure indicator calculations, but it emits
-   no intents and is never imported by the trading path. Displayed threshold prices
-   are descriptive closed-candle conditions, never a promised trigger or execution
-   price. The five-second worker heartbeat is distinct from both the bot lifecycle
-   state and the four-hour ingest dead-man signal.
+   briefing. Each strategy plugin owns its optional pure `inspect()` projection, so
+   adding a different strategy cannot leave Trend Rider-specific conditions in the
+   generic Overview service. Inspection emits no intents and is never used by the
+   trading path. Displayed threshold prices are descriptive closed-candle conditions,
+   never a promised trigger or execution price. The five-second worker heartbeat is
+   distinct from both the bot lifecycle state and the four-hour ingest dead-man signal.
 7. **Aggressive risk-defined sizing profile (`risk_pct` 15%, `leverage_cap` 6x).**
    Supersedes the original validated 2%/3x defaults. Each long trade is sized so a
    stop-out loses ~15% of equity (`risk_pct ÷ stop%` ⇒ ~4.7x median leverage, capped
@@ -137,7 +139,14 @@ unless hotfix-critical. Health endpoint + dead-man cron.
    no liquidation. This accepts materially higher single-trade and drawdown risk than
    the validated set; it relies on stops filling near their price (gap risk) and on the
    short sleeve remaining at its native vol-targeted sizing. Owner-acknowledged, DEMO
-   only. `risk_pct`/`leverage_cap` sit outside the parity gate (which locks the engine
-   constants), so this preserves bar-for-bar strategy parity. Delivered as migration
-   `d3e4f5a6b7c8`; the seeded default is guarded by
-   `test_seeded_row_uses_approved_risk_profile`.
+   only. Contract v2 moved these values from mutable application settings into the
+   immutable strategy manifest; the chronological production-plugin replay verifies
+   the complete configured profile. The earlier settings change was delivered as
+   migration `d3e4f5a6b7c8`; migration `f5a6b7c8d9e0` removes those duplicate columns.
+8. **Strategy plugin contract v2.** Strategy IDs and filenames include their
+   timeframe (for example `trend_rider_v6_4h.py`). An immutable plugin manifest owns
+   the market/data window, risk policy, education, and validation evidence. The
+   application auto-discovers verified plugins and remains responsible for I/O,
+   clocks, reconciliation, exchange filters, sizing mechanics, and orders. Strategy
+   selection is read-only apart from choosing the default; it requires stopped and
+   flat state. See `docs/strategies/CREATING_A_STRATEGY.md`.

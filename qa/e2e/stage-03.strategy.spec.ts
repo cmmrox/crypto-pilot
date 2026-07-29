@@ -21,13 +21,13 @@ test("QA-3.01 strategy library shows both validated releases", async ({
   await login(page);
   await gotoSettings(page);
   await expect(page.getByTestId("strategy-library")).toBeVisible();
-  await expect(page.getByTestId("strategy-trend_rider_v6")).toContainText(
-    "trend_rider_v6",
+  await expect(page.getByTestId("strategy-trend_rider_v6_4h")).toContainText(
+    "trend_rider_v6_4h",
   );
-  await expect(page.getByTestId("strategy-trend_rider_v6")).toContainText(
+  await expect(page.getByTestId("strategy-trend_rider_v6_4h")).toContainText(
     "LONG + SHORT",
   );
-  await expect(page.getByTestId("strategy-trend_rider_v52")).toContainText(
+  await expect(page.getByTestId("strategy-trend_rider_v52_4h")).toContainText(
     "LONG ONLY",
   );
 });
@@ -35,10 +35,10 @@ test("QA-3.01 strategy library shows both validated releases", async ({
 test("QA-3.02 v6 is active and parity-verified", async ({ page }) => {
   await login(page);
   await gotoSettings(page);
-  await expect(page.getByTestId("parity-trend_rider_v6")).toContainText(
+  await expect(page.getByTestId("parity-trend_rider_v6_4h")).toContainText(
     /parity verified/i,
   );
-  await expect(page.getByTestId("strategy-trend_rider_v6")).toContainText(
+  await expect(page.getByTestId("strategy-trend_rider_v6_4h")).toContainText(
     "Active",
   );
 });
@@ -56,7 +56,9 @@ test("QA-3.03 strategies API returns the validated manifest", async ({
   const byName = Object.fromEntries(
     (await resp.json()).map((s: { name: string }) => [s.name, s]),
   );
-  expect(byName["trend_rider_v6"].parity_verified).toBe(true);
-  expect(byName["trend_rider_v6"].params.stop_atr).toBe(2.5);
-  expect(byName["trend_rider_v6"].warmup_bars).toBe(200);
+  expect(byName["trend_rider_v6_4h"].parity_verified).toBe(true);
+  expect(byName["trend_rider_v6_4h"].params.stop_atr).toBe(2.5);
+  expect(byName["trend_rider_v6_4h"].warmup_bars).toBe(200);
+  expect(byName["trend_rider_v6_4h"].interval).toBe("4h");
+  expect(byName["trend_rider_v6_4h"].summary).toBeTruthy();
 });

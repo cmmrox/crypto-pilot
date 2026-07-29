@@ -436,7 +436,9 @@ export function Overview() {
                   ))}
                 </div>
               ) : (
-                <div className="inline-empty">Waiting for the 200 closed candles required for indicator warmup.</div>
+                <div className="inline-empty">
+                  Strategy inspection is waiting for its required closed-candle history.
+                </div>
               )}
               <p className="watch-disclaimer" data-testid="watch-disclaimer">
                 <ShieldAlert size={14} /> {data.watch.disclaimer}

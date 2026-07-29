@@ -530,6 +530,7 @@ function StrategyLibrary() {
       onConfirm: async () => {
         await switchStrategy(name);
         await load();
+        window.dispatchEvent(new Event("strategy-changed"));
       },
     });
   return (
@@ -552,10 +553,30 @@ function StrategyLibrary() {
             data-testid={`strategy-${s.name}`}
           >
             <div>
-              <strong>{s.name}</strong>
-              <code>release {s.validated_release}</code>
+              <strong>{s.display_name}</strong>
+              <code>{s.name} · release {s.validated_release}</code>
+              <p>{s.summary}</p>
+              <small>
+                {s.symbol} · {s.interval} · {s.decision_point.replace("_", " ")}
+              </small>
             </div>
             <span className="strategy-dir">{s.direction}</span>
+            <details>
+              <summary>How this strategy works</summary>
+              <p>{s.description}</p>
+              <h4>Entries</h4>
+              <ul>{s.entries.map((item) => <li key={item}>{item}</li>)}</ul>
+              <h4>Exits</h4>
+              <ul>{s.exits.map((item) => <li key={item}>{item}</li>)}</ul>
+              <h4>Risk controls</h4>
+              <ul>{s.risk_controls.map((item) => <li key={item}>{item}</li>)}</ul>
+              <h4>Caveats</h4>
+              <ul>{s.caveats.map((item) => <li key={item}>{item}</li>)}</ul>
+              <small>
+                Warm-up {s.warmup_bars} bars · history {s.history_bars} bars ·
+                validation: {s.validation_method}
+              </small>
+            </details>
             <div className="strategy-badges">
               {s.parity_verified && (
                 <span className="pill ok" data-testid={`parity-${s.name}`}>

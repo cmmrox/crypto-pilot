@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from app.strategies import get_strategy
 from app.strategies.base import Candle
-from app.strategies.watch import inspect_strategy_watch
 
 
 def _candles(closes: list[float]) -> list[Candle]:
@@ -21,26 +21,42 @@ def _candles(closes: list[float]) -> list[Candle]:
 
 
 def test_watch_requires_full_indicator_warmup() -> None:
-    assert inspect_strategy_watch(_candles([50_000 + index for index in range(199)])) is None
+    strategy = get_strategy("trend_rider_v6_4h")
+    assert strategy.inspect(_candles([50_000 + index for index in range(199)])) is None
 
 
 def test_watch_exposes_long_regime_thresholds_without_emitting_an_intent() -> None:
-    snapshot = inspect_strategy_watch(_candles([50_000 + index * 20 for index in range(240)]))
+    strategy = get_strategy("trend_rider_v6_4h")
+    closes = [50_000 + index * 20 for index in range(240)]
+    snapshot = strategy.inspect(_candles(closes))
 
     assert snapshot is not None
-    assert snapshot.long_regime
-    assert snapshot.close > snapshot.sma200
-    assert snapshot.ema50 > snapshot.ema200
-    assert snapshot.deep_bear_threshold == snapshot.sma200 - 0.5 * snapshot.atr14
+    by_key = {rule.key: rule for rule in snapshot.rules}
+    assert by_key["long_regime"].active
+    assert by_key["long_regime"].threshold is not None
+    assert closes[-1] > by_key["long_regime"].threshold
+    assert by_key["pullback_resume"].condition.startswith("A closed 4h candle")
 
 
 def test_watch_exposes_deep_bear_condition_for_owner_visibility() -> None:
     closes = [70_000 + index * 15 for index in range(210)]
     closes.extend([73_000 - index * 550 for index in range(30)])
-    snapshot = inspect_strategy_watch(_candles(closes))
+    strategy = get_strategy("trend_rider_v6_4h")
+    snapshot = strategy.inspect(_candles(closes))
 
     assert snapshot is not None
-    assert snapshot.close < snapshot.sma200
-    assert snapshot.ema50 < snapshot.ema200
-    assert snapshot.close < snapshot.deep_bear_threshold
-    assert snapshot.deep_bear
+    rule = next(rule for rule in snapshot.rules if rule.key == "deep_bear_short")
+    assert rule.active
+    assert rule.threshold is not None
+    assert closes[-1] < rule.threshold
+
+
+def test_long_only_watch_does_not_publish_short_rules() -> None:
+    strategy = get_strategy("trend_rider_v52_4h")
+    snapshot = strategy.inspect(_candles([50_000 + index * 20 for index in range(240)]))
+
+    assert snapshot is not None
+    assert {rule.key for rule in snapshot.rules} == {
+        "long_regime",
+        "pullback_resume",
+    }

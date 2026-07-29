@@ -9,12 +9,13 @@ import pandas as pd
 import pytest
 from app.bot.service import BotService
 from app.bot.state import BotStatus
-from app.db.models import Candle, Event, Trade
+from app.db.models import Candle, EquitySnapshot, Event, Order, Trade
 from app.execution.orders import (
     OrderManager,
     ProtectiveStopFailed,
     persist_emergency_exit,
 )
+from app.risk.sizing import SizingResult
 from app.strategies.engine import add_indicators
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -100,7 +101,7 @@ async def test_stop_leaves_position(db_session: AsyncSession) -> None:
 async def test_stop_and_close_flattens(db_session: AsyncSession) -> None:
     svc = BotService()
     ex = FakeExchange()
-    om = OrderManager(ex)
+    om = OrderManager(ex, symbol="BTCUSDT")
     await svc.start(db_session, ex, by="o")
     await db_session.commit()
     await ex.place_market("BTCUSDT", "BUY", D("0.05"), client_order_id="e")
@@ -114,7 +115,7 @@ async def test_stop_and_close_flattens(db_session: AsyncSession) -> None:
 async def test_safe_mode_blocks_evaluate(db_session: AsyncSession) -> None:
     svc = BotService()
     ex = FakeExchange()
-    om = OrderManager(ex)
+    om = OrderManager(ex, symbol="BTCUSDT")
     await svc.start(db_session, ex, by="o")
     await svc.enter_safe_mode(db_session, reason="test")
     await db_session.commit()
@@ -128,7 +129,7 @@ async def test_evaluate_opens_long_on_fresh_regime(db_session: AsyncSession) -> 
 
     svc = BotService()
     ex = FakeExchange(mark_price=D("150"))
-    om = OrderManager(ex)
+    om = OrderManager(ex, symbol="BTCUSDT")
     await svc.start(db_session, ex, by="o")
     await db_session.commit()
 
@@ -163,7 +164,7 @@ async def test_every_close_reconciliation_blocks_new_risk(
 ) -> None:
     svc = BotService()
     ex = FakeExchange()
-    om = OrderManager(ex)
+    om = OrderManager(ex, symbol="BTCUSDT")
     await svc.start(db_session, ex, by="o")
     await db_session.commit()
     await ex.place_market("BTCUSDT", "BUY", D("0.05"), client_order_id="out-of-band")
@@ -209,7 +210,7 @@ async def test_protective_stop_failure_enters_safe_mode_and_records_fills(
 
     svc = BotService()
     ex = StopFailingExchange(mark_price=D("150"))
-    om = OrderManager(ex)
+    om = OrderManager(ex, symbol="BTCUSDT")
     await svc.start(db_session, ex, by="o")
     await db_session.commit()
 
@@ -255,3 +256,91 @@ async def test_restart_resume_detects_open_run(db_session: AsyncSession) -> None
     # A fresh service instance (simulating restart) sees the open run as running.
     fresh = BotService()
     assert (await fresh.status(db_session)).status == BotStatus.RUNNING
+
+
+@pytest.mark.asyncio
+async def test_safe_mode_continues_tp_sync_and_stop_management(
+    db_session: AsyncSession,
+) -> None:
+    svc = BotService()
+    exchange = FakeExchange(mark_price=D("150"), balance=D("5000"))
+    manager = OrderManager(exchange, symbol="BTCUSDT")
+    await svc.start(db_session, exchange, by="owner")
+    trade = await manager.open_long(
+        db_session,
+        sizing=SizingResult(D("1"), D("150"), D("0.03"), True, "ok"),
+        stop_price=D("100"),
+        tp1_price=D("160"),
+        tp1_fraction=D("0.4"),
+        strategy="trend_rider_v6_4h",
+        strategy_release="6.0",
+        strategy_interval="4h",
+    )
+    tp = (
+        await db_session.execute(
+            select(Order).where(Order.trade_id == trade.id, Order.type == "LIMIT")
+        )
+    ).scalar_one()
+    exchange.fill_resting(tp.client_order_id, price=D("160"))
+    await svc.enter_safe_mode(db_session, reason="test management")
+
+    candles = _bull_candles(320)
+    exchange.mark = candles[-1].close
+    actions = await svc.evaluate_once(
+        db_session,
+        exchange,
+        manager,
+        candles=candles,
+    )
+
+    assert "move_stop" in actions
+    assert trade.remaining_qty == D("0.6")
+    assert (await svc.status(db_session)).status == BotStatus.SAFE_MODE
+
+
+@pytest.mark.asyncio
+async def test_long_monthly_breaker_flattens_and_persists_halt(
+    db_session: AsyncSession,
+) -> None:
+    svc = BotService()
+    exchange = FakeExchange(mark_price=D("150"), balance=D("100"))
+    manager = OrderManager(exchange, symbol="BTCUSDT")
+    await svc.start(db_session, exchange, by="owner")
+    trade = await manager.open_long(
+        db_session,
+        sizing=SizingResult(D("0.1"), D("15"), D("0.15"), True, "ok"),
+        stop_price=D("90"),
+        tp1_price=D("210"),
+        tp1_fraction=D("0.4"),
+        strategy="trend_rider_v6_4h",
+        strategy_release="6.0",
+        strategy_interval="4h",
+    )
+    candles = _bull_candles(320)
+    current_close = candles[-1].open_time + dt.timedelta(hours=4)
+    db_session.add(
+        EquitySnapshot(
+            ts=current_close - dt.timedelta(hours=4),
+            environment="DEMO",
+            balance=D("100"),
+            unrealized_pnl=D("0"),
+            month_to_date_pnl=D("0"),
+            sleeve_month_pnl=D("0"),
+        )
+    )
+    exchange.mark = D("100")  # -$5 unrealized = -5% of month-start equity
+
+    actions = await svc.evaluate_once(
+        db_session,
+        exchange,
+        manager,
+        candles=candles,
+    )
+
+    assert actions == ["halt_long", "breaker_exit_long"]
+    assert (await exchange.get_position("BTCUSDT")).qty == 0
+    assert trade.closed_at is not None
+    breaker = (
+        await db_session.execute(select(Event).where(Event.ref == "breaker:LONG:2024-02"))
+    ).scalar_one()
+    assert D(breaker.payload_json["month_to_date_pnl"]) == D("-5")

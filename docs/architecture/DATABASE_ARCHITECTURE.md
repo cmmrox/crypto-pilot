@@ -18,12 +18,11 @@ state (balance/positions/income) — the DB records it, never invents it.
 |---|---|---|
 | `users` | Owner login | `email unique`, `password_hash` (Argon2id), `role` (`owner`), `phone_encrypted`, `twofa_enabled` |
 | `otp_challenges` | Single-use SMS login/security proof | `user_id fk`, constrained `purpose`, HMAC `code_hash`, encrypted target phone, attempts/max, expiry/consumed/send timestamps; index `(user_id, purpose, created_at)` |
-| `app_settings` | Singleton config row | `active_environment` (`DEMO`\|`LIVE`), `active_strategy`, `risk_pct`, `sleeve_weight_pct`, `sleeve_vol_target`, `leverage_cap`, `sms_enabled`, `news_sources jsonb`, `news_time`, `news_provider` |
+| `app_settings` | Singleton config row | `active_environment` (`DEMO`\|`LIVE`), canonical `active_strategy`, `sms_enabled`, `news_sources jsonb`, `news_time`, `news_provider`; strategy risk/data policy lives in the plugin manifest |
 | `api_credentials` | Per-environment exchange + SMS secrets | `environment`, `service` (`binance`\|`notifylk`), `api_key_encrypted`, `secret_encrypted` (AES-GCM), unique `(environment, service)`; the legacy plaintext `api_key` slot is cleared by a fail-closed startup data migration |
-| `strategies` | Registered plugins | `name unique`, `class_path`, `params_json jsonb`, `enabled`, `validated_release` |
-| `bot_runs` | One row per start→stop | `started_at`, `stopped_at`, `environment`, `strategy`, `stop_reason` (`user`\|`error`\|`kill`\|`breaker`), `started_by` |
+| `bot_runs` | One row per start→stop | `started_at`, `stopped_at`, `environment`, canonical `strategy`, `strategy_release`, `strategy_interval`, `stop_reason` (`user`\|`error`\|`kill`\|`breaker`), `started_by` |
 | `candles` | Cached klines | `symbol`, `interval`, `open_time` — unique `(symbol, interval, open_time)`; o/h/l/c/v `numeric(20,8)`; `closed boolean` |
-| `trades` | One row per round-trip | `opened_at`, `closed_at`, `side` (`LONG`\|`SHORT`), `entry_px`, `exit_px`, `qty`, `fees`, `funding`, `realized_pnl`, `r_multiple`, `exit_reason`, `strategy`, `environment`, `bot_run_id fk` |
+| `trades` | One row per round-trip | `opened_at`, `closed_at`, `side` (`LONG`\|`SHORT`), `entry_px`, `exit_px`, `qty`, `fees`, `funding`, `realized_pnl`, `r_multiple`, `exit_reason`, canonical `strategy`, `strategy_release`, `strategy_interval`, `environment`, `bot_run_id fk` |
 | `orders` | Every exchange order | `binance_order_id`, `client_order_id unique` (idempotency!), `trade_id fk`, `type`, `status`, `price`, `stop_price`, `qty`, `reduce_only`, `placed_at`, `filled_at`, `raw_json jsonb` |
 | `equity_snapshots` | Every 4h close | `ts`, `environment`, `balance`, `unrealized_pnl`, `month_to_date_pnl`, `sleeve_month_pnl`; unique `(environment, ts)` |
 | `events` | Full audit trail | `ts`, `level` (`INFO`\|`WARN`\|`ERROR`), `category` (`trade`\|`bot`\|`breaker`\|`error`\|`sms`\|`news`\|`reconciliation`\|`system`\|`security`), `message`, `payload_json jsonb`, `sms_status`, `ref` |
@@ -48,6 +47,11 @@ state (balance/positions/income) — the DB records it, never invents it.
 ## Indexing (beyond PKs/uniques)
 
 - `trades (environment, opened_at desc)`, `trades (side)`, `trades (strategy)` — history filters.
+
+Runtime-equivalence fields are persisted rather than reconstructed from process
+memory: `trades.remaining_qty`, `trades.highest_high`, `orders.filled_qty`, and
+`orders.avg_fill_px`. Conditional stop rows retain the Binance Algo ID in
+`orders.binance_order_id` and the original Algo payload in `raw_json`.
 - `events (ts desc)`, `events (category, ts desc)`, `events (level, ts desc)` — ledger queries.
 - `otp_challenges (user_id, purpose, created_at)` — send cap and challenge lookup.
 - `candles (symbol, interval, open_time desc)` — window loads.

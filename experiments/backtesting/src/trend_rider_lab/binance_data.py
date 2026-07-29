@@ -22,6 +22,7 @@ from app.execution.filters import SymbolFilters
 
 BASE_URL = "https://fapi.binance.com"
 FOUR_HOURS_MS = 4 * 60 * 60 * 1000
+THIRTY_MINUTES_MS = 30 * 60 * 1000
 KLINE_LIMIT = 1500
 FUNDING_LIMIT = 1000
 QueryValue: TypeAlias = str | int | float | bool | None
@@ -43,7 +44,9 @@ class PublicBinanceClient:
 
     def __init__(self, base_url: str = BASE_URL) -> None:
         self._base_url = base_url.rstrip("/")
-        self._client = httpx.Client(timeout=30.0, headers={"User-Agent": "CryptoPilotLab/1.0"})
+        self._client = httpx.Client(
+            timeout=30.0, headers={"User-Agent": "CryptoPilotLab/1.0"}
+        )
 
     def close(self) -> None:
         self._client.close()
@@ -97,7 +100,11 @@ class PublicBinanceClient:
         start_ms: int,
         end_ms: int,
         server_time_ms: int,
+        *,
+        interval_ms: int = FOUR_HOURS_MS,
     ) -> list[KlineRow]:
+        if interval_ms <= 0:
+            raise ValueError("interval_ms must be positive")
         rows: list[KlineRow] = []
         cursor = start_ms
         while cursor <= end_ms:
@@ -114,7 +121,7 @@ class PublicBinanceClient:
             if not batch:
                 break
             rows.extend(row for row in batch if int(row[6]) < server_time_ms)
-            next_cursor = int(batch[-1][0]) + FOUR_HOURS_MS
+            next_cursor = int(batch[-1][0]) + interval_ms
             if next_cursor <= cursor:
                 raise RuntimeError("Binance kline pagination did not advance")
             cursor = next_cursor
@@ -149,10 +156,16 @@ class PublicBinanceClient:
         return [unique[key] for key in sorted(unique)]
 
 
-def latest_closed_open_ms(server_time_ms: int) -> int:
-    """Open time of the newest 4h candle that has fully closed."""
-    current_open = (server_time_ms // FOUR_HOURS_MS) * FOUR_HOURS_MS
-    return current_open - FOUR_HOURS_MS
+def latest_closed_open_ms(
+    server_time_ms: int,
+    *,
+    interval_ms: int = FOUR_HOURS_MS,
+) -> int:
+    """Open time of the newest candle at ``interval_ms`` that has fully closed."""
+    if interval_ms <= 0:
+        raise ValueError("interval_ms must be positive")
+    current_open = (server_time_ms // interval_ms) * interval_ms
+    return current_open - interval_ms
 
 
 def download_dataset(
@@ -179,14 +192,18 @@ def download_dataset(
     finally:
         client.close()
     if not candles:
-        raise RuntimeError("Binance returned no closed candles for the requested period")
+        raise RuntimeError(
+            "Binance returned no closed candles for the requested period"
+        )
 
     candles_path = data_dir / "btcusdt_4h.csv"
     funding_path = data_dir / "btcusdt_funding.csv"
     filters_path = data_dir / "btcusdt_filters.json"
     _write_candles(candles_path, candles)
     _write_funding(funding_path, funding)
-    filters_path.write_text(json.dumps(public_filters, indent=2) + "\n", encoding="utf-8")
+    filters_path.write_text(
+        json.dumps(public_filters, indent=2) + "\n", encoding="utf-8"
+    )
     return DownloadedData(
         candles_path=candles_path,
         funding_path=funding_path,

@@ -74,6 +74,56 @@ backend/.venv/bin/python -m pytest -q experiments/backtesting/tests
 backend/.venv/bin/python -m trend_rider_lab.cli audit-live-path
 ```
 
+## Isolated 30-minute and 1-hour research
+
+The lab can also search experimental 30-minute long/short signal families without
+registering a production strategy:
+
+```sh
+export PYTHONPATH="$PWD/backend:$PWD/experiments/backtesting/src"
+backend/.venv/bin/python -m trend_rider_lab.cli search-30m \
+  --years 3 \
+  --broad-count 1500 \
+  --refined-count 1500
+```
+
+The deterministic search covers EMA trend, time-series momentum, Donchian breakout,
+ATR channel, regime-gated mean reversion, and multi-horizon momentum ensembles. It
+selects candidates only on the first two years (one train year plus one validation
+year), then evaluates the locked winner on the untouched final year. Signals execute
+at the next 30-minute open; 0.05% turnover cost and public historical funding apply.
+
+This command is research-only. It does not modify the frozen `research/` tree, register
+a plugin, connect to an account, or change the application's approved closed-4h
+scheduler policy.
+
+The stricter six-year asymmetric search selects separate long and short sleeves only
+on the older three years, then evaluates the locked composite on the latest three
+years. Run both the full family set and the trend-only falsification:
+
+```sh
+export PYTHONPATH="$PWD/backend:$PWD/experiments/backtesting/src"
+backend/.venv/bin/python -m trend_rider_lab.cli search-30m-asymmetric \
+  --timeframe 30m \
+  --leader-count 12
+backend/.venv/bin/python -m trend_rider_lab.cli search-30m-asymmetric \
+  --timeframe 30m \
+  --leader-count 12 \
+  --trend-only \
+  --reuse-data
+backend/.venv/bin/python -m trend_rider_lab.cli search-30m-asymmetric \
+  --timeframe 1h \
+  --leader-count 12
+backend/.venv/bin/python -m trend_rider_lab.cli search-30m-asymmetric \
+  --timeframe 1h \
+  --leader-count 12 \
+  --trend-only \
+  --reuse-data
+```
+
+The latest evidence and comparison with Trend Rider v6 is recorded in
+`results/LATEST_INTRADAY_RESEARCH.md`.
+
 ## Replay assumptions
 
 - Public Binance USD-M BTCUSDT 4h candles; only candles whose close time is

@@ -54,6 +54,23 @@ test("QA-9.03 switching to LIVE requires typing LIVE (cancelled here)", async ({
   await expect(page.getByTestId("active-env")).toContainText("DEMO");
 });
 
+test("QA-9.03b locked LIVE switch explains the backend release gate", async ({ page }) => {
+  await login(page);
+  await gotoSettings(page);
+  await page.getByTestId("env-live").click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByLabel(/type LIVE to confirm/i).fill("LIVE");
+  const rejected = page.waitForResponse(
+    (response) =>
+      response.request().method() === "PUT" &&
+      response.url().endsWith("/api/settings/environment"),
+  );
+  await dialog.getByRole("button", { name: /switch to live/i }).click();
+  expect((await rejected).status()).toBe(403);
+  await expect(dialog.getByRole("alert")).toContainText(/LIVE is locked until Stage 11/i);
+  await expect(page.getByTestId("active-env")).toContainText("DEMO");
+});
+
 test("QA-9.04 strategy fallback can be selected (guarded)", async ({
   page,
 }) => {

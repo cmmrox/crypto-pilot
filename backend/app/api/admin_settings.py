@@ -17,6 +17,7 @@ from app.bot.service import bot_service
 from app.bot.state import BotStatus
 from app.core.config import get_settings
 from app.db.session import get_session
+from app.services import execution_service as exec_svc
 from app.services.events import record_event
 from app.services.settings_store import get_settings_row
 from app.services.strategy_selection import (
@@ -56,7 +57,6 @@ async def _require_stopped(session: AsyncSession) -> None:
 async def switch_environment(
     body: EnvironmentIn, current: CurrentUserDep, session: SessionDep
 ) -> MessageOut:
-    row = await get_settings_row(session, for_update=True)
     await _require_stopped(session)
     if body.environment == "LIVE" and body.confirm != "LIVE":
         raise HTTPException(
@@ -74,6 +74,13 @@ async def switch_environment(
                 "permissions are independently verified."
             ),
         )
+    if body.environment == "LIVE":
+        try:
+            await exec_svc.require_live_ready(session, require_flat=True)
+        except exec_svc.LiveTradingBlockedError as exc:
+            raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    row = await get_settings_row(session, for_update=True)
+    await _require_stopped(session)
     old = row.active_environment
     row.active_environment = body.environment
     await record_event(

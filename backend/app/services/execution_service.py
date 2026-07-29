@@ -13,8 +13,10 @@ from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.execution.binance_client import BinanceClient
 from app.execution.binance_exchange import BinanceExchange
+from app.execution.live_readiness import LiveReadiness, verify_live_readiness
 from app.execution.orders import OrderManager
 from app.services import credentials as cred_svc
 from app.services.settings_store import get_settings_row
@@ -25,12 +27,46 @@ class NotConfiguredError(Exception):
     """No Binance credentials configured for the active environment."""
 
 
+class LiveTradingBlockedError(RuntimeError):
+    """The release gate or current Binance account truth blocks LIVE start."""
+
+
 @dataclass
 class ExecutionContext:
     environment: str
     market: MarketSpec
     exchange: BinanceExchange
     orders: OrderManager
+
+
+async def require_live_ready(
+    session: AsyncSession,
+    *,
+    require_flat: bool,
+) -> LiveReadiness:
+    """Re-read LIVE credentials and Binance controls immediately before activation."""
+    runtime = get_settings()
+    if not (runtime.live_trading_approved and runtime.live_key_permissions_verified):
+        raise LiveTradingBlockedError(
+            "LIVE is locked until owner approval and key-permission verification are enabled"
+        )
+    settings_row = await get_settings_row(session)
+    strategy = get_strategy(settings_row.active_strategy)
+    leverage = strategy.manifest.risk.leverage_cap
+    if leverage != leverage.to_integral_value():
+        raise LiveTradingBlockedError("active strategy leverage cap must be a whole number")
+    creds = await cred_svc.get_decrypted(session, environment="LIVE", service="binance")
+    if creds is None:
+        raise LiveTradingBlockedError("no Binance credentials configured for LIVE")
+    async with BinanceClient("LIVE", api_key=creds[0], api_secret=creds[1]) as client:
+        readiness = await verify_live_readiness(
+            client,
+            required_leverage=int(leverage),
+            require_flat=require_flat,
+        )
+    if not readiness.ready:
+        raise LiveTradingBlockedError("; ".join(readiness.issues))
+    return readiness
 
 
 @asynccontextmanager

@@ -12,6 +12,7 @@ from app.api.deps import CurrentUserDep
 from app.bot.service import bot_service
 from app.db.session import get_session
 from app.services import execution_service as exec_svc
+from app.services.settings_store import get_settings_row
 
 router = APIRouter(prefix="/api/bot", tags=["bot"])
 
@@ -47,6 +48,9 @@ async def bot_status(current: CurrentUserDep, session: SessionDep) -> BotStatusO
 @router.post("/start", response_model=MessageOut)
 async def start_bot(current: CurrentUserDep, session: SessionDep) -> MessageOut:
     try:
+        settings_row = await get_settings_row(session)
+        if settings_row.active_environment == "LIVE":
+            await exec_svc.require_live_ready(session, require_flat=False)
         async with exec_svc.execution_context(session) as ctx:
             run = await bot_service.start(session, ctx.exchange, by=current.user.email)
         return MessageOut(message=f"bot started (run {run.id})")

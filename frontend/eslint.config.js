@@ -9,6 +9,12 @@ export default tseslint.config(
   {
     files: ["**/*.{ts,tsx}"],
     plugins: { "react-hooks": reactHooks },
-    rules: { ...reactHooks.configs.recommended.rules },
+    rules: {
+      ...reactHooks.configs.recommended.rules,
+      // Initial data loads and polling callbacks intentionally begin in effects.
+      // They synchronize this client with external API state rather than deriving
+      // local render state, so the React Compiler-oriented rule is not applicable.
+      "react-hooks/set-state-in-effect": "off",
+    },
   },
 );

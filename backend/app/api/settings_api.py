@@ -13,6 +13,7 @@ from app.api.schemas import (
     ConnectionTestOut,
     CredentialIn,
     CredentialStatusOut,
+    LiveReadinessOut,
     MessageResponse,
     SecurityChangeConfirm,
     SecurityChangeStart,
@@ -23,11 +24,13 @@ from app.bot.service import bot_service
 from app.bot.state import BotStatus
 from app.db.session import get_session
 from app.execution.binance_client import BinanceClient, BinanceError
+from app.execution.live_readiness import verify_live_readiness
 from app.services import auth as auth_service
 from app.services import credentials as cred_svc
 from app.services import notify_config as notify_svc
 from app.services.events import record_event
 from app.services.settings_store import get_settings_row
+from app.strategies import get_strategy
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -117,6 +120,45 @@ async def test_binance_connection(
                     "No API key configured — add one to verify account access.",
                 )
             await client.signed_request("GET", "/fapi/v2/balance")
+            if environment == "LIVE":
+                settings_row = await get_settings_row(session)
+                leverage = get_strategy(settings_row.active_strategy).manifest.risk.leverage_cap
+                readiness = await verify_live_readiness(
+                    client,
+                    required_leverage=int(leverage),
+                )
+                readiness_out = LiveReadinessOut(
+                    ready=readiness.ready,
+                    ip_restricted=readiness.ip_restricted,
+                    reading_enabled=readiness.reading_enabled,
+                    futures_enabled=readiness.futures_enabled,
+                    withdrawals_disabled=readiness.withdrawals_disabled,
+                    unrelated_permissions_disabled=readiness.unrelated_permissions_disabled,
+                    one_way_mode=readiness.one_way_mode,
+                    single_asset_mode=readiness.single_asset_mode,
+                    open_position_count=readiness.open_position_count,
+                    open_order_count=readiness.open_order_count,
+                    btcusdt_margin_type=readiness.btcusdt_margin_type,
+                    btcusdt_leverage=readiness.btcusdt_leverage,
+                    issues=list(readiness.issues),
+                )
+                if not readiness.ready:
+                    return ConnectionTestOut(
+                        ok=False,
+                        detail=(
+                            "Authenticated LIVE access verified, but LIVE readiness is blocked: "
+                            + "; ".join(readiness.issues)
+                        ),
+                        live_readiness=readiness_out,
+                    )
+                return ConnectionTestOut(
+                    ok=True,
+                    detail=(
+                        "Authenticated LIVE access and all read-only LIVE readiness checks "
+                        "verified."
+                    ),
+                    live_readiness=readiness_out,
+                )
             return ConnectionTestOut(
                 ok=True,
                 detail=f"Authenticated account access verified (clock drift {drift} ms).",

@@ -342,6 +342,18 @@ class OrderManager:
                     qty=abs(qty),
                 )
             trade.exit_reason = reason[:64]
+            from app.services.notify_config import notify_event
+
+            await notify_event(
+                session,
+                kind="trade_closed",
+                payload={
+                    "side": side,
+                    "pnl": str(trade.realized_pnl),
+                    "reason": reason,
+                    "month_pnl": "see dashboard",
+                },
+            )
         await record_event(
             session,
             level="INFO",

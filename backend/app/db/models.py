@@ -164,6 +164,7 @@ class Trade(Base):
     __tablename__ = "trades"
     __table_args__ = (
         Index("ix_trades_env_opened", "environment", "opened_at"),
+        Index("ix_trades_opened_id", "opened_at", "id"),
         Index("ix_trades_side", "side"),
         Index("ix_trades_strategy", "strategy"),
     )
@@ -234,7 +235,7 @@ class EquitySnapshot(Base):
 class Event(Base):
     __tablename__ = "events"
     __table_args__ = (
-        Index("ix_events_ts", "ts"),
+        Index("ix_events_ts_id", "ts", "id"),
         Index("ix_events_category_ts", "category", "ts"),
         Index("ix_events_level_ts", "level", "ts"),
     )

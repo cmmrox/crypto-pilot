@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { NavLink, Route, Routes, Navigate } from "react-router-dom";
 import {
   Bitcoin,
@@ -15,13 +15,21 @@ import {
 } from "lucide-react";
 import { useAuth } from "../auth/store";
 import { PlaceholderView } from "./PlaceholderView";
-import { Events } from "../views/Events";
-import { Monthly } from "../views/Monthly";
-import { News } from "../views/News";
-import { Overview } from "../views/Overview";
-import { Settings as SettingsView } from "../views/Settings";
-import { Trades } from "../views/Trades";
 import { getStrategies, type StrategyInfo } from "../api/client";
+import { LoadingState, Spinner } from "../components/AsyncState";
+
+const Events = lazy(() => import("../views/Events").then((module) => ({ default: module.Events })));
+const Monthly = lazy(() =>
+  import("../views/Monthly").then((module) => ({ default: module.Monthly })),
+);
+const News = lazy(() => import("../views/News").then((module) => ({ default: module.News })));
+const Overview = lazy(() =>
+  import("../views/Overview").then((module) => ({ default: module.Overview })),
+);
+const SettingsView = lazy(() =>
+  import("../views/Settings").then((module) => ({ default: module.Settings })),
+);
+const Trades = lazy(() => import("../views/Trades").then((module) => ({ default: module.Trades })));
 
 const NAV = [
   { to: "/overview", label: "Overview", icon: LayoutDashboard, stage: "Stage 5" },
@@ -87,7 +95,13 @@ export function Shell() {
         <div className="sidebar-status">
           <div className="strategy-card-mini">
             <p className="kicker">ACTIVE STRATEGY</p>
-            <strong>{activeStrategy?.display_name ?? "Loading strategy…"}</strong>
+            <strong className="strategy-loading">
+              {activeStrategy?.display_name ?? (
+                <>
+                  <Spinner size={13} /> Loading strategy…
+                </>
+              )}
+            </strong>
             <small>
               {activeStrategy
                 ? `${activeStrategy.symbol} · ${activeStrategy.interval} · ${activeStrategy.direction}`
@@ -138,28 +152,37 @@ export function Shell() {
           </div>
         </header>
         <main className="content">
-          <Routes>
-            <Route path="/" element={<Navigate to="/overview" replace />} />
-            <Route path="/overview" element={<Overview />} />
-            <Route path="/trades" element={<Trades />} />
-            <Route path="/monthly" element={<Monthly />} />
-            <Route path="/news" element={<News />} />
-            <Route path="/events" element={<Events />} />
-            <Route path="/settings" element={<SettingsView />} />
-            {NAV.filter(
-              (i) =>
-                !["/overview", "/trades", "/monthly", "/news", "/events", "/settings"].includes(
-                  i.to,
-                ),
-            ).map((item) => (
-              <Route
-                key={item.to}
-                path={item.to}
-                element={<PlaceholderView title={item.label} stage={item.stage} />}
+          <Suspense
+            fallback={
+              <LoadingState
+                title="Loading view…"
+                detail="Preparing the requested control-room data."
               />
-            ))}
-            <Route path="*" element={<Navigate to="/overview" replace />} />
-          </Routes>
+            }
+          >
+            <Routes>
+              <Route path="/" element={<Navigate to="/overview" replace />} />
+              <Route path="/overview" element={<Overview />} />
+              <Route path="/trades" element={<Trades />} />
+              <Route path="/monthly" element={<Monthly />} />
+              <Route path="/news" element={<News />} />
+              <Route path="/events" element={<Events />} />
+              <Route path="/settings" element={<SettingsView />} />
+              {NAV.filter(
+                (i) =>
+                  !["/overview", "/trades", "/monthly", "/news", "/events", "/settings"].includes(
+                    i.to,
+                  ),
+              ).map((item) => (
+                <Route
+                  key={item.to}
+                  path={item.to}
+                  element={<PlaceholderView title={item.label} stage={item.stage} />}
+                />
+              ))}
+              <Route path="*" element={<Navigate to="/overview" replace />} />
+            </Routes>
+          </Suspense>
         </main>
       </div>
     </div>

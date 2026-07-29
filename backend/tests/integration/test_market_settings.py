@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import datetime as dt
+import os
 from decimal import Decimal
 
 import httpx
 import pytest
+from app.db.models import Event
 from app.execution.binance_client import Kline
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from tests.conftest import OWNER_PASSWORD, auth_headers
 
@@ -276,13 +280,136 @@ async def test_connection_test_public_only(
 
 
 @pytest.mark.asyncio
+async def test_live_connection_reports_every_readiness_blocker(
+    app_client: httpx.AsyncClient,
+    owner: str,
+    _mock_binance: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.api import settings_api
+    from app.execution import binance_client as bc
+    from app.execution.live_readiness import LiveReadiness
+
+    async def fake_signed_request(
+        self: object,
+        method: str,
+        path: str,
+        params: dict[str, object] | None = None,
+    ) -> list[object]:
+        return []
+
+    readiness = LiveReadiness(
+        ip_restricted=True,
+        reading_enabled=True,
+        futures_enabled=True,
+        withdrawals_disabled=True,
+        unrelated_permissions_disabled=True,
+        one_way_mode=False,
+        single_asset_mode=True,
+        open_position_count=4,
+        open_order_count=0,
+        btcusdt_margin_type="cross",
+        btcusdt_leverage=20,
+        issues=(
+            "Binance Futures must use One-way Mode, not Hedge Mode",
+            "close or reconcile 4 existing LIVE positions",
+            "BTCUSDT margin type must be isolated",
+            "BTCUSDT leverage must be at most 3x",
+        ),
+    )
+
+    async def fake_readiness(
+        _client: object,
+        *,
+        required_leverage: int,
+        require_flat: bool = True,
+    ) -> LiveReadiness:
+        assert required_leverage == 6
+        assert require_flat
+        return readiness
+
+    monkeypatch.setattr(bc.BinanceClient, "signed_request", fake_signed_request)
+    monkeypatch.setattr(settings_api, "verify_live_readiness", fake_readiness)
+
+    headers = await _auth_headers(app_client, owner)
+    put = await app_client.put(
+        "/api/settings/credentials",
+        json={
+            "environment": "LIVE",
+            "service": "binance",
+            "api_key": "LIVEKEY1234ABCD",
+            "api_secret": "live-secret-value",
+            "current_password": OWNER_PASSWORD,
+        },
+        headers=headers,
+    )
+    assert put.status_code == 200
+
+    response = await app_client.post(
+        "/api/settings/credentials/LIVE/binance/test",
+        headers=headers,
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is False
+    assert body["live_readiness"]["ready"] is False
+    assert body["live_readiness"]["open_position_count"] == 4
+    assert body["live_readiness"]["btcusdt_margin_type"] == "cross"
+    assert body["live_readiness"]["btcusdt_leverage"] == 20
+    assert "One-way Mode" in body["detail"]
+    assert "existing LIVE positions" in body["detail"]
+
+
+@pytest.mark.asyncio
 async def test_events_endpoint_lists_audit(app_client: httpx.AsyncClient, owner: str) -> None:
     headers = await _auth_headers(app_client, owner)
     # The login above recorded a security event; the list should include it.
     resp = await app_client.get("/api/events", headers=headers)
     assert resp.status_code == 200
     events = resp.json()
-    assert any(e["category"] == "security" for e in events)
+    assert any(e["category"] == "security" for e in events["items"])
     # Filter by category.
     filtered = await app_client.get("/api/events?category=security", headers=headers)
-    assert all(e["category"] == "security" for e in filtered.json())
+    assert all(e["category"] == "security" for e in filtered.json()["items"])
+
+
+@pytest.mark.asyncio
+async def test_events_are_paginated_at_fifty_rows(
+    app_client: httpx.AsyncClient, owner: str
+) -> None:
+    headers = await _auth_headers(app_client, owner)
+    engine = create_async_engine(os.environ["CP_DATABASE_URL"])
+    async with AsyncSession(engine) as session:
+        session.add_all(
+            [
+                Event(
+                    ts=dt.datetime(2026, 7, 29, tzinfo=dt.UTC) + dt.timedelta(seconds=i),
+                    level="INFO",
+                    category="system",
+                    message=f"pagination event {i}",
+                    payload_json={"fixture": i},
+                    ref=f"page:{i}",
+                )
+                for i in range(55)
+            ]
+        )
+        await session.commit()
+    await engine.dispose()
+
+    first = (await app_client.get("/api/events?page=1&page_size=50", headers=headers)).json()
+    second = (await app_client.get("/api/events?page=2&page_size=50", headers=headers)).json()
+
+    assert first["total"] >= 55
+    assert first["total_pages"] >= 2
+    assert len(first["items"]) == 50
+    assert len(second["items"]) == first["total"] - 50
+    assert {row["id"] for row in first["items"]}.isdisjoint(row["id"] for row in second["items"])
+
+
+@pytest.mark.asyncio
+async def test_event_pagination_and_filters_are_bounded(
+    app_client: httpx.AsyncClient, owner: str
+) -> None:
+    headers = await _auth_headers(app_client, owner)
+    assert (await app_client.get("/api/events?page_size=51", headers=headers)).status_code == 422
+    assert (await app_client.get("/api/events?level=DEBUG", headers=headers)).status_code == 422

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { AlertTriangle, ArrowRight, Bitcoin, Eye, EyeOff, ShieldCheck } from "lucide-react";
 import { ApiError, clearTokens, getMe, login, setTokens } from "../api/client";
 import { useAuth } from "./store";
+import { Spinner } from "../components/AsyncState";
 
 /**
  * Owner login (email + password). With 2FA enabled, advances to SMS-code
@@ -126,7 +127,7 @@ export function Login({
             </div>
           )}
           <button className="button primary full" type="submit" disabled={busy}>
-            {busy ? "Verifying…" : "Continue"} <ArrowRight size={16} />
+            {busy ? <><Spinner /> Verifying credentials…</> : <>Continue <ArrowRight size={16} /></>}
           </button>
           <div className="auth-security-note">
             <ShieldCheck size={16} />

@@ -43,6 +43,7 @@ import {
 import { ConfirmModal, type ModalSpec } from "../components/ConfirmModal";
 import { Activity, Database, RadioTower, RefreshCw, Server, Wifi } from "lucide-react";
 import { getDeepHealth, type DeepHealth } from "../api/client";
+import { LoadingState, Spinner } from "../components/AsyncState";
 
 /** Stage 2 Settings: Binance API credentials (write-only) + connection test. */
 export function Settings() {
@@ -96,6 +97,7 @@ export function Settings() {
 
 function SecurityCard() {
   const [status, setStatus] = useState<SecurityStatus | null>(null);
+  const [statusLoading, setStatusLoading] = useState(true);
   // Active guarded flow: null when idle, otherwise the pending action.
   const [action, setAction] = useState<SecurityAction | null>(null);
   const [password, setPassword] = useState("");
@@ -106,15 +108,17 @@ function SecurityCard() {
   const [busy, setBusy] = useState(false);
   const [guard, setGuard] = useState<ModalSpec | null>(null);
 
-  const refresh = () =>
-    getSecurityStatus()
-      .then((next) => {
-        setStatus(next);
-      })
-      .catch(() => {
-        setStatus(null);
-        setMsg({ ok: false, text: "Could not load account security status." });
-      });
+  const refresh = async () => {
+    setStatusLoading(true);
+    try {
+      setStatus(await getSecurityStatus());
+    } catch {
+      setStatus(null);
+      setMsg({ ok: false, text: "Could not load account security status." });
+    } finally {
+      setStatusLoading(false);
+    }
+  };
   useEffect(() => {
     void refresh();
   }, []);
@@ -219,7 +223,7 @@ function SecurityCard() {
           <p>A one-time SMS code is required at sign-in while this is on.</p>
         </div>
         <span className={`pill ${enabled ? "ok" : "warn"}`} data-testid="twofa-state">
-          {enabled ? `On ${status?.phone_hint ?? ""}` : "Off"}
+          {statusLoading ? <><Spinner size={12} /> Checking…</> : status === null ? "Unavailable" : enabled ? `On ${status.phone_hint ?? ""}` : "Off"}
         </span>
       </div>
 
@@ -300,7 +304,7 @@ function SecurityCard() {
                   onClick={() => void sendCode()}
                   disabled={busy}
                 >
-                  <Send size={14} /> Send code
+                  {busy ? <><Spinner /> Sending code…</> : <><Send size={14} /> Send code</>}
                 </button>
                 <button className="button ghost" onClick={reset} disabled={busy}>
                   Cancel
@@ -331,7 +335,7 @@ function SecurityCard() {
                   onClick={() => void confirm()}
                   disabled={busy}
                 >
-                  <ShieldCheck size={14} /> Confirm
+                  {busy ? <><Spinner /> Confirming…</> : <><ShieldCheck size={14} /> Confirm</>}
                 </button>
                 <button className="button ghost" onClick={reset} disabled={busy}>
                   Cancel
@@ -358,10 +362,17 @@ function SecurityCard() {
 
 function OperationsCard() {
   const [h, setH] = useState<DeepHealth | null>(null);
-  const load = () =>
-    getDeepHealth()
-      .then(setH)
-      .catch(() => setH(null));
+  const [loading, setLoading] = useState(true);
+  const load = async () => {
+    setLoading(true);
+    try {
+      setH(await getDeepHealth());
+    } catch {
+      setH(null);
+    } finally {
+      setLoading(false);
+    }
+  };
   useEffect(() => {
     void load();
     const t = setInterval(() => void load(), 10000);
@@ -380,10 +391,12 @@ function OperationsCard() {
           <p>Live service health, scheduler heartbeat and the dead-man's switch.</p>
         </div>
         <span className={`pill ${h?.status === "ok" ? "ok" : "warn"}`} data-testid="ops-status">
-          {h?.status === "ok" ? "All healthy" : "Degraded"}
+          {loading && !h ? <><Spinner size={12} /> Checking…</> : h?.status === "ok" ? "All healthy" : "Degraded"}
         </span>
       </div>
-      <div className="operations-grid">
+      {loading && !h ? (
+        <LoadingState compact title="Running service health checks…" detail="Checking the database, scheduler, ingest loop, and dead-man switch." />
+      ) : <div className="operations-grid">
         <span>
           <Database size={16} />
           <div>
@@ -412,9 +425,9 @@ function OperationsCard() {
             <strong>{h?.ingest_overdue ? "OVERDUE" : "Armed"}</strong>
           </div>
         </span>
-      </div>
-      <button className="button secondary" data-testid="ops-refresh" onClick={() => void load()}>
-        <RefreshCw size={14} /> Run health check
+      </div>}
+      <button className="button secondary" data-testid="ops-refresh" onClick={() => void load()} disabled={loading}>
+        {loading ? <><Spinner /> Running health check…</> : <><RefreshCw size={14} /> Run health check</>}
       </button>
     </div>
   );
@@ -425,14 +438,20 @@ function EnvironmentCard() {
   const [botRunning, setBotRunning] = useState(false);
   const [modal, setModal] = useState<ModalSpec | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  const refresh = () =>
-    getBotStatus()
-      .then((s) => {
-        setEnv(s.environment);
-        setBotRunning(s.status !== "stopped");
-      })
-      .catch(() => {});
+  const refresh = async () => {
+    setLoading(true);
+    try {
+      const s = await getBotStatus();
+      setEnv(s.environment);
+      setBotRunning(s.status !== "stopped");
+    } catch {
+      setMsg("Could not load the active environment.");
+    } finally {
+      setLoading(false);
+    }
+  };
   useEffect(() => {
     void refresh();
   }, []);
@@ -479,7 +498,7 @@ function EnvironmentCard() {
           <p>DEMO and LIVE share one code path with separate write-only credentials.</p>
         </div>
         <span className={`pill ${env === "LIVE" ? "warn" : "ok"}`} data-testid="active-env">
-          {env} active
+          {loading ? <><Spinner size={12} /> Checking…</> : `${env} active`}
         </span>
       </div>
       <div className="env-options">
@@ -487,6 +506,7 @@ function EnvironmentCard() {
           className={env === "DEMO" ? "active" : ""}
           data-testid="env-demo"
           onClick={() => request("DEMO")}
+          disabled={loading}
         >
           <strong>DEMO / Testnet</strong>
           <small>Fake funds · safe testing</small>
@@ -495,6 +515,7 @@ function EnvironmentCard() {
           className={`live ${env === "LIVE" ? "active" : ""}`}
           data-testid="env-live"
           onClick={() => request("LIVE")}
+          disabled={loading}
         >
           <strong>LIVE trading</strong>
           <small>Real funds · production</small>
@@ -512,11 +533,18 @@ function EnvironmentCard() {
 
 function StrategyLibrary() {
   const [strategies, setStrategies] = useState<StrategyInfo[]>([]);
+  const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState<ModalSpec | null>(null);
-  const load = () =>
-    getStrategies()
-      .then(setStrategies)
-      .catch(() => setStrategies([]));
+  const load = async () => {
+    setLoading(true);
+    try {
+      setStrategies(await getStrategies());
+    } catch {
+      setStrategies([]);
+    } finally {
+      setLoading(false);
+    }
+  };
   useEffect(() => {
     void load();
   }, []);
@@ -546,6 +574,9 @@ function StrategyLibrary() {
         </div>
       </div>
       <div className="strategy-list">
+        {loading && strategies.length === 0 && (
+          <LoadingState compact title="Loading strategy releases…" detail="Reading the deployed, parity-validated plugin manifest." />
+        )}
         {strategies.map((s) => (
           <article
             key={s.name}
@@ -703,7 +734,7 @@ function CodexCard() {
             onClick={() => void connect()}
             disabled={busy || !!login}
           >
-            <Bot size={14} /> Connect Codex
+            {busy ? <><Spinner /> Starting connection…</> : <><Bot size={14} /> Connect Codex</>}
           </button>
         ) : (
           <>
@@ -713,7 +744,7 @@ function CodexCard() {
               onClick={() => void connect()}
               disabled={busy || !!login}
             >
-              <Bot size={14} /> Re-authenticate
+              {busy ? <><Spinner /> Starting connection…</> : <><Bot size={14} /> Re-authenticate</>}
             </button>
             <button
               className="button ghost"
@@ -731,6 +762,7 @@ function CodexCard() {
 
 function SmsCard() {
   const [status, setStatus] = useState<SmsStatus | null>(null);
+  const [statusLoading, setStatusLoading] = useState(true);
   const [userId, setUserId] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [senderId, setSenderId] = useState("NotifyDEMO");
@@ -739,10 +771,16 @@ function SmsCard() {
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const refresh = () =>
-    getSmsStatus()
-      .then(setStatus)
-      .catch(() => setStatus(null));
+  const refresh = async () => {
+    setStatusLoading(true);
+    try {
+      setStatus(await getSmsStatus());
+    } catch {
+      setStatus(null);
+    } finally {
+      setStatusLoading(false);
+    }
+  };
   useEffect(() => {
     void refresh();
   }, []);
@@ -807,7 +845,7 @@ function SmsCard() {
           <p>Fire-and-log delivery; failures retry three times and never block trading.</p>
         </div>
         <span className={`pill ${status?.configured ? "ok" : "warn"}`} data-testid="sms-state">
-          {status?.configured ? `Configured ${status.phone_hint ?? ""}` : "Not configured"}
+          {statusLoading ? <><Spinner size={12} /> Checking…</> : status === null ? "Unavailable" : status.configured ? `Configured ${status.phone_hint ?? ""}` : "Not configured"}
         </span>
       </div>
       <div className="setting-row">
@@ -874,7 +912,7 @@ function SmsCard() {
       </div>
       <div className="credential-footer">
         <button className="button primary" onClick={() => void save()} disabled={busy}>
-          <KeyRound size={14} /> Save
+          {busy ? <><Spinner /> Saving…</> : <><KeyRound size={14} /> Save</>}
         </button>
         <button
           className="button secondary"
@@ -882,7 +920,7 @@ function SmsCard() {
           onClick={() => void runTest()}
           disabled={busy || !status?.configured}
         >
-          <Send size={14} /> Send test SMS
+          {busy ? <><Spinner /> Working…</> : <><Send size={14} /> Send test SMS</>}
         </button>
       </div>
       {msg && (
@@ -900,16 +938,23 @@ function SmsCard() {
 
 function CredentialCard({ environment }: { environment: string }) {
   const [status, setStatus] = useState<CredentialStatus | null>(null);
+  const [statusLoading, setStatusLoading] = useState(true);
   const [apiKey, setApiKey] = useState("");
   const [apiSecret, setApiSecret] = useState("");
   const [currentPassword, setCurrentPassword] = useState("");
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const refresh = () =>
-    getCredentialStatus(environment, "binance")
-      .then(setStatus)
-      .catch(() => setStatus(null));
+  const refresh = async () => {
+    setStatusLoading(true);
+    try {
+      setStatus(await getCredentialStatus(environment, "binance"));
+    } catch {
+      setStatus(null);
+    } finally {
+      setStatusLoading(false);
+    }
+  };
 
   useEffect(() => {
     void refresh();
@@ -967,7 +1012,7 @@ function CredentialCard({ environment }: { environment: string }) {
           className={`pill ${status?.configured ? "ok" : "warn"}`}
           data-testid={`cred-state-${environment}`}
         >
-          {status?.configured ? `Configured ${status.key_hint ?? ""}` : "Not configured"}
+          {statusLoading ? <><Spinner size={12} /> Checking…</> : status === null ? "Unavailable" : status.configured ? `Configured ${status.key_hint ?? ""}` : "Not configured"}
         </span>
       </div>
       <div className="form-grid">
@@ -1004,10 +1049,10 @@ function CredentialCard({ environment }: { environment: string }) {
       </div>
       <div className="credential-footer">
         <button className="button primary" onClick={() => void save()} disabled={busy}>
-          <KeyRound size={14} /> Save credentials
+          {busy ? <><Spinner /> Saving…</> : <><KeyRound size={14} /> Save credentials</>}
         </button>
         <button className="button secondary" onClick={() => void test()} disabled={busy}>
-          <PlugZap size={14} /> Test connection
+          {busy ? <><Spinner /> Testing…</> : <><PlugZap size={14} /> Test connection</>}
         </button>
       </div>
       {msg && (

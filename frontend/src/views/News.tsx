@@ -8,6 +8,7 @@ import {
   type ArchiveItem,
   type NewsBriefing,
 } from "../api/client";
+import { LoadingState, Spinner } from "../components/AsyncState";
 
 export function News() {
   const [briefing, setBriefing] = useState<NewsBriefing | null>(null);
@@ -15,16 +16,26 @@ export function News() {
   const [codexOk, setCodexOk] = useState<boolean | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
 
   const load = useCallback(async () => {
-    const [b, a, c] = await Promise.all([
-      getLatestBriefing().catch(() => null),
-      getNewsArchive().catch(() => []),
-      getCodexStatus().catch(() => ({ authenticated: false })),
+    setLoading(true);
+    setLoadError("");
+    const [b, a, c] = await Promise.allSettled([
+      getLatestBriefing(),
+      getNewsArchive(),
+      getCodexStatus(),
     ]);
-    setBriefing(b);
-    setArchive(a);
-    setCodexOk(c.authenticated);
+    if (b.status === "fulfilled") setBriefing(b.value);
+    if (a.status === "fulfilled") setArchive(a.value);
+    if (c.status === "fulfilled") setCodexOk(c.value.authenticated);
+    if ([b, a, c].some((result) => result.status === "rejected")) {
+      setLoadError(
+        "Some briefing data could not be refreshed. Available confirmed data remains visible.",
+      );
+    }
+    setLoading(false);
   }, []);
 
   useEffect(() => {
@@ -53,7 +64,7 @@ export function News() {
           <p>Daily crypto and macro context — never a trading input.</p>
         </div>
         <button className="button secondary" data-testid="refresh-briefing" onClick={() => void refresh()} disabled={busy}>
-          <RefreshCw size={15} /> Refresh briefing
+          {busy ? <><Spinner /> Refreshing briefing…</> : <><RefreshCw size={15} /> Refresh briefing</>}
         </button>
       </div>
 
@@ -64,8 +75,13 @@ export function News() {
         </div>
       )}
       {msg && <div className="inline-msg ok" role="status">{msg}</div>}
+      {loadError && <div className="form-error" role="alert">{loadError}</div>}
 
-      <div className="news-grid">
+      {loading && !briefing && archive.length === 0 ? (
+        <div className="panel">
+          <LoadingState title="Loading market intelligence…" detail="Fetching the latest read-only briefing and archive." />
+        </div>
+      ) : <div className="news-grid" aria-busy={loading}>
         <div className="panel briefing-panel" data-testid="briefing-panel">
           <div className="settings-heading">
             <span className="settings-icon"><Newspaper size={18} /></span>
@@ -140,7 +156,7 @@ export function News() {
             </a>
           </div>
         </aside>
-      </div>
+      </div>}
     </div>
   );
 }

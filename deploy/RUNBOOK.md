@@ -83,7 +83,9 @@ Exit: 4 clean weeks + owner sign-off recorded in `docs/qa/reports/`.
   **IP-allowlisted to the VPS**.
 - Settings → LIVE credentials → the app verifies permissions and refuses unsafe keys.
 - Settings → Environment → switch to **LIVE** (typed confirmation), pilot sizing
-  (risk 1–2%, sleeve 50%). Start. Monitor first closes.
+  from the selected immutable strategy manifest. The currently approved Trend Rider
+  v6 release uses 15% long risk and a 6× leverage cap; see the risk acceptance in
+  `ARCHITECTURE.md §8`. Start and monitor the first closes.
 - After 4+ LIVE weeks matching DEMO behaviour → raise to validated defaults.
 
 ## 8. Routine ops

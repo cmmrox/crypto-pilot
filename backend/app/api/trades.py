@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import csv
+import datetime as dt
 import io
-from typing import Annotated
+import math
+from collections.abc import AsyncIterator
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import Select, select
+from sqlalchemy import Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.api.deps import CurrentUserDep
 from app.db.models import Order, Trade
@@ -53,6 +57,14 @@ class TradeDetailOut(TradeOut):
     orders: list[OrderOut]
 
 
+class TradePageOut(BaseModel):
+    items: list[TradeOut]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+
+
 def _outcome(t: Trade) -> str:
     if t.closed_at is None:
         return "OPEN"
@@ -80,107 +92,139 @@ def _to_out(t: Trade) -> TradeOut:
     )
 
 
-def _filtered_query(
-    side: str | None,
-    environment: str | None,
+def _trade_filters(
+    side: Literal["LONG", "SHORT"] | None,
+    environment: Literal["DEMO", "LIVE"] | None,
     strategy: str | None,
     month: str | None,
     search: str | None,
-) -> Select[tuple[Trade]]:
-    stmt = select(Trade).order_by(Trade.opened_at.desc())
+) -> list[ColumnElement[bool]]:
+    filters: list[ColumnElement[bool]] = []
     if side:
-        stmt = stmt.where(Trade.side == side)
+        filters.append(Trade.side == side)
     if environment:
-        stmt = stmt.where(Trade.environment == environment)
+        filters.append(Trade.environment == environment)
     if strategy:
-        stmt = stmt.where(Trade.strategy == strategy)
+        filters.append(Trade.strategy == strategy)
     if month:
-        from sqlalchemy import func
-
-        stmt = stmt.where(func.to_char(Trade.opened_at, "YYYY-MM") == month)
+        try:
+            month_start = dt.date.fromisoformat(f"{month}-01")
+        except ValueError as exc:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="month must be a valid YYYY-MM value",
+            ) from exc
+        next_month = (
+            dt.date(month_start.year + 1, 1, 1)
+            if month_start.month == 12
+            else dt.date(month_start.year, month_start.month + 1, 1)
+        )
+        start = dt.datetime.combine(month_start, dt.time.min, tzinfo=dt.UTC)
+        end = dt.datetime.combine(next_month, dt.time.min, tzinfo=dt.UTC)
+        filters.extend((Trade.opened_at >= start, Trade.opened_at < end))
     if search:
-        from sqlalchemy import String, cast, func, or_
+        from sqlalchemy import String, cast
 
         like = f"%{search.lower()}%"
-        stmt = stmt.where(
+        filters.append(
             or_(
                 func.lower(func.coalesce(Trade.exit_reason, "")).like(like),
                 cast(Trade.id, String).like(f"%{search}%"),
             )
         )
-    return stmt
+    return filters
 
 
-@router.get("", response_model=list[TradeOut])
+def _filtered_query(filters: list[ColumnElement[bool]]) -> Select[tuple[Trade]]:
+    return select(Trade).where(*filters).order_by(Trade.opened_at.desc(), Trade.id.desc())
+
+
+@router.get("", response_model=TradePageOut)
 async def list_trades(
     _current: CurrentUserDep,
     session: SessionDep,
-    side: Annotated[str | None, Query()] = None,
-    environment: Annotated[str | None, Query()] = None,
-    strategy: Annotated[str | None, Query()] = None,
-    month: Annotated[str | None, Query()] = None,
-    search: Annotated[str | None, Query()] = None,
-) -> list[TradeOut]:
-    stmt = _filtered_query(side, environment, strategy, month, search)
+    side: Annotated[Literal["LONG", "SHORT"] | None, Query()] = None,
+    environment: Annotated[Literal["DEMO", "LIVE"] | None, Query()] = None,
+    strategy: Annotated[str | None, Query(max_length=64)] = None,
+    month: Annotated[str | None, Query(pattern=r"^\d{4}-\d{2}$")] = None,
+    search: Annotated[str | None, Query(max_length=100)] = None,
+    page: Annotated[int, Query(ge=1, le=100_000)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=50)] = 50,
+) -> TradePageOut:
+    filters = _trade_filters(side, environment, strategy, month, search)
+    total = (await session.execute(select(func.count(Trade.id)).where(*filters))).scalar_one()
+    stmt = _filtered_query(filters).offset((page - 1) * page_size).limit(page_size)
     rows = (await session.execute(stmt)).scalars().all()
-    return [_to_out(t) for t in rows]
+    return TradePageOut(
+        items=[_to_out(t) for t in rows],
+        total=total,
+        page=page,
+        page_size=page_size,
+        total_pages=math.ceil(total / page_size),
+    )
 
 
 @router.get("/export.csv")
 async def export_csv(
     _current: CurrentUserDep,
     session: SessionDep,
-    side: Annotated[str | None, Query()] = None,
-    environment: Annotated[str | None, Query()] = None,
-    strategy: Annotated[str | None, Query()] = None,
-    month: Annotated[str | None, Query()] = None,
-    search: Annotated[str | None, Query()] = None,
+    side: Annotated[Literal["LONG", "SHORT"] | None, Query()] = None,
+    environment: Annotated[Literal["DEMO", "LIVE"] | None, Query()] = None,
+    strategy: Annotated[str | None, Query(max_length=64)] = None,
+    month: Annotated[str | None, Query(pattern=r"^\d{4}-\d{2}$")] = None,
+    search: Annotated[str | None, Query(max_length=100)] = None,
 ) -> StreamingResponse:
-    rows = (
-        (await session.execute(_filtered_query(side, environment, strategy, month, search)))
-        .scalars()
-        .all()
-    )
-    buf = io.StringIO()
-    w = csv.writer(buf)
-    w.writerow(
-        [
-            "id",
-            "opened_at",
-            "closed_at",
-            "side",
-            "environment",
-            "strategy",
-            "entry_px",
-            "exit_px",
-            "qty",
-            "fees",
-            "realized_pnl",
-            "r_multiple",
-            "exit_reason",
-        ]
-    )
-    for t in rows:
-        w.writerow(
+    filters = _trade_filters(side, environment, strategy, month, search)
+
+    async def generate() -> AsyncIterator[str]:
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+
+        def line(values: list[object]) -> str:
+            buf.seek(0)
+            buf.truncate(0)
+            writer.writerow(values)
+            return buf.getvalue()
+
+        yield line(
             [
-                t.id,
-                t.opened_at.isoformat(),
-                t.closed_at.isoformat() if t.closed_at else "",
-                t.side,
-                t.environment,
-                t.strategy,
-                t.entry_px,
-                t.exit_px or "",
-                t.qty,
-                t.fees,
-                t.realized_pnl if t.realized_pnl is not None else "",
-                t.r_multiple if t.r_multiple is not None else "",
-                t.exit_reason or "",
+                "id",
+                "opened_at",
+                "closed_at",
+                "side",
+                "environment",
+                "strategy",
+                "entry_px",
+                "exit_px",
+                "qty",
+                "fees",
+                "realized_pnl",
+                "r_multiple",
+                "exit_reason",
             ]
         )
-    buf.seek(0)
+        result = await session.stream_scalars(_filtered_query(filters))
+        async for trade in result:
+            yield line(
+                [
+                    trade.id,
+                    trade.opened_at.isoformat(),
+                    trade.closed_at.isoformat() if trade.closed_at else "",
+                    trade.side,
+                    trade.environment,
+                    trade.strategy,
+                    trade.entry_px,
+                    trade.exit_px or "",
+                    trade.qty,
+                    trade.fees,
+                    trade.realized_pnl if trade.realized_pnl is not None else "",
+                    trade.r_multiple if trade.r_multiple is not None else "",
+                    trade.exit_reason or "",
+                ]
+            )
+
     return StreamingResponse(
-        iter([buf.getvalue()]),
+        generate(),
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=cryptopilot-trades.csv"},
     )

@@ -257,6 +257,56 @@ async def test_flatten_cancels_and_closes(db_session: AsyncSession) -> None:
 
 
 @pytest.mark.asyncio
+async def test_flatten_sends_trade_closed_notification(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.services import notify_config
+
+    sent: list[tuple[str, dict[str, object]]] = []
+
+    async def capture(
+        _session: AsyncSession,
+        *,
+        kind: str,
+        payload: dict[str, object],
+    ) -> str:
+        sent.append((kind, payload))
+        return "delivered"
+
+    monkeypatch.setattr(notify_config, "notify_event", capture)
+    ex = FakeExchange(mark_price=D("65000"))
+    om = OrderManager(ex, symbol="BTCUSDT", environment="LIVE")
+    sizing = size_short(
+        equity=D("5000"),
+        weight_pct=D("10"),
+        vol_target=D("0.20"),
+        realized_vol=D("0.20"),
+        price=D("65000"),
+        leverage_cap=D("6"),
+        filters=await _filters(ex),
+    )
+    trade = await om.open_short(
+        db_session,
+        sizing=sizing,
+        strategy="trend_rider_v6_4h",
+        strategy_release="6.0",
+        strategy_interval="4h",
+    )
+
+    await om.flatten(
+        db_session,
+        side="SHORT",
+        qty=trade.remaining_qty,
+        reason="Stage 12 dust verification",
+    )
+
+    assert [kind for kind, _payload in sent] == ["short_opened", "trade_closed"]
+    assert sent[-1][1]["side"] == "SHORT"
+    assert sent[-1][1]["reason"] == "Stage 12 dust verification"
+
+
+@pytest.mark.asyncio
 async def test_kill_switch_flattens_from_short(db_session: AsyncSession) -> None:
     ex = FakeExchange(mark_price=D("60000"))
     await ex.place_market("BTCUSDT", "SELL", D("0.08"), client_order_id="e")

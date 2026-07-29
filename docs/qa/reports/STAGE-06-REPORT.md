@@ -55,3 +55,22 @@ No known open bugs.
 Stage 6 meets its exit criteria: any trade is reconstructable in a few clicks, exports
 match the DB, monthly math is correct. **Stage 7 (Notifier — notify.lk SMS) needs the
 owner's notify.lk credentials + sender ID; I will request them before starting Stage 7.**
+
+## 2026-07-29 pagination and performance hardening
+
+- Trade History and Event Ledger now use server-backed pagination with a strict maximum
+  of 50 rows, stable timestamp-plus-ID ordering, filtered totals, and shared accessible
+  Previous/Next controls.
+- Month filtering uses an index-friendly UTC date range. Matching composite indexes were
+  applied through Alembic. Trade CSV export streams rows from the database.
+- Search requests are debounced; paging Event Ledger no longer reloads market status.
+  Route-level code splitting reduced the initial production bundle from 700.82 KB to
+  257.38 KB and removed the oversized-chunk warning.
+- Decimal display remains string-based, rounds without floating-point coercion, and uses
+  standard negative-currency sign placement.
+- Live Browser QA verified 50 rows on pages 1 and 2 of a 2,751-event ledger, responsive
+  paging at 390 × 844, a responsive 3-row Trade List, and zero console errors. The live
+  mobile pass found and fixed long event references clipping the viewport.
+- Regression evidence: backend `226 passed, 3 deselected` (exchange-marked tests);
+  focused pagination Playwright `4 passed` across Desktop Chrome and Pixel 5; frontend
+  lint/type-check, 4 decimal tests, and production build passed.

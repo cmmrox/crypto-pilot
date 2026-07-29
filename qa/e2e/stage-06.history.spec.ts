@@ -107,3 +107,80 @@ test("QA-6.06 mark withdrawn records $14.10 and removes the allowance", async ({
     timeout: 10000,
   });
 });
+
+test("QA-6.07 audit surfaces distinguish loading from an empty result", async ({
+  page,
+}) => {
+  await login(page);
+
+  let releaseTrades!: () => void;
+  const tradesGate = new Promise<void>((resolve) => {
+    releaseTrades = resolve;
+  });
+  await page.route("**/api/trades**", async (route) => {
+    await tradesGate;
+    await route.continue();
+  });
+
+  const menu = page.getByRole("button", { name: /open navigation/i });
+  if (await menu.isVisible()) await menu.click();
+  await page.getByRole("link", { name: /trades/i }).click();
+
+  const table = page.getByTestId("trades-table");
+  await expect(table).toHaveAttribute("aria-busy", "true");
+  await expect(table.getByRole("status")).toContainText(
+    "Loading trade history",
+  );
+  await expect(table).not.toContainText("No matching trades");
+
+  releaseTrades();
+  await expect(table).toHaveAttribute("aria-busy", "false");
+  await expect(table.getByRole("status")).toHaveCount(0);
+});
+
+test("QA-6.08 trade history pages after fifty records", async ({ page }) => {
+  await login(page);
+  const trades = Array.from({ length: 51 }, (_, index) => {
+    const id = 51 - index;
+    return {
+      id,
+      opened_at: `2026-07-${String((index % 28) + 1).padStart(2, "0")}T00:00:00Z`,
+      closed_at: null,
+      side: "LONG",
+      entry_px: "9007199254740993.125",
+      exit_px: null,
+      qty: "0.001",
+      fees: "0",
+      realized_pnl: null,
+      r_multiple: null,
+      exit_reason: null,
+      strategy: "trend_rider_v6",
+      environment: "DEMO",
+      outcome: "OPEN",
+    };
+  });
+  await page.route("**/api/trades?**", async (route) => {
+    const url = new URL(route.request().url());
+    const currentPage = Number(url.searchParams.get("page") ?? "1");
+    const pageSize = Number(url.searchParams.get("page_size") ?? "50");
+    const start = (currentPage - 1) * pageSize;
+    await route.fulfill({
+      json: {
+        items: trades.slice(start, start + pageSize),
+        total: trades.length,
+        page: currentPage,
+        page_size: pageSize,
+        total_pages: 2,
+      },
+    });
+  });
+
+  await goto(page, /trades/i, "Trades");
+  const pagination = page.getByTestId("trades-pagination");
+  await expect(pagination).toContainText("Showing 1–50 of 51");
+  await expect(page.getByLabel("Trade 51 detail")).toBeVisible();
+  await pagination.getByRole("button", { name: /next trades page/i }).click();
+  await expect(pagination).toContainText("Showing 51–51 of 51");
+  await expect(page.getByLabel("Trade 1 detail")).toBeVisible();
+  await expect(page.getByText("$9,007,199,254,740,993.13")).toBeVisible();
+});

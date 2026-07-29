@@ -36,6 +36,7 @@ import {
   type Overview as OverviewData,
 } from "../api/client";
 import { ConfirmModal, type ModalSpec } from "../components/ConfirmModal";
+import { LoadingState, Spinner } from "../components/AsyncState";
 
 const POLL_MS = 4000;
 
@@ -156,7 +157,7 @@ export function Overview() {
         <div className="heading-actions command-actions">
           {!data ? (
             <button className="button secondary" disabled>
-              <Activity size={15} /> Checking status…
+              <Spinner /> Checking status…
             </button>
           ) : running || safeMode ? (
             <button
@@ -293,7 +294,10 @@ export function Overview() {
 
       {!data ? (
         <div className="panel overview-loading" data-testid="overview-loading">
-          <Activity size={20} /> Loading the live command center…
+          <LoadingState
+            title="Loading the live command center…"
+            detail="Confirming the worker, market feed, account, and strategy state."
+          />
         </div>
       ) : (
         <>

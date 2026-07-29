@@ -140,6 +140,23 @@ class CredentialStatusOut(BaseModel):
     key_hint: str | None
 
 
+class LiveReadinessOut(BaseModel):
+    ready: bool
+    ip_restricted: bool
+    reading_enabled: bool
+    futures_enabled: bool
+    withdrawals_disabled: bool
+    unrelated_permissions_disabled: bool
+    one_way_mode: bool
+    single_asset_mode: bool
+    open_position_count: int
+    open_order_count: int
+    btcusdt_margin_type: str | None
+    btcusdt_leverage: int | None
+    issues: list[str]
+
+
 class ConnectionTestOut(BaseModel):
     ok: bool
     detail: str
+    live_readiness: LiveReadinessOut | None = None

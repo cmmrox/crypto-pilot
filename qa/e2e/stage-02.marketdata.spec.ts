@@ -62,14 +62,22 @@ test("QA-2.04 event filters narrow the list", async ({ page }) => {
   await login(page);
   await gotoEvents(page);
   const chips = page.getByTestId("events-table").locator(".category");
+  const filtered = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return (
+      response.request().method() === "GET" &&
+      url.pathname === "/api/events" &&
+      url.searchParams.get("category") === "security"
+    );
+  });
   await page.getByLabel("Filter category").selectOption("security");
-  // Wait for the filtered reload to settle, then assert every chip matches.
+  await filtered;
+  // Read one stable post-response snapshot. Iterating a previously captured
+  // count races normal login-event inserts and page-size changes.
   await expect(chips.first()).toHaveText("security");
-  const count = await chips.count();
-  expect(count).toBeGreaterThan(0);
-  for (let i = 0; i < count; i++) {
-    await expect(chips.nth(i)).toHaveText("security");
-  }
+  const categories = await chips.allTextContents();
+  expect(categories.length).toBeGreaterThan(0);
+  expect(new Set(categories)).toEqual(new Set(["security"]));
 });
 
 test("QA-2.05 manual candle ingest button works", async ({ page }) => {
@@ -121,4 +129,46 @@ test("QA-2.07 connection test reports public reachability", async ({
     .getByRole("button", { name: /test connection/i })
     .click();
   await expect(page.getByTestId("test-result-LIVE")).toBeVisible();
+});
+
+test("QA-2.08 event ledger pages after fifty records", async ({ page }) => {
+  await login(page);
+  const events = Array.from({ length: 51 }, (_, index) => {
+    const id = 51 - index;
+    return {
+      id,
+      ts: `2026-07-29T07:${String(index % 60).padStart(2, "0")}:00Z`,
+      level: "INFO",
+      category: "system",
+      message: `Paginated audit event ${id}`,
+      payload_json: {},
+      sms_status: null,
+      ref: `page-${id}`,
+    };
+  });
+  await page.route("**/api/events?**", async (route) => {
+    const url = new URL(route.request().url());
+    const currentPage = Number(url.searchParams.get("page") ?? "1");
+    const pageSize = Number(url.searchParams.get("page_size") ?? "50");
+    const start = (currentPage - 1) * pageSize;
+    await route.fulfill({
+      json: {
+        items: events.slice(start, start + pageSize),
+        total: events.length,
+        page: currentPage,
+        page_size: pageSize,
+        total_pages: 2,
+      },
+    });
+  });
+
+  await gotoEvents(page);
+  const pagination = page.getByTestId("events-pagination");
+  await expect(pagination).toContainText("Showing 1–50 of 51");
+  await expect(page.getByLabel("Inspect event page-51")).toBeVisible();
+  await pagination.getByRole("button", { name: /next events page/i }).click();
+  await expect(pagination).toContainText("Showing 51–51 of 51");
+  await expect(
+    page.getByLabel("Inspect event page-1", { exact: true }),
+  ).toBeVisible();
 });

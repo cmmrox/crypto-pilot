@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { AlertTriangle, X } from "lucide-react";
+import { Spinner } from "./AsyncState";
 
 export interface ModalSpec {
   tone?: "warning" | "danger";
@@ -16,6 +17,7 @@ export interface ModalSpec {
 export function ConfirmModal({ modal, onClose }: { modal: ModalSpec; onClose: () => void }) {
   const [word, setWord] = useState("");
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const dialogRef = useRef<HTMLElement>(null);
   const titleId = useId();
   const needsWord = Boolean(modal.confirmWord);
@@ -64,9 +66,12 @@ export function ConfirmModal({ modal, onClose }: { modal: ModalSpec; onClose: ()
   const confirm = async () => {
     if (!canConfirm) return;
     setBusy(true);
+    setError(null);
     try {
       await modal.onConfirm?.();
       onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "The requested action was not completed.");
     } finally {
       setBusy(false);
     }
@@ -112,6 +117,11 @@ export function ConfirmModal({ modal, onClose }: { modal: ModalSpec; onClose: ()
             />
           </label>
         )}
+        {error && (
+          <div className="inline-msg err" role="alert">
+            {error}
+          </div>
+        )}
         <div className="modal-actions">
           <button className="button secondary" onClick={onClose}>
             Cancel
@@ -121,7 +131,7 @@ export function ConfirmModal({ modal, onClose }: { modal: ModalSpec; onClose: ()
             disabled={!canConfirm || busy}
             onClick={() => void confirm()}
           >
-            {busy ? "Working…" : (modal.confirmLabel ?? "Confirm")}
+            {busy ? <><Spinner /> Confirming…</> : (modal.confirmLabel ?? "Confirm")}
           </button>
         </div>
       </section>

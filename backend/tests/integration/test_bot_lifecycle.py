@@ -112,6 +112,38 @@ async def test_stop_and_close_flattens(db_session: AsyncSession) -> None:
 
 
 @pytest.mark.asyncio
+async def test_kill_flattens_stops_run_and_notifies(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.services import notify_config
+
+    kinds: list[str] = []
+
+    async def capture(
+        _session: AsyncSession,
+        *,
+        kind: str,
+        payload: dict[str, object],
+    ) -> str:
+        kinds.append(kind)
+        return "delivered"
+
+    monkeypatch.setattr(notify_config, "notify_event", capture)
+    svc = BotService()
+    ex = FakeExchange()
+    orders = OrderManager(ex, symbol="BTCUSDT")
+    await svc.start(db_session, ex, by="owner")
+    await ex.place_market("BTCUSDT", "SELL", D("0.05"), client_order_id="dust")
+
+    await svc.kill(db_session, orders)
+
+    assert (await ex.get_position("BTCUSDT")).qty == D("0")
+    assert (await svc.status(db_session)).status == BotStatus.STOPPED
+    assert kinds == ["bot_started", "kill_switch"]
+
+
+@pytest.mark.asyncio
 async def test_safe_mode_blocks_evaluate(db_session: AsyncSession) -> None:
     svc = BotService()
     ex = FakeExchange()

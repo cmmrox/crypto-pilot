@@ -181,6 +181,13 @@ class BotService:
         if run is not None:
             run.stopped_at = dt.datetime.now(dt.UTC)
             run.stop_reason = "kill"
+        from app.services.notify_config import notify_event
+
+        await notify_event(
+            session,
+            kind="kill_switch",
+            payload={"cancelled_orders": cancelled},
+        )
         return cancelled
 
     async def enter_safe_mode(self, session: AsyncSession, *, reason: str) -> None:

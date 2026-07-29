@@ -68,9 +68,18 @@ async def test_environment_switch_blocked_while_running(
 
 @pytest.mark.asyncio
 async def test_live_switch_requires_typed_confirm(
-    app_client: httpx.AsyncClient, owner: str
+    app_client: httpx.AsyncClient,
+    owner: str,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from app.core.config import get_settings
+    from app.services import execution_service as exec_svc
+
+    async def ready(_session: object, *, require_flat: bool) -> object:
+        assert require_flat
+        return object()
+
+    monkeypatch.setattr(exec_svc, "require_live_ready", ready)
 
     h = await _headers(app_client, owner)
     # Bot is stopped by default.
@@ -90,6 +99,40 @@ async def test_live_switch_requires_typed_confirm(
         "/api/settings/environment", json={"environment": "LIVE", "confirm": "LIVE"}, headers=h
     )
     assert good.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_live_bot_start_rechecks_current_binance_controls(
+    app_client: httpx.AsyncClient,
+    owner: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.core.config import get_settings
+    from app.db.session import get_sessionmaker
+    from app.services import execution_service as exec_svc
+    from app.services.settings_store import get_settings_row
+
+    async with get_sessionmaker()() as session:
+        (await get_settings_row(session)).active_environment = "LIVE"
+        await session.commit()
+
+    runtime = get_settings()
+    runtime.live_trading_approved = True
+    runtime.live_key_permissions_verified = True
+
+    async def blocked(_session: object, *, require_flat: bool) -> object:
+        assert not require_flat
+        raise exec_svc.LiveTradingBlockedError("current Binance controls are unsafe")
+
+    monkeypatch.setattr(exec_svc, "require_live_ready", blocked)
+
+    response = await app_client.post(
+        "/api/bot/start",
+        headers=await _headers(app_client, owner),
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "current Binance controls are unsafe"
 
 
 @pytest.mark.asyncio

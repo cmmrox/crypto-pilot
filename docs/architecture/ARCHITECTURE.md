@@ -138,8 +138,10 @@ unless hotfix-critical. Health endpoint + dead-man cron.
    stop/breaker model, funding included): $100 → ~$1,330 with a ~-40% max drawdown and
    no liquidation. This accepts materially higher single-trade and drawdown risk than
    the validated set; it relies on stops filling near their price (gap risk) and on the
-   short sleeve remaining at its native vol-targeted sizing. Owner-acknowledged, DEMO
-   only. Contract v2 moved these values from mutable application settings into the
+   short sleeve remaining at its native vol-targeted sizing. On 2026-07-29 the owner
+   explicitly approved applying this same immutable DEMO profile to LIVE, superseding
+   the previous DEMO-only restriction and the BSD Stage 12 minimum-risk pilot profile.
+   Contract v2 moved these values from mutable application settings into the
    immutable strategy manifest; the chronological production-plugin replay verifies
    the complete configured profile. The earlier settings change was delivered as
    migration `d3e4f5a6b7c8`; migration `f5a6b7c8d9e0` removes those duplicate columns.
@@ -150,3 +152,10 @@ unless hotfix-critical. Health endpoint + dead-man cron.
    clocks, reconciliation, exchange filters, sizing mechanics, and orders. Strategy
    selection is read-only apart from choosing the default; it requires stopped and
    flat state. See `docs/strategies/CREATING_A_STRATEGY.md`.
+9. **Stage 11 calendar-soak waiver and Stage 12 gate opening.** The checked evidence
+   shows that the latest unattended DEMO soak began on 2026-07-29 and therefore did
+   not satisfy the BSD's four-week calendar duration on that date. The owner
+   explicitly accepted that residual operational risk, approved Stage 11, opened
+   Stage 12, and authorized minimum-size real LIVE order-lifecycle checks before VPS
+   deployment. Reports must preserve the distinction between owner waiver and four
+   weeks of observed evidence.

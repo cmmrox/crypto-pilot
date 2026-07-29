@@ -15,6 +15,10 @@ TEMPLATES: dict[str, str] = {
     "short_resized": "CryptoPilot: SHORT resized to {weight} of equity ({reason}).",
     "bot_started": "CryptoPilot: bot STARTED on {environment}, strategy {strategy}, equity {equity}.",
     "bot_stopped": "CryptoPilot: bot STOPPED by {actor}. Open position left with its exchange stops.",
+    "kill_switch": (
+        "CryptoPilot: KILL SWITCH completed. Positions flattened and "
+        "{cancelled_orders} resting orders cancelled."
+    ),
     "breaker": "CryptoPilot: monthly loss cap hit (-4%). All closed. Halted until the 1st.",
     "error": "CryptoPilot ALERT: {error}. Bot paused — check dashboard.",
 }
@@ -27,6 +31,7 @@ DEFAULT_TOGGLES: dict[str, bool] = {
     "short_resized": True,
     "bot_started": True,
     "bot_stopped": True,
+    "kill_switch": True,
     "breaker": True,
     "error": True,
 }

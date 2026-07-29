@@ -7,6 +7,11 @@ import {
   type EventRow,
   type MarketStatus,
 } from "../api/client";
+import { LoadingState, Spinner } from "../components/AsyncState";
+import { Pagination } from "../components/Pagination";
+import { useDebouncedValue } from "../hooks/useDebouncedValue";
+
+const PAGE_SIZE = 50;
 
 const CATEGORIES = [
   "",
@@ -31,34 +36,92 @@ export function Events() {
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<EventRow | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const [eventsError, setEventsError] = useState("");
+  const [statusError, setStatusError] = useState("");
+  const [backfillBusy, setBackfillBusy] = useState(false);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
   const loadSeq = useRef(0);
+  const resultsRef = useRef<HTMLDivElement>(null);
+  const debouncedSearch = useDebouncedValue(search);
 
-  const load = async () => {
-    setError("");
+  const loadStatus = async () => {
+    setStatusError("");
+    try {
+      setStatus(await getMarketStatus());
+    } catch {
+      setStatusError("Could not load market connection status.");
+    }
+  };
+
+  const loadEvents = async () => {
+    setLoading(true);
+    setEventsError("");
     const seq = ++loadSeq.current;
     try {
-      const [st, ev] = await Promise.all([
-        getMarketStatus(),
-        getEvents({ level, category, search, limit: 200 }),
-      ]);
-      // Ignore results from a superseded (out-of-order) request.
+      const result = await getEvents({
+        level,
+        category,
+        search: debouncedSearch,
+        page,
+        pageSize: PAGE_SIZE,
+      });
       if (seq !== loadSeq.current) return;
-      setStatus(st);
-      setEvents(ev);
+      if (result.total_pages > 0 && page > result.total_pages) {
+        setPage(result.total_pages);
+        return;
+      }
+      setEvents(result.items);
+      setTotal(result.total);
+      setTotalPages(result.total_pages);
     } catch {
       if (seq === loadSeq.current) {
-        setError("Could not load system status. The backend may be unreachable.");
+        setEventsError("Could not load the event ledger. The backend may be unreachable.");
       }
     } finally {
       if (seq === loadSeq.current) setLoading(false);
     }
   };
 
+  const backfill = async () => {
+    setBackfillBusy(true);
+    setStatusError("");
+    try {
+      setStatus(await backfillCandles());
+      await loadEvents();
+    } catch {
+      setStatusError("Could not ingest candles. No market data was changed.");
+    } finally {
+      setBackfillBusy(false);
+    }
+  };
+
   useEffect(() => {
-    void load();
+    void loadStatus();
+  }, []);
+
+  useEffect(() => {
+    void loadEvents();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [level, category, search]);
+  }, [level, category, debouncedSearch, page]);
+
+  const updateLevel = (next: string) => {
+    setPage(1);
+    setLevel(next);
+  };
+  const updateCategory = (next: string) => {
+    setPage(1);
+    setCategory(next);
+  };
+  const updateSearch = (next: string) => {
+    setPage(1);
+    setSearch(next);
+  };
+  const changePage = (nextPage: number) => {
+    setPage(nextPage);
+    resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
 
   return (
     <div className="view-stack">
@@ -70,10 +133,19 @@ export function Events() {
         </div>
         <button
           className="button secondary"
-          onClick={() => void backfillCandles().then(load)}
+          onClick={() => void backfill()}
           data-testid="backfill-btn"
+          disabled={backfillBusy}
         >
-          <RefreshCw size={15} /> Ingest candles now
+          {backfillBusy ? (
+            <>
+              <Spinner /> Ingesting candles…
+            </>
+          ) : (
+            <>
+              <RefreshCw size={15} /> Ingest candles now
+            </>
+          )}
         </button>
       </div>
 
@@ -115,10 +187,14 @@ export function Events() {
             aria-label="Search events"
             placeholder="Search message or reference"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => updateSearch(e.target.value)}
           />
         </label>
-        <select aria-label="Filter level" value={level} onChange={(e) => setLevel(e.target.value)}>
+        <select
+          aria-label="Filter level"
+          value={level}
+          onChange={(e) => updateLevel(e.target.value)}
+        >
           {LEVELS.map((l) => (
             <option key={l} value={l}>
               {l || "All levels"}
@@ -128,7 +204,7 @@ export function Events() {
         <select
           aria-label="Filter category"
           value={category}
-          onChange={(e) => setCategory(e.target.value)}
+          onChange={(e) => updateCategory(e.target.value)}
         >
           {CATEGORIES.map((c) => (
             <option key={c} value={c}>
@@ -136,16 +212,24 @@ export function Events() {
             </option>
           ))}
         </select>
-        <span className="result-count">{events.length} events</span>
+        <span className="result-count" role="status">
+          {loading ? (
+            <>
+              <Spinner size={13} /> Updating…
+            </>
+          ) : (
+            `${total} events`
+          )}
+        </span>
       </div>
 
-      {error && (
+      {(statusError || eventsError) && (
         <div className="form-error" role="alert">
-          {error}
+          {statusError || eventsError}
         </div>
       )}
 
-      <div className="events-panel" data-testid="events-table">
+      <div ref={resultsRef} className="events-panel" data-testid="events-table" aria-busy={loading}>
         <div className="event-head">
           <span>UTC time</span>
           <span>Category</span>
@@ -153,7 +237,12 @@ export function Events() {
           <span>Message</span>
           <span>Ref</span>
         </div>
-        {loading && <div className="empty-state">Loading…</div>}
+        {loading && events.length === 0 && (
+          <LoadingState
+            title="Loading event ledger…"
+            detail="Fetching the latest audit and system records."
+          />
+        )}
         {!loading && events.length === 0 && (
           <div className="empty-state">
             <Search size={24} />
@@ -178,6 +267,16 @@ export function Events() {
           </button>
         ))}
       </div>
+
+      <Pagination
+        label="events"
+        page={page}
+        pageSize={PAGE_SIZE}
+        total={total}
+        totalPages={totalPages}
+        busy={loading}
+        onPageChange={changePage}
+      />
 
       {selected && <EventDrawer event={selected} onClose={() => setSelected(null)} />}
     </div>

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { AlertTriangle, ArrowLeft, MessageSquareText, ShieldCheck } from "lucide-react";
 import { ApiError, clearTokens, getMe, resendOtp, setTokens, verifyOtp } from "../api/client";
 import { useAuth } from "./store";
+import { Spinner } from "../components/AsyncState";
 
 const RESEND_SECONDS = 60;
 
@@ -147,7 +148,7 @@ export function Otp({
           </div>
         )}
         <button className="button primary full" type="submit" disabled={busy}>
-          {busy ? "Verifying…" : "Verify & enter"}
+          {busy ? <><Spinner /> Verifying code…</> : "Verify & enter"}
         </button>
         <button
           type="button"
@@ -156,7 +157,7 @@ export function Otp({
           onClick={() => void resend()}
           disabled={cooldown > 0 || resendBusy}
         >
-          {resendBusy ? "Sending…" : cooldown > 0 ? `Resend code in ${cooldown}s` : "Resend code"}
+          {resendBusy ? <><Spinner /> Sending code…</> : cooldown > 0 ? `Resend code in ${cooldown}s` : "Resend code"}
         </button>
         <div className="otp-required">
           <ShieldCheck size={15} />

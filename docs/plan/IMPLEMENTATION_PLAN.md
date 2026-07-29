@@ -201,17 +201,23 @@ Additional acceptance cases:
 **Deliverables**
 - Trades view: filters (search/side/environment/strategy/month), CSV export (streamed,
   exact `numeric` formatting), per-trade drawer (orders, fills, decision timeline,
-  reconciliation status).
+  reconciliation status), server-backed pagination capped at 50 rows per page.
 - Monthly view: calendar-month ledger (trades, realized P&L, fees+funding, net, both
   breaker states), withdrawal allowance (10% rule), manual mark-withdrawn (audited).
-- Events view completed: level/category/search filters, payload drawer, JSON export.
+- Events view completed: level/category/search filters, payload drawer, JSON export,
+  server-backed pagination capped at 50 rows per page.
 
 **QA test cases (QA-6):** filters compose correctly (property-based where cheap); CSV
 matches DB to the satoshi; trade drawer reconstructs a full round-trip from `orders`;
 month aggregates equal sum of trades ± fees/funding vs Binance income history on DEMO;
-mark-withdrawn writes audit event and is idempotent-guarded.
+mark-withdrawn writes audit event and is idempotent-guarded; audit surfaces distinguish
+in-flight loading from a confirmed empty result and announce progress accessibly;
+pagination keeps stable order, reports the full filtered count, and works at desktop and
+mobile breakpoints.
 **Playwright:** `stage-06.history.spec.ts` — filter matrix, export download+content
-check, drawer reconstruction, monthly ledger math against seeded fixtures.
+check, drawer reconstruction, monthly ledger math against seeded fixtures, and the
+50-to-51 trade-page boundary. Event pagination is covered by
+`stage-02.marketdata.spec.ts`.
 
 **Exit:** any trade fully reconstructable in ≤3 clicks; exports byte-exact.
 
@@ -330,10 +336,16 @@ per BSD G3.
 
 **Goal:** real trading, smallest sensible size, owner in control.
 
+**Owner-approved deviation — 2026-07-29:** the owner opened Stage 12 despite the
+latest four-week DEMO calendar soak being incomplete and approved the same immutable
+Trend Rider v6 profile used in DEMO (`long_risk_pct=15`, `leverage_cap=6`, native
+vol-targeted short sleeve) for LIVE. Initial verification orders remain
+exchange-minimum dust; this deviation changes ongoing strategy risk, not QA trade size.
+
 **Deliverables**
 - LIVE API key onboarding (trade+read only, withdrawals disabled, VPS IP whitelist —
   verified programmatically before first start); Settings switch to LIVE (typed
-  confirmation); pilot config (risk 1–2%, sleeve 50%); go-live runbook + rollback
+  confirmation); owner-approved immutable strategy profile; go-live runbook + rollback
   (switch back to DEMO) runbook; monthly review template vs Appendix A.
 
 **QA test cases (QA-12):** key permission verification rejects a withdrawal-enabled

@@ -46,13 +46,15 @@ state (balance/positions/income) — the DB records it, never invents it.
 
 ## Indexing (beyond PKs/uniques)
 
-- `trades (environment, opened_at desc)`, `trades (side)`, `trades (strategy)` — history filters.
+- `trades (opened_at desc, id desc)`, `trades (environment, opened_at desc)`,
+  `trades (side)`, `trades (strategy)` — stable paginated history and filters.
 
 Runtime-equivalence fields are persisted rather than reconstructed from process
 memory: `trades.remaining_qty`, `trades.highest_high`, `orders.filled_qty`, and
 `orders.avg_fill_px`. Conditional stop rows retain the Binance Algo ID in
 `orders.binance_order_id` and the original Algo payload in `raw_json`.
-- `events (ts desc)`, `events (category, ts desc)`, `events (level, ts desc)` — ledger queries.
+- `events (ts desc, id desc)`, `events (category, ts desc)`,
+  `events (level, ts desc)` — stable paginated ledger queries.
 - `otp_challenges (user_id, purpose, created_at)` — send cap and challenge lookup.
 - `candles (symbol, interval, open_time desc)` — window loads.
 - `equity_snapshots (environment, ts desc)` — chart ranges.

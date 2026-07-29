@@ -4,6 +4,7 @@ import { Login } from "./auth/Login";
 import { Otp } from "./auth/Otp";
 import { Shell } from "./shell/Shell";
 import { useAuth } from "./auth/store";
+import { Spinner } from "./components/AsyncState";
 
 interface OtpFlow {
   token: string;
@@ -39,7 +40,10 @@ export function App() {
           <span className="brand-icon" />
           <strong>CryptoPilot</strong>
         </div>
-        <p>Loading…</p>
+        <div className="splash-progress" role="status" aria-live="polite">
+          <Spinner size={18} />
+          <span>Securing your session…</span>
+        </div>
       </main>
     );
   }

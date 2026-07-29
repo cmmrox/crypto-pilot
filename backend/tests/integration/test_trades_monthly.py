@@ -19,7 +19,7 @@ async def _headers(client: httpx.AsyncClient, _secret: str) -> dict[str, str]:
     return await auth_headers(client)
 
 
-async def _seed_trades() -> None:
+async def _seed_trades(total: int = 2) -> None:
     import os
 
     engine = create_async_engine(os.environ["CP_DATABASE_URL"])
@@ -53,7 +53,24 @@ async def _seed_trades() -> None:
             strategy="trend_rider_v6_4h",
             environment="DEMO",
         )
-        s.add_all([t1, t2])
+        extra = [
+            Trade(
+                opened_at=dt.datetime(2026, 7, 12, tzinfo=dt.UTC) + dt.timedelta(minutes=i),
+                closed_at=dt.datetime(2026, 7, 13, tzinfo=dt.UTC) + dt.timedelta(minutes=i),
+                side="LONG",
+                entry_px=D("60000"),
+                exit_px=D("60100"),
+                qty=D("0.01"),
+                fees=D("1"),
+                realized_pnl=D("1"),
+                r_multiple=D("0.1"),
+                exit_reason=f"pagination fixture {i}",
+                strategy="trend_rider_v6_4h",
+                environment="DEMO",
+            )
+            for i in range(total - 2)
+        ]
+        s.add_all([t1, t2, *extra])
         await s.flush()
         s.add(
             Order(
@@ -90,14 +107,15 @@ async def test_list_and_filter_trades(app_client: httpx.AsyncClient, owner: str)
     await _seed_trades()
     h = await _headers(app_client, owner)
     all_trades = (await app_client.get("/api/trades", headers=h)).json()
-    assert len(all_trades) == 2
+    assert all_trades["total"] == 2
+    assert len(all_trades["items"]) == 2
     longs = (await app_client.get("/api/trades?side=LONG", headers=h)).json()
-    assert len(longs) == 1 and longs[0]["side"] == "LONG"
-    assert longs[0]["outcome"] == "WIN"
+    assert len(longs["items"]) == 1 and longs["items"][0]["side"] == "LONG"
+    assert longs["items"][0]["outcome"] == "WIN"
     shorts = (await app_client.get("/api/trades?side=SHORT", headers=h)).json()
-    assert shorts[0]["outcome"] == "LOSS"
+    assert shorts["items"][0]["outcome"] == "LOSS"
     julys = (await app_client.get("/api/trades?month=2026-07", headers=h)).json()
-    assert len(julys) == 2
+    assert len(julys["items"]) == 2
 
 
 @pytest.mark.asyncio
@@ -105,7 +123,7 @@ async def test_trade_detail_has_orders(app_client: httpx.AsyncClient, owner: str
     await _seed_trades()
     h = await _headers(app_client, owner)
     trades = (await app_client.get("/api/trades?side=LONG", headers=h)).json()
-    detail = (await app_client.get(f"/api/trades/{trades[0]['id']}", headers=h)).json()
+    detail = (await app_client.get(f"/api/trades/{trades['items'][0]['id']}", headers=h)).json()
     assert len(detail["orders"]) == 2
     assert any(o["type"] == "STOP_MARKET" for o in detail["orders"])
 
@@ -120,6 +138,35 @@ async def test_csv_export_matches_db(app_client: httpx.AsyncClient, owner: str) 
     body = resp.text
     assert "realized_pnl" in body  # header
     assert "200" in body and "-50" in body  # both trades' pnl
+
+
+@pytest.mark.asyncio
+async def test_trades_are_paginated_at_fifty_rows(
+    app_client: httpx.AsyncClient, owner: str
+) -> None:
+    await _seed_trades(total=55)
+    headers = await _headers(app_client, owner)
+
+    first = (await app_client.get("/api/trades?page=1&page_size=50", headers=headers)).json()
+    second = (await app_client.get("/api/trades?page=2&page_size=50", headers=headers)).json()
+
+    assert first["total"] == 55
+    assert first["total_pages"] == 2
+    assert len(first["items"]) == 50
+    assert len(second["items"]) == 5
+    assert {row["id"] for row in first["items"]}.isdisjoint(row["id"] for row in second["items"])
+
+
+@pytest.mark.asyncio
+async def test_trade_pagination_and_filters_are_bounded(
+    app_client: httpx.AsyncClient, owner: str
+) -> None:
+    headers = await _headers(app_client, owner)
+    assert (await app_client.get("/api/trades?page_size=51", headers=headers)).status_code == 422
+    assert (await app_client.get("/api/trades?month=2026-13", headers=headers)).status_code == 422
+    assert (
+        await app_client.get(f"/api/trades?search={'x' * 101}", headers=headers)
+    ).status_code == 422
 
 
 @pytest.mark.asyncio

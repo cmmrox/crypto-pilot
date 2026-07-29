@@ -35,6 +35,13 @@ row (BSD FR-01). Docs: [developers.binance.com — USDS-M futures](https://devel
   decision synchronizes order status, fills, fees, realized PnL, funding, and
   remaining quantity before position reconciliation.
 - **Account:** one-way position mode, isolated margin, explicit leverage (cap 3×). Margin error `-2019` → pause bot + SMS.
+- **LIVE readiness:** the authenticated Settings test reads Binance's
+  `/sapi/v1/account/apiRestrictions`, position mode, asset mode, positions, and open
+  orders. It fails closed unless the key is IP-restricted with read + Futures access,
+  withdrawals and unrelated permissions are disabled, the account is flat in one-way
+  single-asset mode, BTCUSDT uses isolated margin, and leverage exactly matches the
+  selected immutable strategy manifest. These checks never place, cancel, or modify
+  an order.
 - **Reconciliation:** on every start and every 4h close compare expected vs actual position/orders; mismatch → safe mode + SMS (BSD §8).
 
 ## 2. notify.lk SMS

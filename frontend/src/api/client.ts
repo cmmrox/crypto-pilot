@@ -185,18 +185,28 @@ export interface EventRow {
   ref: string | null;
 }
 
+export interface PageResponse<T> {
+  items: T[];
+  total: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+}
+
 export function getEvents(params: {
   level?: string;
   category?: string;
   search?: string;
-  limit?: number;
-}): Promise<EventRow[]> {
+  page?: number;
+  pageSize?: number;
+}): Promise<PageResponse<EventRow>> {
   const q = new URLSearchParams();
   if (params.level) q.set("level", params.level);
   if (params.category) q.set("category", params.category);
   if (params.search) q.set("search", params.search);
-  q.set("limit", String(params.limit ?? 100));
-  return apiRequest<EventRow[]>(`/api/events?${q.toString()}`);
+  q.set("page", String(params.page ?? 1));
+  q.set("page_size", String(params.pageSize ?? 50));
+  return apiRequest<PageResponse<EventRow>>(`/api/events?${q.toString()}`);
 }
 
 // --- Market / connection ---
@@ -468,8 +478,12 @@ function tradeQuery(f: TradeFilters): string {
   return q.toString();
 }
 
-export const getTrades = (f: TradeFilters = {}) =>
-  apiRequest<TradeRow[]>(`/api/trades?${tradeQuery(f)}`);
+export const getTrades = (f: TradeFilters = {}, page = 1, pageSize = 50) => {
+  const q = new URLSearchParams(tradeQuery(f));
+  q.set("page", String(page));
+  q.set("page_size", String(pageSize));
+  return apiRequest<PageResponse<TradeRow>>(`/api/trades?${q.toString()}`);
+};
 export const getTradeDetail = (id: number) => apiRequest<TradeDetail>(`/api/trades/${id}`);
 
 /** Fetch the trades CSV as text with auth (endpoint requires a bearer token). */

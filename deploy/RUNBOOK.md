@@ -63,6 +63,10 @@ ssh -L 8090:127.0.0.1:8090 user@server
 Use `http://localhost:8090` through that tunnel. Set `CP_BACKUP_DIR` to an
 absolute host directory. `CP_BACKUP_BUCKET` remains the off-host upload switch.
 
+An owner may temporarily expose the non-TLS endpoint by setting
+`CP_HTTP_BIND=0.0.0.0`. This sends login credentials, OTPs, and session traffic
+without transport encryption and is not an accepted final production posture.
+
 ## 5. Configure in the dashboard
 
 - Settings → **DEMO credentials** (Binance testnet key/secret) → Test connection.

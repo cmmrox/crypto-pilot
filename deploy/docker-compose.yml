@@ -50,9 +50,9 @@ services:
       - backend
       - frontend
     ports:
-      # Safe default when no trusted TLS domain is configured. Reach it with:
-      # ssh -L 8090:127.0.0.1:8090 <host>
-      - "127.0.0.1:${CP_HTTP_PORT:-8090}:80"
+      # Loopback remains the safe default. Set CP_HTTP_BIND=0.0.0.0 only for an
+      # explicitly accepted temporary plaintext-access exception.
+      - "${CP_HTTP_BIND:-127.0.0.1}:${CP_HTTP_PORT:-8090}:80"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

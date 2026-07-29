@@ -342,6 +342,14 @@ Trend Rider v6 profile used in DEMO (`long_risk_pct=15`, `leverage_cap=6`, nativ
 vol-targeted short sleeve) for LIVE. Initial verification orders remain
 exchange-minimum dust; this deviation changes ongoing strategy risk, not QA trade size.
 
+**Production checkpoint — 2026-07-29:** release
+`d1aea00e79c8f50e0c6dee0f61b6e7d6eac4b292` was deployed to the VPS. Binance
+readiness, two minimum-size LIVE round trips, the authenticated LIVE bot start, kill
+switch, SMS delivery, final flattening, migrations, restore drill, health/API, and
+browser smoke checks passed. Stage 12's final exit remains open for its 4+ elapsed
+LIVE pilot weeks and for the production domain/TLS and off-host backup inputs listed
+in `docs/qa/reports/STAGE-12-PRODUCTION-DEPLOYMENT-2026-07-29.md`.
+
 **Deliverables**
 - LIVE API key onboarding (trade+read only, withdrawals disabled, VPS IP whitelist —
   verified programmatically before first start); Settings switch to LIVE (typed

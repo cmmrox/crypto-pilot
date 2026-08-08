@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from tests.fakes import FakeExchange
 
 D = Decimal
+AMPLE_MARGIN = Decimal("1000000")
 
 
 async def _filters(ex: FakeExchange):
@@ -40,6 +41,7 @@ async def test_open_long_places_entry_stop_and_tp(db_session: AsyncSession) -> N
         stop_distance=D("2000"),
         price=D("65000"),
         leverage_cap=D("3"),
+        available_margin=AMPLE_MARGIN,
         filters=await _filters(ex),
     )
     trade = await om.open_long(
@@ -88,6 +90,7 @@ async def test_open_long_emergency_flattens_when_stop_fails(
         stop_distance=D("2000"),
         price=D("65000"),
         leverage_cap=D("3"),
+        available_margin=AMPLE_MARGIN,
         filters=await _filters(ex),
     )
     with pytest.raises(ProtectiveStopFailed, match="emergency-flattened") as excinfo:
@@ -160,6 +163,7 @@ async def test_open_long_records_open_trade_when_flatten_also_fails(
         stop_distance=D("2000"),
         price=D("65000"),
         leverage_cap=D("3"),
+        available_margin=AMPLE_MARGIN,
         filters=await _filters(ex),
     )
     with pytest.raises(ProtectiveStopFailed, match="not confirmed") as excinfo:
@@ -203,6 +207,7 @@ async def test_open_short_has_no_price_stop(db_session: AsyncSession) -> None:
         realized_vol=D("0.40"),
         price=D("60000"),
         leverage_cap=D("3"),
+        available_margin=AMPLE_MARGIN,
         filters=await _filters(ex),
     )
     trade = await om.open_short(
@@ -284,6 +289,7 @@ async def test_flatten_sends_trade_closed_notification(
         realized_vol=D("0.20"),
         price=D("65000"),
         leverage_cap=D("6"),
+        available_margin=AMPLE_MARGIN,
         filters=await _filters(ex),
     )
     trade = await om.open_short(
@@ -328,6 +334,7 @@ async def test_order_rows_store_decimal_and_client_id(db_session: AsyncSession) 
         stop_distance=D("2000"),
         price=D("65000"),
         leverage_cap=D("3"),
+        available_margin=AMPLE_MARGIN,
         filters=await _filters(ex),
     )
     await om.open_long(
@@ -357,6 +364,7 @@ async def test_long_stop_ratchets_and_never_lowers(db_session: AsyncSession) -> 
         stop_distance=D("2000"),
         price=D("65000"),
         leverage_cap=D("3"),
+        available_margin=AMPLE_MARGIN,
         filters=await _filters(ex),
     )
     trade = await om.open_long(
@@ -406,6 +414,7 @@ async def test_short_resize_increases_and_reduces_to_exact_target(
         realized_vol=D("0.40"),
         price=D("60000"),
         leverage_cap=D("3"),
+        available_margin=AMPLE_MARGIN,
         filters=await _filters(ex),
     )
     trade = await om.open_short(

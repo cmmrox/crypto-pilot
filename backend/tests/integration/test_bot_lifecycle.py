@@ -263,6 +263,106 @@ async def test_evaluate_opens_long_on_fresh_regime(db_session: AsyncSession) -> 
 
 
 @pytest.mark.asyncio
+async def test_closed_candle_failure_notifies_owner_with_the_real_error(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: on 2026-07-30 and 2026-08-07 the real failure was silent.
+
+    `_drive_bot` recorded `bot_drive_failed` but never notified, so the owner only
+    learned four hours later from the missed-decision echo — with a message that
+    named neither the rejection nor its cause.
+    """
+    import contextlib
+
+    from app.bot.ingest import ingest_service
+    from app.execution.binance_client import BinanceError
+    from app.services import execution_service, notify_config
+    from app.services.execution_service import ExecutionContext
+
+    notifications: list[tuple[str, dict[str, object]]] = []
+
+    async def capture(_session: AsyncSession, *, kind: str, payload: dict[str, object]) -> str:
+        notifications.append((kind, payload))
+        return "delivered"
+
+    monkeypatch.setattr(notify_config, "notify_event", capture)
+
+    svc = BotService()
+    exchange = FakeExchange(mark_price=D("150"))
+
+    async def reject_entry(*_args: object, **_kwargs: object) -> None:
+        raise BinanceError("Margin is insufficient.", status=400, code=-2019)
+
+    monkeypatch.setattr(exchange, "place_market", reject_entry)
+
+    candles = _bull_candles(320)
+    fresh = _fresh_regime_index(candles)
+    for candle in candles[: fresh + 1]:
+        db_session.add(candle)
+    exchange.mark = Decimal(str(candles[fresh].close))
+    await svc.start(db_session, exchange, by="o")
+    run = await svc._current_run(db_session)
+    assert run is not None
+    run.last_evaluated_candle_at = None
+    await db_session.commit()
+
+    @contextlib.asynccontextmanager
+    async def fake_context(_session: AsyncSession):  # type: ignore[no-untyped-def]
+        yield ExecutionContext(
+            environment="LIVE",
+            market=__import__("app.strategies", fromlist=["get_strategy"])
+            .get_strategy("trend_rider_v6_4h")
+            .manifest.market,
+            exchange=exchange,  # type: ignore[arg-type]
+            orders=OrderManager(exchange, symbol="BTCUSDT"),
+        )
+
+    monkeypatch.setattr(execution_service, "execution_context", fake_context)
+
+    await ingest_service._drive_bot(db_session, allow_new_entries=True)
+
+    assert (await svc.status(db_session)).status == BotStatus.SAFE_MODE
+    failure = (
+        await db_session.execute(select(Event).where(Event.ref == "bot_drive_failed"))
+    ).scalar_one()
+    assert failure.payload_json["error"] == "Margin is insufficient."
+    # The owner must be paged for the failure itself, carrying the real reason.
+    assert [kind for kind, _ in notifications] == ["bot_started", "error"]
+    assert "Margin is insufficient." in str(notifications[-1][1])
+
+
+@pytest.mark.asyncio
+async def test_long_entry_submits_tick_aligned_stop_and_take_profit(
+    db_session: AsyncSession,
+) -> None:
+    """Regression: the 2026-07-30 LIVE long (Binance -1111).
+
+    `stop_distance` is a float, so `mark - stop_distance` lands on sub-tick
+    precision. The protective stop and TP1 must be rounded to `tick_size` before
+    they reach the exchange, or the stop is rejected and the long is stranded.
+    """
+    svc = BotService()
+    ex = FakeExchange(mark_price=D("150"))
+    om = OrderManager(ex, symbol="BTCUSDT")
+    await svc.start(db_session, ex, by="o")
+    await db_session.commit()
+
+    candles = _bull_candles(320)
+    fresh = _fresh_regime_index(candles)
+    # An off-tick mark guarantees an off-tick raw stop/TP (tick size is 0.10).
+    ex.mark = Decimal("150.07")
+    actions = await svc.evaluate_once(db_session, ex, om, candles=candles[: fresh + 1])
+    await db_session.commit()
+
+    assert "open_long" in actions
+    tick = (await ex.get_filters("BTCUSDT")).tick_size
+    assert ex.price_by_order, "no protective orders were submitted"
+    for client_order_id, price in ex.price_by_order.items():
+        assert price % tick == 0, f"{client_order_id} price {price} is not tick-aligned"
+
+
+@pytest.mark.asyncio
 async def test_every_close_reconciliation_blocks_new_risk(
     db_session: AsyncSession,
 ) -> None:

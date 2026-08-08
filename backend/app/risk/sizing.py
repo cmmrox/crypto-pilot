@@ -12,6 +12,14 @@ from decimal import Decimal
 
 from app.execution.filters import SymbolFilters, clamp_qty, meets_min_notional
 
+# Binance charges the taker fee on the entry fill, on top of the initial margin.
+# Take the conservative side of the maker/taker schedule so the reserve never
+# under-provides.
+TAKER_FEE_RATE = Decimal("0.0005")
+# Held back from available balance so a leverage-capped entry stays placeable
+# through mark-price drift between sizing and the fill.
+MARGIN_SAFETY_BUFFER = Decimal("0.02")
+
 
 @dataclass(frozen=True)
 class SizingResult:
@@ -34,6 +42,27 @@ def _leverage_capped_qty(
     return qty
 
 
+def margin_capped_qty(
+    qty: Decimal, price: Decimal, available_margin: Decimal, leverage_cap: Decimal
+) -> Decimal:
+    """Reduce qty so the entry's initial margin plus taker fee actually fit.
+
+    The account's configured leverage equals `leverage_cap`, so a notional sized
+    to exactly the cap needs `notional / leverage_cap` = the entire balance as
+    initial margin and the exchange rejects the order for fees alone (Binance
+    -2019). This is a placeability constraint on top of the risk cap, never a
+    relaxation of it: it only ever lowers quantity.
+    """
+    if available_margin <= 0 or price <= 0 or leverage_cap <= 0:
+        return Decimal("0")
+    spendable = available_margin * (Decimal("1") - MARGIN_SAFETY_BUFFER)
+    cost_per_notional = Decimal("1") / leverage_cap + TAKER_FEE_RATE
+    max_notional = spendable / cost_per_notional
+    if qty * price > max_notional:
+        return max_notional / price
+    return qty
+
+
 def size_long(
     *,
     equity: Decimal,
@@ -41,6 +70,7 @@ def size_long(
     stop_distance: Decimal,
     price: Decimal,
     leverage_cap: Decimal,
+    available_margin: Decimal,
     filters: SymbolFilters,
 ) -> SizingResult:
     """Size a long: qty = (equity * risk%) / stop_distance, leverage-capped."""
@@ -49,9 +79,12 @@ def size_long(
     risk_capital = equity * (risk_pct / Decimal("100"))
     raw_qty = risk_capital / stop_distance
     raw_qty = _leverage_capped_qty(raw_qty, price, equity, leverage_cap)
+    raw_qty = margin_capped_qty(raw_qty, price, available_margin, leverage_cap)
     qty = clamp_qty(raw_qty, filters)
     if qty <= 0:
-        return SizingResult(Decimal("0"), Decimal("0"), Decimal("0"), False, "below min lot")
+        return SizingResult(
+            Decimal("0"), Decimal("0"), Decimal("0"), False, "below min lot or margin"
+        )
     if not meets_min_notional(qty, price, filters):
         return SizingResult(qty, qty * price, Decimal("0"), False, "below min notional")
     notional = qty * price
@@ -73,6 +106,7 @@ def size_short(
     realized_vol: Decimal,
     price: Decimal,
     leverage_cap: Decimal,
+    available_margin: Decimal,
     filters: SymbolFilters,
 ) -> SizingResult:
     """Size the vol-targeted short sleeve.
@@ -87,9 +121,12 @@ def size_short(
     notional = equity * (weight_pct / Decimal("100")) * scale
     raw_qty = notional / price
     raw_qty = _leverage_capped_qty(raw_qty, price, equity, leverage_cap)
+    raw_qty = margin_capped_qty(raw_qty, price, available_margin, leverage_cap)
     qty = clamp_qty(raw_qty, filters)
     if qty <= 0:
-        return SizingResult(Decimal("0"), Decimal("0"), Decimal("0"), False, "below min lot")
+        return SizingResult(
+            Decimal("0"), Decimal("0"), Decimal("0"), False, "below min lot or margin"
+        )
     if not meets_min_notional(qty, price, filters):
         return SizingResult(qty, qty * price, Decimal("0"), False, "below min notional")
     final_notional = qty * price

@@ -44,6 +44,8 @@ class FakeExchange:
         self._seen_ids: set[str] = set()
         self.leverage: int | None = None
         self.placed: list[tuple[str, str, Decimal]] = []  # (type, side, qty) log
+        # Submitted trigger/limit prices, so tests can assert tick alignment.
+        self.price_by_order: dict[str, Decimal] = {}
 
     async def get_filters(self, symbol: str) -> SymbolFilters:
         return _BTC_FILTERS
@@ -114,6 +116,7 @@ class FakeExchange:
         self, symbol, side, qty, stop_price, *, client_order_id, reduce_only=True
     ) -> OrderResult:
         self.placed.append(("STOP_MARKET", side, qty))
+        self.price_by_order[client_order_id] = stop_price
         r = OrderResult(client_order_id, f"S{client_order_id}", "NEW", Decimal("0"), Decimal("0"))
         self._open_orders[client_order_id] = r
         self._orders[client_order_id] = r
@@ -124,6 +127,7 @@ class FakeExchange:
         self, symbol, side, qty, price, *, client_order_id, reduce_only=True
     ) -> OrderResult:
         self.placed.append(("LIMIT", side, qty))
+        self.price_by_order[client_order_id] = price
         r = OrderResult(client_order_id, f"T{client_order_id}", "NEW", Decimal("0"), Decimal("0"))
         self._open_orders[client_order_id] = r
         self._orders[client_order_id] = r

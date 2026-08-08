@@ -271,6 +271,7 @@ class CandleIngestService:
                     "flattened": exc.record.flattened,
                 },
             )
+            await self._notify_drive_failure(session, exc, cause)
             await session.commit()
             _log.error("bot_drive_failed", error=str(exc), cause=str(cause) if cause else None)
         except AmbiguousMutationError as exc:
@@ -333,9 +334,7 @@ class CandleIngestService:
                 "ambiguous_mutation_recovery",
                 flattened=flattened,
                 cancelled_orders=cancelled,
-                recovery_error=(
-                    str(recovery_error) if recovery_error is not None else None
-                ),
+                recovery_error=(str(recovery_error) if recovery_error is not None else None),
             )
         except Exception as exc:
             await session.rollback()
@@ -354,8 +353,35 @@ class CandleIngestService:
                     "cause_type": type(cause).__name__ if cause else None,
                 },
             )
+            await self._notify_drive_failure(session, exc, cause)
             await session.commit()
             _log.error("bot_drive_failed", error=str(exc), cause=str(cause) if cause else None)
+
+    async def _notify_drive_failure(
+        self,
+        session: AsyncSession,
+        exc: BaseException,
+        cause: BaseException | None,
+    ) -> None:
+        """Page the owner for the failure itself, naming the real reason.
+
+        Without this the only SMS arrives at the *next* close, as the
+        missed-decision guard firing on a cursor this handler rolled back — four
+        hours late and describing a symptom instead of the rejection.
+        """
+        from app.services.notify_config import notify_event
+
+        reason = str(cause) if cause else str(exc)
+        await notify_event(
+            session,
+            kind="error",
+            payload={
+                "error": (
+                    f"closed-candle decision failed ({reason}); "
+                    "bot entered safe mode — no new entries until restarted"
+                )
+            },
+        )
 
 
 ingest_service = CandleIngestService()

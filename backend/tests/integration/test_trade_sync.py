@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from tests.fakes import FakeExchange
 
 D = Decimal
+AMPLE_MARGIN = Decimal("1000000")
 
 
 @pytest.mark.asyncio
@@ -30,6 +31,7 @@ async def test_tp_fill_updates_remaining_position_and_exact_trade_money(
         stop_distance=D("2000"),
         price=D("65000"),
         leverage_cap=D("3"),
+        available_margin=AMPLE_MARGIN,
         filters=filters,
     )
     trade = await manager.open_long(

@@ -23,12 +23,12 @@ from app.bot.state import BotSnapshot, BotStatus
 from app.core.logging import get_logger
 from app.db.models import BotRun, Candle, EquitySnapshot, Event, Trade
 from app.execution.exchange import Exchange
-from app.execution.filters import SymbolFilters, clamp_qty, meets_min_notional
+from app.execution.filters import SymbolFilters, clamp_qty, meets_min_notional, round_price
 from app.execution.orders import OrderManager
 from app.execution.reconcile import reconcile_position
 from app.execution.trade_sync import sync_open_trade
 from app.risk.breakers import evaluate_breaker
-from app.risk.sizing import SizingResult, size_long
+from app.risk.sizing import SizingResult, margin_capped_qty, size_long
 from app.services.events import record_event
 from app.services.settings_store import get_settings_row
 from app.strategies import (
@@ -500,13 +500,22 @@ class BotService:
                     stop_distance=Decimal(str(intent.stop_distance)),
                     price=execution_price,
                     leverage_cap=risk.leverage_cap,
+                    available_margin=acct.available,
                     filters=filters,
                 )
                 if sizing.ok:
-                    stop_price = execution_price - Decimal(str(intent.stop_distance))
+                    # Strategy distances are floats, so the raw prices land on
+                    # sub-tick precision. Round before they reach the exchange or
+                    # the protective stop is rejected (-1111) and the long is
+                    # left naked until the emergency flatten.
+                    stop_price = round_price(
+                        execution_price - Decimal(str(intent.stop_distance)),
+                        filters.tick_size,
+                    )
                     tp_r, tp_frac = intent.tp_levels[0]
-                    tp1_price = execution_price + Decimal(str(tp_r)) * Decimal(
-                        str(intent.stop_distance)
+                    tp1_price = round_price(
+                        execution_price + Decimal(str(tp_r)) * Decimal(str(intent.stop_distance)),
+                        filters.tick_size,
                     )
                     await orders.open_long(
                         session,
@@ -531,6 +540,8 @@ class BotService:
                     equity,
                     execution_price,
                     filters,
+                    leverage_cap=risk.leverage_cap,
+                    available_margin=acct.available,
                 )
                 if sizing.ok:
                     await orders.open_short(
@@ -599,9 +610,7 @@ class BotService:
                 actions.append("halt")
 
         stale_entry_intents = [
-            intent
-            for intent in intents
-            if isinstance(intent, EnterLong | EnterShort)
+            intent for intent in intents if isinstance(intent, EnterLong | EnterShort)
         ]
         if not allow_new_entries and stale_entry_intents:
             await record_event(
@@ -613,9 +622,7 @@ class BotService:
                 payload={
                     "candle_open_time": decision_candle_at.isoformat(),
                     "strategy": run.strategy,
-                    "intents": [
-                        type(intent).__name__ for intent in stale_entry_intents
-                    ],
+                    "intents": [type(intent).__name__ for intent in stale_entry_intents],
                 },
             )
             actions.append("stale_entry_skipped")
@@ -752,11 +759,15 @@ def _size_short_from_intent(
     equity: Decimal,
     price: Decimal,
     filters: SymbolFilters,
+    *,
+    leverage_cap: Decimal,
+    available_margin: Decimal,
 ) -> SizingResult:
     """Size the short from the strategy's already-vol-scaled weight."""
     weight = Decimal(str(intent.weight))
     notional = equity * weight
-    qty = clamp_qty(notional / price, filters)
+    raw_qty = margin_capped_qty(notional / price, price, available_margin, leverage_cap)
+    qty = clamp_qty(raw_qty, filters)
     if qty <= 0 or not meets_min_notional(qty, price, filters):
         return SizingResult(Decimal("0"), Decimal("0"), Decimal("0"), False, "below min")
     return SizingResult(qty, qty * price, (qty * price) / equity, True, "ok")

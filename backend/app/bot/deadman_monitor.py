@@ -20,7 +20,7 @@ def _healthy(url: str, timeout: float) -> bool:
     try:
         with urllib.request.urlopen(url, timeout=timeout) as response:
             payload = json.load(response)
-        return response.status == 200 and payload.get("status") == "ok"
+        return bool(response.status == 200 and payload.get("status") == "ok")
     except Exception:
         return False
 

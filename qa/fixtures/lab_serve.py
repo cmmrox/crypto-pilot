@@ -31,7 +31,10 @@ def main() -> None:
         ([sys.executable, str(ROOT / "qa/fixtures/lab_stack.py"), mode], ROOT)
         for mode in ("lab", "runner", "advisor", "backend")
     ] + [(["npm", "run", "dev", "--", "--host", "127.0.0.1"], ROOT / "frontend")]
-    environment = os.environ | {"VITE_DEV_API_PROXY": "http://127.0.0.1:8000"}
+    environment = os.environ | {
+        "VITE_DEV_API_PROXY": "http://127.0.0.1:8000",
+        "VITE_EXPERIMENT_LAB_ENABLED": "true",
+    }
     try:
         for command, directory in commands:
             processes.append(

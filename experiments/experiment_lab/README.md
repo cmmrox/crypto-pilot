@@ -135,7 +135,7 @@ refuses occupied ports and stops its children together. Optional
 `CP_QA_LAB_DATA_DIR=.lab-data/qa/release-regression` isolate regression evidence.
 
 For separate processes, run each in its own terminal. Start the frontend with
-`VITE_DEV_API_PROXY=http://127.0.0.1:8000 npm run dev` from `frontend/`.
+`VITE_EXPERIMENT_LAB_ENABLED=true VITE_DEV_API_PROXY=http://127.0.0.1:8000 npm run dev` from `frontend/`.
 In `qa/`, set `CP_QA_OWNER_EMAIL=qa-owner@example.com`,
 `CP_BASE_URL=http://localhost:5173`, and `CP_LAB_DATASET_ID` to the real Binance
 dataset ID before `npx playwright test`. Do not run these provisioning commands
@@ -146,3 +146,7 @@ explicitly outstanding gates.
 
 Latest cross-application regression and release limitations:
 [2026-09-07 report](../../docs/qa/reports/RELEASE-REGRESSION-2026-09-07.md).
+
+The standard frontend build hides the Lab navigation and route. Only the opt-in
+Lab Compose overlay enables `VITE_EXPERIMENT_LAB_ENABLED=true`. Production without
+Lab must also leave backend Lab URL/token unset.

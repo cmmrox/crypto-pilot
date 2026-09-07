@@ -4,6 +4,8 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
+ARG VITE_EXPERIMENT_LAB_ENABLED=false
+ENV VITE_EXPERIMENT_LAB_ENABLED=$VITE_EXPERIMENT_LAB_ENABLED
 RUN npm run build
 
 FROM nginx:1.27-alpine

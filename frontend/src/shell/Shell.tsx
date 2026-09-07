@@ -20,11 +20,14 @@ import { getStrategies, type StrategyInfo } from "../api/client";
 import { LoadingState, Spinner } from "../components/AsyncState";
 
 const Events = lazy(() => import("../views/Events").then((module) => ({ default: module.Events })));
-const ExperimentLab = lazy(() =>
-  import("../features/experiment-lab/ExperimentLab").then((module) => ({
-    default: module.ExperimentLab,
-  })),
-);
+const LAB_ENABLED = import.meta.env.VITE_EXPERIMENT_LAB_ENABLED === "true";
+const ExperimentLab = LAB_ENABLED
+  ? lazy(() =>
+      import("../features/experiment-lab/ExperimentLab").then((module) => ({
+        default: module.ExperimentLab,
+      })),
+    )
+  : () => null;
 const Monthly = lazy(() =>
   import("../views/Monthly").then((module) => ({ default: module.Monthly })),
 );
@@ -84,7 +87,7 @@ export function Shell() {
           </button>
         </div>
         <nav>
-          {NAV.map((item) => {
+          {NAV.filter((item) => LAB_ENABLED || item.to !== "/experiment-lab").map((item) => {
             const Icon = item.icon;
             return (
               <NavLink
@@ -174,7 +177,7 @@ export function Shell() {
               <Route path="/monthly" element={<Monthly />} />
               <Route path="/news" element={<News />} />
               <Route path="/events" element={<Events />} />
-              <Route path="/experiment-lab" element={<ExperimentLab />} />
+              {LAB_ENABLED && <Route path="/experiment-lab" element={<ExperimentLab />} />}
               <Route path="/settings" element={<SettingsView />} />
               {NAV.filter(
                 (i) =>

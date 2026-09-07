@@ -1,6 +1,10 @@
 # Opt-in overlay: docker compose -f docker-compose.yml -f docker-compose.experiments.yml up -d
 # No exchange, PostgreSQL, JWT or master-key secrets enter lab/advisor containers.
 services:
+  frontend:
+    build:
+      args:
+        VITE_EXPERIMENT_LAB_ENABLED: "true"
   backend:
     networks: [default, database, lab-private]
     environment:

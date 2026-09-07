@@ -6,6 +6,7 @@ import json
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
+from typing import cast
 
 from trend_rider_lab.binance_data import sha256
 from trend_rider_lab.replay import ReplayResult, config_dict
@@ -14,13 +15,19 @@ from trend_rider_lab.replay import ReplayResult, config_dict
 def result_summary(result: ReplayResult) -> dict[str, object]:
     trades = result.trades
     closed = len(trades)
-    net_values = [Decimal(str(value)) for value in trades["net_pnl"].tolist()] if closed else []
+    net_values = (
+        [Decimal(str(value)) for value in trades["net_pnl"].tolist()] if closed else []
+    )
     wins = sum(value > 0 for value in net_values)
     gross_profit = (
-        sum((value for value in net_values if value > 0), Decimal("0")) if closed else Decimal("0")
+        sum((value for value in net_values if value > 0), Decimal("0"))
+        if closed
+        else Decimal("0")
     )
     gross_loss = (
-        -sum((value for value in net_values if value < 0), Decimal("0")) if closed else Decimal("0")
+        -sum((value for value in net_values if value < 0), Decimal("0"))
+        if closed
+        else Decimal("0")
     )
     fees = (
         sum(
@@ -109,7 +116,9 @@ def write_run(
         },
         "lab_sources": {
             str(path): sha256(path)
-            for path in sorted((results_root.parent / "src" / "trend_rider_lab").glob("*.py"))
+            for path in sorted(
+                (results_root.parent / "src" / "trend_rider_lab").glob("*.py")
+            )
         },
         "assumptions": [
             "closed Binance USD-M BTCUSDT 4h candles only",
@@ -120,7 +129,11 @@ def write_run(
             "actual public funding rates applied to carried positions",
             "bar open proxies notional when Binance funding history omits markPrice",
             "current public exchange filters applied to historical replay",
-            "independent 4% monthly breakers flatten next open",
+            (
+                "independent 4% monthly breakers flatten next open"
+                if result.config.monthly_breakers_enabled
+                else "both monthly breakers disabled for controlled comparison"
+            ),
             "OHLC replay is not tick/order-book or liquidation-engine simulation",
         ],
     }
@@ -138,7 +151,12 @@ def _pct(value: object) -> str:
 
 
 def _markdown_report(summary: dict[str, object]) -> str:
-    return f"""# Trend Rider v6 current-profile replay
+    config = cast("dict[str, object]", summary["config"])
+    breakers_enabled = bool(config["monthly_breakers_enabled"])
+    breaker_label = (
+        "with monthly breakers" if breakers_enabled else "without monthly breakers"
+    )
+    return f"""# Trend Rider v6 replay — {breaker_label}
 
 Generated over public Binance USD-M BTCUSDT 4h data.
 
@@ -153,6 +171,7 @@ Generated over public Binance USD-M BTCUSDT 4h data.
 - CAGR: {_pct(summary["cagr"])}
 - Maximum drawdown: {_pct(summary["max_drawdown"])}
 - Sharpe: {Decimal(str(summary["sharpe"])):.2f}
+- Monthly breakers: {"enabled" if breakers_enabled else "disabled"}
 
 ## Trading
 

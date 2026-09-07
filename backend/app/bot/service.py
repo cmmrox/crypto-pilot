@@ -44,6 +44,7 @@ from app.strategies import (
     get_strategy,
 )
 from app.strategies.base import Candle as StratCandle
+from app.telemetry.decisions import record_decision
 
 _log = get_logger("bot")
 
@@ -486,6 +487,17 @@ class BotService:
         )
         intents = strat.on_candle(strat_candles, state)
         entries_allowed = run.stop_reason != "safe_mode" and allow_new_entries
+        record_decision(
+            session,
+            strategy=strat,
+            candles=strat_candles,
+            state=state,
+            intents=intents,
+            entries_allowed=entries_allowed,
+            run_id=run.id,
+            equity=equity,
+            execution_price=execution_price,
+        )
 
         for intent in intents:
             if (

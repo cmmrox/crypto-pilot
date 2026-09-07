@@ -70,3 +70,60 @@ async def test_self_check_emergency_cleanup_flattens_after_protective_order_fail
 
     assert (await exchange.get_position("BTCUSDT")).qty == 0
     assert await exchange.get_open_orders("BTCUSDT") == []
+
+
+@pytest.mark.parametrize(
+    "side,position,message",
+    [
+        ("BUY", "0", "side must"),
+        ("LONG", "0.001", "flat account"),
+    ],
+)
+async def test_self_check_rejects_invalid_initial_state_without_mutation(side, position, message):
+    exchange = FakeExchange()
+    exchange._pos = Decimal(position)
+    with pytest.raises((ValueError, RuntimeError), match=message):
+        await run_execution_self_check(exchange, symbol="BTCUSDT", side=side)
+    assert exchange.placed == []
+
+
+async def test_cleanup_still_flattens_when_cancel_all_fails():
+    class CancelFailingExchange(FakeExchange):
+        async def cancel_all(self, symbol):
+            raise RuntimeError("cancel unavailable")
+
+    exchange = CancelFailingExchange()
+    with pytest.raises(RuntimeError, match="cleanup was not confirmed") as failure:
+        await run_execution_self_check(exchange, symbol="BTCUSDT", side="SHORT")
+    assert str(failure.value.__cause__) == "cancel unavailable"
+    assert (await exchange.get_position("BTCUSDT")).qty == 0
+
+
+async def test_cleanup_failure_is_reported_when_reduce_only_exit_fails():
+    class ExitFailingExchange(FakeExchange):
+        async def place_market(self, *args, **kwargs):
+            if kwargs.get("reduce_only"):
+                raise RuntimeError("exit unavailable")
+            return await super().place_market(*args, **kwargs)
+
+    exchange = ExitFailingExchange()
+    with pytest.raises(RuntimeError, match="inspect Binance immediately") as failure:
+        await run_execution_self_check(exchange, symbol="BTCUSDT", side="SHORT")
+    assert str(failure.value.__cause__) == "exit unavailable"
+    assert (await exchange.get_position("BTCUSDT")).qty < 0
+
+
+async def test_unconfirmed_entry_triggers_cleanup():
+    from dataclasses import replace
+
+    class PartialExchange(FakeExchange):
+        async def place_market(self, *args, **kwargs):
+            result = await super().place_market(*args, **kwargs)
+            return (
+                result if kwargs.get("reduce_only") else replace(result, status="PARTIALLY_FILLED")
+            )
+
+    exchange = PartialExchange()
+    with pytest.raises(RuntimeError, match="not fully confirmed"):
+        await run_execution_self_check(exchange, symbol="BTCUSDT", side="SHORT")
+    assert (await exchange.get_position("BTCUSDT")).qty == 0

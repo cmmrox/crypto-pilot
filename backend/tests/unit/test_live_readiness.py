@@ -45,6 +45,7 @@ def _responses() -> dict[str, Any]:
             }
         ],
         "/fapi/v1/openOrders": [],
+        "/fapi/v1/openAlgoOrders": [],
     }
 
 
@@ -127,3 +128,42 @@ async def test_live_readiness_uses_active_strategy_leverage_and_can_allow_resume
     assert not first_start.ready
     assert any("existing LIVE positions" in issue for issue in first_start.issues)
     assert any("existing LIVE open orders" in issue for issue in first_start.issues)
+
+
+async def test_live_readiness_blocks_conditional_orders_on_other_symbols():
+    responses = _responses()
+    responses["/fapi/v1/openAlgoOrders"] = [{"algoId": 42, "symbol": "ETHUSDT"}]
+    result = await verify_live_readiness(FakeSignedClient(responses), required_leverage=3)
+    assert not result.ready
+    assert result.open_order_count == 1
+    assert any("open orders" in issue for issue in result.issues)
+
+
+@pytest.mark.parametrize(
+    "path,value",
+    [
+        ("/fapi/v1/openAlgoOrders", {}),
+        ("/fapi/v1/openOrders", ["invalid"]),
+        (API_RESTRICTIONS_URL, []),
+        ("/fapi/v1/positionSide/dual", []),
+        ("/fapi/v1/multiAssetsMargin", None),
+        ("/fapi/v2/positionRisk", [{"positionAmt": "invalid"}]),
+    ],
+)
+async def test_readiness_rejects_malformed_provider_payload(path, value):
+    from app.execution.binance_client import BinanceError
+
+    responses = _responses()
+    responses[path] = value
+    with pytest.raises(BinanceError):
+        await verify_live_readiness(FakeSignedClient(responses), required_leverage=3)
+
+
+async def test_readiness_blocks_missing_symbol_and_permissions():
+    responses = _responses()
+    responses[API_RESTRICTIONS_URL] = {}
+    responses["/fapi/v2/positionRisk"] = []
+    result = await verify_live_readiness(FakeSignedClient(responses), required_leverage=3)
+    assert not result.ready
+    assert result.btcusdt_leverage is None
+    assert len(result.issues) >= 5

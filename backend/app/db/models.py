@@ -36,7 +36,9 @@ class User(Base):
     # SMS second factor. phone_encrypted holds the AES-GCM ciphertext of the
     # 2FA number; when twofa_enabled is false, login is password-only.
     phone_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
-    twofa_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    twofa_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false", nullable=False
+    )
 
 
 class OtpChallenge(Base):
@@ -68,12 +70,12 @@ class OtpChallenge(Base):
     # Target number for this challenge (AES-GCM); for change_phone/enable this is
     # the NEW number being proven, not necessarily the user's stored one.
     phone_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
-    attempts: Mapped[int] = mapped_column(default=0, nullable=False)
-    max_attempts: Mapped[int] = mapped_column(default=5, nullable=False)
+    attempts: Mapped[int] = mapped_column(default=0, server_default="0", nullable=False)
+    max_attempts: Mapped[int] = mapped_column(default=5, server_default="5", nullable=False)
     expires_at: Mapped[dt.datetime] = mapped_column(nullable=False)
     consumed_at: Mapped[dt.datetime | None] = mapped_column(nullable=True)
     last_sent_at: Mapped[dt.datetime] = mapped_column(nullable=False)
-    send_count: Mapped[int] = mapped_column(default=1, nullable=False)
+    send_count: Mapped[int] = mapped_column(default=1, server_default="1", nullable=False)
 
 
 class Session(Base):
@@ -135,8 +137,12 @@ class BotRun(Base):
     stopped_at: Mapped[dt.datetime | None] = mapped_column(nullable=True)
     environment: Mapped[str] = mapped_column(String(8), nullable=False)
     strategy: Mapped[str] = mapped_column(String(64), nullable=False)
-    strategy_release: Mapped[str] = mapped_column(String(32), default="legacy", nullable=False)
-    strategy_interval: Mapped[str] = mapped_column(String(8), default="4h", nullable=False)
+    strategy_release: Mapped[str] = mapped_column(
+        String(32), default="legacy", server_default="legacy", nullable=False
+    )
+    strategy_interval: Mapped[str] = mapped_column(
+        String(8), default="4h", server_default="4h", nullable=False
+    )
     last_evaluated_candle_at: Mapped[dt.datetime | None] = mapped_column(nullable=True)
     stop_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
     started_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -185,8 +191,12 @@ class Trade(Base):
     r_multiple: Mapped[Decimal | None] = mapped_column(nullable=True)
     exit_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
     strategy: Mapped[str] = mapped_column(String(64), nullable=False)
-    strategy_release: Mapped[str] = mapped_column(String(32), default="legacy", nullable=False)
-    strategy_interval: Mapped[str] = mapped_column(String(8), default="4h", nullable=False)
+    strategy_release: Mapped[str] = mapped_column(
+        String(32), default="legacy", server_default="legacy", nullable=False
+    )
+    strategy_interval: Mapped[str] = mapped_column(
+        String(8), default="4h", server_default="4h", nullable=False
+    )
     environment: Mapped[str] = mapped_column(String(8), nullable=False)
     bot_run_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("bot_runs.id"), nullable=True

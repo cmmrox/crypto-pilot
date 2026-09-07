@@ -54,6 +54,17 @@ backend/.venv/bin/python -m trend_rider_lab.cli run \
   --reuse-data
 ```
 
+Run the same replay with both independent monthly breakers disabled:
+
+```sh
+export PYTHONPATH="$PWD/backend:$PWD/experiments/backtesting/src"
+backend/.venv/bin/python -m trend_rider_lab.cli run \
+  --years 5 \
+  --initial-capital 200 \
+  --reuse-data \
+  --no-monthly-breakers
+```
+
 Run a venue-filter control using the read-only DEMO filter snapshot:
 
 ```sh

@@ -39,6 +39,8 @@ _SENSITIVE_KEYS = frozenset(
         "phone_encrypted",
         "signature",
         "codex_api_key",
+        "lab_service_token",
+        "lease_token",
     }
 )
 

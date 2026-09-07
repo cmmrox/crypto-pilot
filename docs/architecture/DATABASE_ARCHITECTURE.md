@@ -79,3 +79,12 @@ backend$ alembic upgrade head        # applied automatically on container start
 ```
 CI runs `alembic upgrade head` against a scratch Postgres and fails on drift between
 models and migrations.
+
+
+### ORM drift verification (2026-09-07)
+
+The ORM now declares the server defaults already present in applied migrations for
+2FA flags, OTP counters and bot/trade strategy release and interval. No schema change
+was required. A fresh database passed upgrade, Alembic drift check, downgrade to base,
+re-upgrade and a second drift check. Experiment Lab SQLite schema 3 is separate from
+PostgreSQL; its migrations and snapshot recovery are covered by the Lab suite.

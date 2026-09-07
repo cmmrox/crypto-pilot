@@ -259,3 +259,86 @@ async def test_stop_market_uses_algo_api_and_supports_query_cancel() -> None:
         "reduceOnly": "true",
         "workingType": "MARK_PRICE",
     }
+
+
+async def test_account_projection_keeps_decimal_precision_and_omits_flat_positions():
+    data = {
+        "totalWalletBalance": "123456789.12345678",
+        "availableBalance": "12.00000001",
+        "totalUnrealizedProfit": "-0.00000001",
+        "positions": [
+            {"symbol": "BTCUSDT", "positionAmt": "0.001", "entryPrice": "61234.12345678"},
+            {"symbol": "ETHUSDT", "positionAmt": "0", "entryPrice": "0"},
+        ],
+    }
+    account = await BinanceExchange(StubClient(data)).get_account()
+    assert account.balance == Decimal("123456789.12345678")
+    assert account.available == Decimal("12.00000001")
+    assert account.unrealized_pnl == Decimal("-0.00000001")
+    assert len(account.positions) == 1
+    assert account.positions[0].entry_price == Decimal("61234.12345678")
+
+
+async def test_funding_projection_preserves_income_identity_and_utc():
+    instant = dt.datetime(2026, 1, 1, tzinfo=dt.UTC)
+    client = RecordingStubClient(
+        [{"tranId": 42, "income": "-0.00000001", "time": int(instant.timestamp() * 1000)}]
+    )
+    rows = await BinanceExchange(client).get_funding_income("BTCUSDT", start_at=instant)
+    assert rows[0].exchange_income_id == "42"
+    assert rows[0].amount == Decimal("-0.00000001")
+    assert rows[0].occurred_at == instant
+    assert client.calls[0][2]["startTime"] == int(instant.timestamp() * 1000)
+
+
+@pytest.mark.parametrize(
+    "row,expected",
+    [
+        ([], "shape"),
+        ({}, "identity"),
+        ({"clientOrderId": "x", "orderId": 1, "status": "UNKNOWN"}, "status"),
+        ({"clientOrderId": "x", "orderId": 1, "status": "NEW", "executedQty": "-1"}, "negative"),
+    ],
+)
+def test_untrusted_regular_order_rejected(row, expected):
+    with pytest.raises(BinanceError, match=expected):
+        BinanceExchange._to_result(row)
+
+
+@pytest.mark.parametrize(
+    "row,expected",
+    [
+        ([], "shape"),
+        ({}, "identity"),
+        ({"clientAlgoId": "x", "algoId": 1, "algoStatus": "UNKNOWN"}, "status"),
+    ],
+)
+def test_untrusted_algo_order_rejected(row, expected):
+    with pytest.raises(BinanceError, match=expected):
+        BinanceExchange._to_algo_result(row)
+
+
+async def test_unconfirmed_algo_cancel_is_rejected():
+    from unittest.mock import AsyncMock
+
+    client = AsyncMock()
+    client.signed_request.side_effect = [
+        BinanceError("missing", code=-2013),
+        {"code": 500, "algoId": 1},
+    ]
+    with pytest.raises(BinanceError, match="not confirmed"):
+        await BinanceExchange(client).cancel_order("BTCUSDT", "cancel-id")
+
+
+async def test_missing_order_retries_reads_but_does_not_place_again(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    client = AsyncMock()
+    client.signed_request.side_effect = BinanceError("missing", code=-2013)
+    delay = AsyncMock()
+    monkeypatch.setattr("app.execution.binance_exchange.asyncio.sleep", delay)
+    with pytest.raises(BinanceError, match="missing"):
+        await BinanceExchange(client).get_order("BTCUSDT", "known-id")
+    assert client.signed_request.call_count == 6
+    assert all(call.args[0] == "GET" for call in client.signed_request.call_args_list)
+    assert delay.await_count == 2

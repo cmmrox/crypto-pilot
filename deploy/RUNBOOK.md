@@ -38,6 +38,7 @@ cp .env.example .env
 cd ../backend
 uv lock --check
 uv export --frozen --no-dev --no-emit-project \
+  --no-emit-package cryptopilot-strategy-runtime \
   --format requirements-txt --output-file /tmp/cryptopilot-requirements.check
 # uv records the requested output path in its two-line generated header. Compare
 # the locked dependency body rather than that non-semantic command comment.

@@ -52,6 +52,10 @@ def audit(repo_root: Path) -> LivePathAudit:
     exchange_source = exchange_path.read_text(encoding="utf-8")
     sync_source = sync_path.read_text(encoding="utf-8")
     strategy_source = strategy_path.read_text(encoding="utf-8")
+    if "class TrendRiderV6(TrendRider)" in strategy_source:
+        strategy_source += (
+            repo_root / "packages/strategy_runtime/src/strategy_runtime/trend_rider.py"
+        ).read_text(encoding="utf-8")
     tree = ast.parse(bot_source)
     handled: set[str] = set()
     for node in ast.walk(tree):

@@ -3,6 +3,7 @@ import { NavLink, Route, Routes, Navigate } from "react-router-dom";
 import {
   Bitcoin,
   CalendarDays,
+  FlaskConical,
   LayoutDashboard,
   ListTree,
   LogOut,
@@ -19,6 +20,11 @@ import { getStrategies, type StrategyInfo } from "../api/client";
 import { LoadingState, Spinner } from "../components/AsyncState";
 
 const Events = lazy(() => import("../views/Events").then((module) => ({ default: module.Events })));
+const ExperimentLab = lazy(() =>
+  import("../features/experiment-lab/ExperimentLab").then((module) => ({
+    default: module.ExperimentLab,
+  })),
+);
 const Monthly = lazy(() =>
   import("../views/Monthly").then((module) => ({ default: module.Monthly })),
 );
@@ -37,6 +43,7 @@ const NAV = [
   { to: "/monthly", label: "Monthly", icon: CalendarDays, stage: "Stage 6" },
   { to: "/news", label: "News briefing", icon: Newspaper, stage: "Stage 8" },
   { to: "/events", label: "Event ledger", icon: ListTree, stage: "Stage 2" },
+  { to: "/experiment-lab", label: "Experiment Lab", icon: FlaskConical, stage: "Research" },
   { to: "/settings", label: "Settings", icon: Settings, stage: "Stage 9" },
 ];
 
@@ -167,6 +174,7 @@ export function Shell() {
               <Route path="/monthly" element={<Monthly />} />
               <Route path="/news" element={<News />} />
               <Route path="/events" element={<Events />} />
+              <Route path="/experiment-lab" element={<ExperimentLab />} />
               <Route path="/settings" element={<SettingsView />} />
               {NAV.filter(
                 (i) =>

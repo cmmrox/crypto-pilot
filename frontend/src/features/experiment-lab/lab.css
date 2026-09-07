@@ -1,0 +1,174 @@
+.lab-page {
+  display: grid;
+  gap: 1.3rem;
+  max-width: 1400px;
+  margin: auto;
+}
+.lab-heading,
+.lab-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.lab-heading h1 {
+  margin: 0.3rem 0;
+}
+.lab-page p {
+  line-height: 1.6;
+}
+.lab-page button {
+  padding: 0.65rem 1rem;
+  border-radius: 8px;
+  border: 1px solid #526373;
+  background: #253b46;
+  color: #f2f7f8;
+  cursor: pointer;
+}
+.lab-page button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.lab-page input:not([type="checkbox"]),
+.lab-page select {
+  display: block;
+  width: 100%;
+  padding: 0.6rem;
+  border: 1px solid #526373;
+  border-radius: 6px;
+  background: #101f29;
+  color: #f2f7f8;
+  margin-top: 0.35rem;
+}
+.lab-selector {
+  max-width: 560px;
+}
+.lab-panel,
+.lab-summary > div,
+.lab-iteration {
+  padding: 1.2rem;
+  border: 1px solid #344653;
+  border-radius: 10px;
+  background: #12232e;
+}
+.lab-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.8rem;
+}
+.lab-summary > div {
+  display: grid;
+  gap: 0.6rem;
+}
+.lab-summary strong {
+  font-size: 1.35rem;
+  overflow-wrap: anywhere;
+}
+.lab-summary small,
+.lab-disclaimer,
+.lab-summary span {
+  color: #9db4c2;
+}
+.lab-form-grid,
+.lab-parameters {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1.2rem;
+  margin: 1rem 0;
+}
+.lab-pin {
+  font-size: 0.8rem;
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+  margin-top: 0.4rem;
+}
+.lab-iterations {
+  display: grid;
+  gap: 0.7rem;
+}
+.lab-iteration > summary {
+  display: grid;
+  grid-template-columns: 0.4fr 1.7fr 1.3fr 1fr 0.8fr 0.5fr 0.6fr;
+  gap: 0.7rem;
+  align-items: center;
+  cursor: pointer;
+}
+.lab-detail {
+  border-top: 1px solid #344653;
+  margin-top: 1rem;
+  padding-top: 0.8rem;
+  overflow-wrap: anywhere;
+}
+.lab-inputs {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.8rem;
+}
+.lab-inputs dd {
+  margin: 0.3rem 0;
+}
+.lab-months {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(125px, 1fr));
+  gap: 0.6rem;
+}
+.lab-months > div {
+  display: grid;
+  gap: 0.4rem;
+  background: #0c1b24;
+  padding: 0.7rem;
+  border-radius: 6px;
+}
+.lab-gain {
+  color: #7ce6b4;
+}
+.lab-loss {
+  color: #ffa0a9;
+}
+.lab-error {
+  padding: 1rem;
+  background: #471f2c;
+  border: 1px solid #e393a3;
+  border-radius: 8px;
+}
+.lab-error button {
+  margin-left: 1rem;
+}
+.lab-empty {
+  padding: 3rem 1.5rem;
+  border: 1px dashed #526373;
+  text-align: center;
+  border-radius: 10px;
+  color: #bdd0db;
+}
+.lab-skill {
+  white-space: pre-wrap;
+  font: inherit;
+  line-height: 1.6;
+}
+.lab-page summary {
+  cursor: pointer;
+  padding: 0.3rem 0;
+}
+@media (max-width: 900px) {
+  .lab-summary,
+  .lab-form-grid,
+  .lab-parameters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .lab-iteration > summary {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+@media (max-width: 550px) {
+  .lab-summary,
+  .lab-form-grid,
+  .lab-parameters {
+    grid-template-columns: 1fr;
+  }
+  .lab-inputs {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}

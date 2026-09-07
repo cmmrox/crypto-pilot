@@ -1,0 +1,13 @@
+[project]
+name = "cryptopilot-strategy-runtime"
+version = "1.0.0"
+description = "Pure, parameterized CryptoPilot strategy contracts and arithmetic"
+requires-python = ">=3.11"
+dependencies = ["numpy==2.2.2", "pandas==2.2.3"]
+
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/strategy_runtime"]

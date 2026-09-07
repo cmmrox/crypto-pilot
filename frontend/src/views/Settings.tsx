@@ -534,13 +534,16 @@ function EnvironmentCard() {
 function StrategyLibrary() {
   const [strategies, setStrategies] = useState<StrategyInfo[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [modal, setModal] = useState<ModalSpec | null>(null);
   const load = async () => {
     setLoading(true);
+    setError(null);
     try {
       setStrategies(await getStrategies());
     } catch {
       setStrategies([]);
+      setError("Strategy releases could not be loaded. Retry to confirm the current active release.");
     } finally {
       setLoading(false);
     }
@@ -548,15 +551,16 @@ function StrategyLibrary() {
   useEffect(() => {
     void load();
   }, []);
-  const selectStrategy = (name: string) =>
+  const selectStrategy = (strategy: StrategyInfo) =>
     setModal({
       tone: "warning",
       kicker: "VALIDATED RELEASE CHANGE",
-      title: `Select ${name}?`,
-      body: "Audit-logged; applies at the next reconciled start. The bot must be stopped.",
+      title: `Select ${strategy.display_name}?`,
+      body: "Audit-logged; requires a stopped bot and no open position. Applies at the next reconciled start; does not start trading or change DEMO/LIVE mode.",
+      details: [strategy.summary, ...strategy.caveats],
       confirmLabel: "Select release",
       onConfirm: async () => {
-        await switchStrategy(name);
+        await switchStrategy(strategy.name);
         await load();
         window.dispatchEvent(new Event("strategy-changed"));
       },
@@ -574,6 +578,7 @@ function StrategyLibrary() {
         </div>
       </div>
       <div className="strategy-list">
+        {error && <div role="alert"><p>{error}</p><button className="button ghost" onClick={() => void load()}>Retry</button></div>}
         {loading && strategies.length === 0 && (
           <LoadingState compact title="Loading strategy releases…" detail="Reading the deployed, parity-validated plugin manifest." />
         )}
@@ -603,6 +608,12 @@ function StrategyLibrary() {
               <ul>{s.risk_controls.map((item) => <li key={item}>{item}</li>)}</ul>
               <h4>Caveats</h4>
               <ul>{s.caveats.map((item) => <li key={item}>{item}</li>)}</ul>
+              <h4>Read-only release parameters</h4>
+              <ul data-testid={`parameters-${s.name}`}>
+                {Object.entries(s.params).map(([key, value]) => (
+                  <li key={key}>{key.replaceAll("_", " ")}: <strong>{value}</strong></li>
+                ))}
+              </ul>
               <small>
                 Warm-up {s.warmup_bars} bars · history {s.history_bars} bars ·
                 validation: {s.validation_method}
@@ -621,7 +632,7 @@ function StrategyLibrary() {
                 <button
                   className="button ghost small"
                   data-testid={`select-${s.name}`}
-                  onClick={() => selectStrategy(s.name)}
+                  onClick={() => selectStrategy(s)}
                 >
                   Select
                 </button>

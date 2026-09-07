@@ -1,7 +1,7 @@
 import { expect, type Page } from "@playwright/test";
 
-export const OWNER_EMAIL = "owner@cryptopilot.app";
-export const OWNER_PASSWORD = "PilotOwner!2026";
+export const OWNER_EMAIL = process.env.CP_QA_OWNER_EMAIL ?? "owner@cryptopilot.app";
+export const OWNER_PASSWORD = process.env.CP_QA_OWNER_PASSWORD ?? "PilotOwner!2026";
 
 interface Tokens {
   access_token: string;

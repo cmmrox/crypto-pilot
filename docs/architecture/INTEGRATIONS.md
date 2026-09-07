@@ -107,3 +107,11 @@ the deployed server so rotation is independent.
 CoinDesk RSS, Cointelegraph RSS, Bitcoin Magazine, macro headlines, static FOMC/CPI
 calendar. URL-unique insert into `news_items`; failures are logged and skipped —
 collection must never crash the scheduler.
+
+### Readiness regression correction — 2026-09-07
+
+Fresh-start readiness counts both regular `/fapi/v1/openOrders` and conditional
+`/fapi/v1/openAlgoOrders` across symbols. An otherwise flat account can still have
+pending conditional exposure; it must not be reported ready. Read-only resume
+verification retains its existing reconciliation policy. The endpoint was checked
+against the [official Binance trade reference](https://developers.binance.com/en/docs/catalog/core-trading-derivatives-trading-usd-s-m-futures/api/rest-api/trade).

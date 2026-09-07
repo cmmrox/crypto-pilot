@@ -220,6 +220,121 @@ def test_monthly_breaker_accumulates_incremental_bar_deltas() -> None:
     assert result.final_equity > Decimal("96")
 
 
+def test_monthly_breakers_can_be_disabled_for_controlled_comparison() -> None:
+    class BreakerProbeReplay(ReferenceReplayEngine):
+        pass
+
+    timestamps = pd.date_range("2024-01-01", periods=221, freq="4h", tz="UTC")
+    candles = pd.DataFrame(
+        {
+            "dt": timestamps,
+            "open": [Decimal("100")] * len(timestamps),
+            "high": [Decimal("100.1")] * len(timestamps),
+            "low": [Decimal("99.9")] * len(timestamps),
+            "close": [Decimal("100")] * len(timestamps),
+            "volume": [Decimal("1")] * len(timestamps),
+        }
+    )
+    filters = SymbolFilters(
+        step_size=Decimal("0.001"),
+        min_qty=Decimal("0.001"),
+        max_qty=Decimal("120"),
+        tick_size=Decimal("0.10"),
+        min_notional=Decimal("50"),
+    )
+    replay = BreakerProbeReplay(
+        candles,
+        pd.DataFrame(columns=["funding_time_ms", "dt", "funding_rate", "mark_price"]),
+        filters,
+        ReplayConfig(monthly_breakers_enabled=False),
+        start=timestamps[220],
+    )
+    replay.long_month_delta = Decimal("-100")
+    replay.short_month_delta = Decimal("-100")
+
+    replay._update_breakers(Decimal("100"), "LONG")
+
+    assert replay.halted_long is False
+    assert replay.halted_short is False
+    assert replay.long_breaker_trips == 0
+    assert replay.short_breaker_trips == 0
+
+
+def test_closing_long_clears_stale_pullback_memory() -> None:
+    timestamps = pd.date_range("2024-01-01", periods=221, freq="4h", tz="UTC")
+    candles = pd.DataFrame(
+        {
+            "dt": timestamps,
+            "open": [Decimal("100")] * len(timestamps),
+            "high": [Decimal("100.1")] * len(timestamps),
+            "low": [Decimal("99.9")] * len(timestamps),
+            "close": [Decimal("100")] * len(timestamps),
+            "volume": [Decimal("1")] * len(timestamps),
+        }
+    )
+    filters = SymbolFilters(
+        step_size=Decimal("0.001"),
+        min_qty=Decimal("0.001"),
+        max_qty=Decimal("120"),
+        tick_size=Decimal("0.10"),
+        min_notional=Decimal("50"),
+    )
+    replay = ReferenceReplayEngine(
+        candles,
+        pd.DataFrame(columns=["funding_time_ms", "dt", "funding_rate", "mark_price"]),
+        filters,
+        ReplayConfig(funding_enabled=False),
+        start=timestamps[220],
+    )
+    replay.position = Position(
+        side="LONG",
+        qty=Decimal("1"),
+        entry_price=Decimal("100"),
+        opened_at=timestamps[220],
+        entry_equity=Decimal("100"),
+        entry_fee=Decimal("0"),
+    )
+    replay.was_below = True
+
+    replay._close_position(Decimal("100"), timestamps[220], "monthly_breaker")
+
+    assert replay.was_below is False
+
+
+def test_regime_break_clears_stale_pullback_memory() -> None:
+    timestamps = pd.date_range("2024-01-01", periods=221, freq="4h", tz="UTC")
+    candles = pd.DataFrame(
+        {
+            "dt": timestamps,
+            "open": [Decimal("100")] * len(timestamps),
+            "high": [Decimal("100.1")] * len(timestamps),
+            "low": [Decimal("99.9")] * len(timestamps),
+            "close": [Decimal("100")] * len(timestamps),
+            "volume": [Decimal("1")] * len(timestamps),
+        }
+    )
+    filters = SymbolFilters(
+        step_size=Decimal("0.001"),
+        min_qty=Decimal("0.001"),
+        max_qty=Decimal("120"),
+        tick_size=Decimal("0.10"),
+        min_notional=Decimal("50"),
+    )
+    replay = ReferenceReplayEngine(
+        candles,
+        pd.DataFrame(columns=["funding_time_ms", "dt", "funding_rate", "mark_price"]),
+        filters,
+        ReplayConfig(funding_enabled=False),
+        start=timestamps[220],
+    )
+    replay.was_below = True
+    row = pd.Series({"regime": False, "close": 99.0, "ema20": 100.0})
+
+    replay._update_signal_memory(row, row)
+
+    assert replay.was_below is False
+
+
 def test_plugin_replay_matches_reference_on_regime_transition_fixture() -> None:
     timestamps = pd.date_range("2023-01-01", periods=500, freq="4h", tz="UTC")
     prices: list[Decimal] = []

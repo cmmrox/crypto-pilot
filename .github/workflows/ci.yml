@@ -42,6 +42,7 @@ jobs:
       - name: Production dependency lock integrity
         run: |
           uv export --frozen --no-dev --no-emit-project \
+            --no-emit-package cryptopilot-strategy-runtime \
             --format requirements-txt \
             --output-file /tmp/cryptopilot-requirements.check
           diff -u \
@@ -51,6 +52,8 @@ jobs:
         run: uv run --frozen pip-audit
       - name: Lint (ruff)
         run: source .venv/bin/activate && ruff check app tests
+      - name: Formatting
+        run: .venv/bin/python -m ruff format --check app tests
       - name: Types (mypy strict)
         run: source .venv/bin/activate && mypy app
       - name: Import boundaries (import-linter)
@@ -66,6 +69,18 @@ jobs:
         run: source .venv/bin/activate && pytest -q -m parity
       - name: Unit + integration tests
         run: source .venv/bin/activate && pytest -q --cov=app --cov-report=term-missing
+      - name: Experiment Lab workflow, data guards and legacy replay regression
+        run: |
+          PYTHONPATH=../experiments/experiment_lab/src:../experiments/backtesting/src \
+            .venv/bin/python -m pytest -q ../experiments/experiment_lab/tests ../experiments/backtesting/tests
+      - name: Lab formatting and type-checked bodies
+        run: |
+          .venv/bin/python -m ruff check ../experiments/experiment_lab/src ../experiments/experiment_lab/tests ../packages/strategy_runtime/src
+          .venv/bin/python -m ruff format --check ../experiments/experiment_lab/src ../experiments/experiment_lab/tests ../packages/strategy_runtime/src
+          PYTHONPATH=../experiments/experiment_lab/src .venv/bin/python -m mypy --config-file ../experiments/experiment_lab/mypy.ini ../experiments/experiment_lab/src/experiment_lab
+      - name: Experiment Lab standalone locked environment
+        working-directory: experiments/experiment_lab
+        run: uv run --frozen --python 3.11 --with pytest==9.1.1 python -m pytest -q tests
 
   frontend:
     runs-on: ubuntu-latest
@@ -84,6 +99,8 @@ jobs:
         run: npm audit --audit-level=high
       - name: Lint + typecheck
         run: npm run lint
+      - name: Unit tests
+        run: npm test
       - name: Build
         run: npm run build
 
@@ -106,13 +123,22 @@ jobs:
       - name: Generate local secrets
         run: |
           cp deploy/.env.example deploy/.env
-          MK=$(openssl rand -base64 32)
-          JWT=$(openssl rand -base64 32)
-          PW=$(openssl rand -hex 16)
-          sed -i "s|change-me-strong|$PW|g" deploy/.env
-          sed -i "s|REPLACE_WITH_openssl_rand_base64_32|$MK|" deploy/.env
-          # second REPLACE (jwt) — replace remaining occurrence
-          sed -i "0,/$MK/! s|REPLACE_WITH_openssl_rand_base64_32|$JWT|" deploy/.env
+          python3 - <<'PYTHON'
+          from pathlib import Path
+          import base64
+          import secrets
+          path = Path("deploy/.env")
+          values = {
+              "CP_MASTER_KEY": base64.b64encode(secrets.token_bytes(32)).decode(),
+              "CP_JWT_SECRET": base64.b64encode(secrets.token_bytes(32)).decode(),
+          }
+          password = secrets.token_hex(16)
+          lines = path.read_text().replace("change-me-strong", password).splitlines()
+          path.write_text("\n".join(
+              f"{line.split('=', 1)[0]}={values[line.split('=', 1)[0]]}"
+              if line.split('=', 1)[0] in values else line for line in lines
+          ) + "\n")
+          PYTHON
           sed -i 's|CP_ENVIRONMENT=development|CP_ENVIRONMENT=test|' deploy/.env
           sed -i 's|CP_OTP_TEST_MODE=false|CP_OTP_TEST_MODE=true|' deploy/.env
           sed -i 's|CP_OTP_TEST_DISABLE_THROTTLE=false|CP_OTP_TEST_DISABLE_THROTTLE=true|' deploy/.env

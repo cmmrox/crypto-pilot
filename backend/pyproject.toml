@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "CryptoPilot automated BTCUSDT trading backend (FastAPI + PostgreSQL)"
 requires-python = ">=3.11"
 dependencies = [
+    "cryptopilot-strategy-runtime==1.0.0",
     "fastapi==0.139.2",
     "uvicorn[standard]==0.34.0",
     "pydantic[email]==2.12.5",
@@ -14,7 +15,7 @@ dependencies = [
     "structlog==25.1.0",
     "argon2-cffi==23.1.0",
     "pyjwt==2.13.0",
-    "cryptography==49.0.0",
+    "cryptography==50.0.1",
     "httpx==0.28.1",
     "websockets==14.2",
     "python-multipart==0.0.32",
@@ -44,6 +45,9 @@ dev = [
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.uv.sources]
+cryptopilot-strategy-runtime = { path = "../packages/strategy_runtime", editable = true }
 
 [tool.hatch.build.targets.wheel]
 packages = ["app"]
@@ -89,7 +93,7 @@ markers = [
 exclude_lines = ["pragma: no cover", "if TYPE_CHECKING:", "raise NotImplementedError"]
 
 [tool.importlinter]
-root_package = "app"
+root_packages = ["app", "strategy_runtime"]
 include_external_packages = true
 
 [[tool.importlinter.contracts]]
@@ -117,3 +121,16 @@ forbidden_modules = [
     "app.risk",
     "app.bot",
 ]
+
+
+[[tool.importlinter.contracts]]
+name = "Shared strategy runtime has no application or network dependencies"
+type = "forbidden"
+source_modules = ["strategy_runtime"]
+forbidden_modules = ["app", "httpx", "sqlalchemy", "subprocess"]
+
+[[tool.importlinter.contracts]]
+name = "Lab advisor cannot reach trading state or database credentials"
+type = "forbidden"
+source_modules = ["app.experiment_lab"]
+forbidden_modules = ["app.db", "app.bot", "app.execution", "app.risk", "app.api"]

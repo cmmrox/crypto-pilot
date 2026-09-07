@@ -10,3 +10,7 @@ workflow, testing, and review gates for this real-money trading system. Do not d
 those rules here. If the skill and a project document differ, treat
 `docs/BUSINESS_SOLUTION_v2.pdf` plus the approved deviations in
 `docs/architecture/ARCHITECTURE.md §8` as authoritative.
+
+Project-specific skills and their references must remain inside this repository.
+Both tools share the setup defined in `docs/guidelines/AGENT_SETUP.md`; strategy
+names follow `docs/strategies/NAMING.md`.

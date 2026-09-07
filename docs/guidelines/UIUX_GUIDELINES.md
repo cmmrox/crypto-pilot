@@ -28,7 +28,10 @@ surfaces stay coherent.
    educational layer; the owner should never wonder *why* the bot did something.
 4. **Honest risk framing.** Performance claims always carry the caveat (fees included,
    past ≠ future). Never invent precision the data doesn't have.
-5. **Environment always visible.** The DEMO/LIVE badge stays in the header on every
+5. **Environment always visible.** Header and Settings share the server-confirmed
+   trading account status. Loading or failed reads must never assume DEMO; show
+   Checking/Unavailable and disable environment switching until verified.
+   The DEMO/LIVE badge stays in the header on every
    screen; LIVE gets the danger treatment everywhere it appears.
 
 ## Interaction patterns

@@ -151,6 +151,7 @@ class OverviewSnapshot:
     environment: str
     bot_status: str
     strategy: str
+    strategy_display_name: str
     exchange_reachable: bool
     account_available: bool
     balance: str
@@ -216,6 +217,7 @@ async def build_overview(session: AsyncSession) -> OverviewSnapshot:
         environment=environment,
         bot_status=bot.status.value,
         strategy=strategy,
+        strategy_display_name=strategy_plugin.manifest.display_name,
         exchange_reachable=market.reachable,
         account_available=account.available,
         balance=_decimal(account.balance),

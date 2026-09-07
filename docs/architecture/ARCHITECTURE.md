@@ -67,6 +67,12 @@ fallback), both pinned to the validated parameter sets. **Parity is law:** the
 production `trend_rider_v6_4h` must reproduce `research/backtests/final_composite.py`
 decisions bar-for-bar over the full 3-year history (CI-enforced, Stage 3).
 
+The separately selectable `trend_rider_refined_v1_4h` release reuses the same pure
+shared runtime, with a pinned 4.5 ATR long trail (original: 4 ATR). It is not a
+replacement default or an editable Lab candidate. Its manifest owns its identity,
+parameters and risk warnings; catalog, settings, scheduler and execution remain
+strategy-agnostic. Software parity is not profitability or live-fill certification.
+
 ## 4. Runtime model
 
 - **One process, three concerns:** FastAPI (uvicorn) serves REST/WS; the bot loop and
@@ -159,3 +165,61 @@ unless hotfix-critical. Health endpoint + dead-man cron.
    Stage 12, and authorized minimum-size real LIVE order-lifecycle checks before VPS
    deployment. Reports must preserve the distinction between owner waiver and four
    weeks of observed evidence.
+10. **Owner-approved isolated Experiment Lab.** Editable strategy parameters and
+    1h/30m research windows are permitted only in the separate Lab service, following
+    the approved Strategy Optimization Pipeline Implementation Plan. Production
+    parameters remain immutable and production decisions remain closed-4h only.
+    The application owns a separate bounded parameter-advisor process; the Lab owns
+    durable experiments, leases, Binance datasets, replay and research evidence.
+    This is distinct from the informational news agent. Declarative candidate export
+    grants no activation authority; production handoff still requires parity,
+    independent validation and explicit operator approval. See
+    `experiments/experiment_lab/README.md` and the implementation QA report.
+11. **Owner-requested refined 4h release, 2026-09-06.** The owner requested adding
+    the researched 4.5 ATR trailing-stop variant to Settings for later manual
+    selection/activation. All other v6 parameters, the stop-free short sleeve and
+    stopped/flat/reconciliation gates remain unchanged. No default migration or
+    automatic LIVE activation is authorized by this implementation. The independent
+    release evidence is `docs/qa/reports/REFINED-4H-RELEASE-2026-09-06.md`.
+
+
+### Experiment Lab implementation boundaries (2026-09-07)
+
+The owner UI under `frontend/src/features/experiment-lab/` calls the authenticated,
+allowlisted `backend/app/api/experiment_lab.py` gateway. `NewStudyForm` owns new-study
+drafts independently of saved-study manual iteration controls. The gateway preserves
+HTTP statuses and pagination; internal job endpoints are never forwarded.
+
+`experiments/experiment_lab/src/experiment_lab/domain/` owns validation and research
+contracts. `application/` coordinates workflow through repository/artifact ports;
+`adapters/` implement SQLite leases, immutable files, public market ingestion and
+replay. The API alone updates workflow metadata. Workers publish content-addressed
+results and return fenced job results. The separately launched application advisor
+has no imports from trading, risk or database modules.
+
+`packages/strategy_runtime/` owns shared pure strategy math. Production plugin
+wrappers retain release identity and validated defaults; research parameters cannot
+mutate a running bot. Import-linter enforces purity and advisor/news isolation.
+`backend/app/telemetry/` records allowlisted decisions in the existing transaction
+and exports committed observations; Lab availability is not a trading dependency.
+
+SQLite schema 3 adds pending-job, lesson, strategy and study-pagination indexes.
+History pages bound decoded payloads; exact Decimal best-profit lookup streams
+scalar values and still has linear scan cost. The private Compose network exposes
+no Lab host ports; runner/advisor have a separate egress network, read-only roots,
+PID/memory/CPU limits and scoped tokens. Production operations and unresolved
+release gates are recorded in the September 7 QA report.
+
+
+### Account labels and strategy names (2026-09-07)
+
+The authenticated frontend owns a session-scoped `TradingStatusProvider`, which
+reads `/api/bot/status` on mount, every ten seconds and on window focus. Header and
+Settings consume the same confirmed snapshot; switching refreshes that shared
+snapshot only after the server accepts the change. Failed or unknown environment
+reads show Unavailable, never DEMO. Late responses are fenced after a newer request
+or session teardown. Trading state is never changed by this display provider.
+
+The overview API exposes `strategy_display_name` alongside its stable `strategy`
+ID. Human-facing strategy names come from manifests and follow
+`docs/strategies/NAMING.md`; IDs, releases and trading math are unchanged by labels.

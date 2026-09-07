@@ -1,4 +1,8 @@
 # CryptoPilot backend — FastAPI + bot + scheduler.
+FROM python:3.11-slim AS runtime-builder
+COPY packages/strategy_runtime /runtime
+RUN pip install --upgrade pip==26.2 && pip wheel --no-deps --wheel-dir /wheels /runtime
+
 FROM python:3.11-slim AS base
 
 ENV PYTHONUNBUFFERED=1 \
@@ -16,12 +20,14 @@ WORKDIR /app
 
 # Install the hash-locked production graph first for reproducible, auditable
 # images. requirements.lock is generated from uv.lock and excludes dev tools.
-COPY requirements.lock ./
-RUN pip install --require-hashes --no-deps -r requirements.lock
+COPY backend/requirements.lock ./
+RUN pip install --upgrade pip==26.2 && pip install --require-hashes --no-deps -r requirements.lock
+COPY --from=runtime-builder /wheels /wheels
+RUN pip install --no-deps /wheels/*.whl
 
 # Application code
-COPY alembic.ini ./
-COPY app ./app
+COPY backend/alembic.ini ./
+COPY backend/app ./app
 
 # Entrypoint: fix CODEX_HOME volume ownership (as root), then run as app.
 COPY <<'EOF' /app/entrypoint.sh

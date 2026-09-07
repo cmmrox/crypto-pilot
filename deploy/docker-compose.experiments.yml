@@ -1,0 +1,92 @@
+# Opt-in overlay: docker compose -f docker-compose.yml -f docker-compose.experiments.yml up -d
+# No exchange, PostgreSQL, JWT or master-key secrets enter lab/advisor containers.
+services:
+  frontend:
+    build:
+      args:
+        VITE_EXPERIMENT_LAB_ENABLED: "true"
+  backend:
+    networks: [default, database, lab-private]
+    environment:
+      CP_LAB_URL: http://experiment-lab:8010
+      CP_LAB_SERVICE_TOKEN: ${CP_LAB_SERVICE_TOKEN:?Set a dedicated random Lab service token}
+  experiment-lab:
+    build:
+      context: ..
+      dockerfile: experiments/experiment_lab/Dockerfile
+    restart: unless-stopped
+    environment:
+      LAB_DATA_DIR: /data
+      LAB_SERVICE_TOKEN: ${CP_LAB_SERVICE_TOKEN:?Set a dedicated random Lab service token}
+      LAB_RUNNER_TOKEN: ${CP_LAB_RUNNER_TOKEN:?Set a separate runner token}
+      LAB_ADVISOR_TOKEN: ${CP_LAB_ADVISOR_TOKEN:?Set a separate advisor token}
+    volumes:
+      - experiment_data:/data
+    mem_limit: 1g
+    cpus: 0.5
+    pids_limit: 128
+    read_only: true
+    tmpfs: [/tmp:size=128m,mode=1777]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    networks: [lab-private]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os,urllib.request; r=urllib.request.Request('http://localhost:8010/health',headers={'Authorization':'Bearer '+os.environ['LAB_SERVICE_TOKEN']}); urllib.request.urlopen(r,timeout=5)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+  experiment-runner:
+    build:
+      context: ..
+      dockerfile: experiments/experiment_lab/Dockerfile
+    depends_on:
+      experiment-lab:
+        condition: service_healthy
+    command: ["python", "-m", "experiment_lab.worker"]
+    restart: unless-stopped
+    environment:
+      LAB_DATA_DIR: /data
+      LAB_SERVICE_TOKEN: ${CP_LAB_RUNNER_TOKEN:?Set a separate runner token}
+    volumes:
+      - experiment_data:/data
+    mem_limit: 2g
+    cpus: 1
+    pids_limit: 128
+    read_only: true
+    tmpfs: [/tmp:size=128m,mode=1777]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    networks: [lab-private, lab-egress]
+  experiment-advisor:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    depends_on:
+      experiment-lab:
+        condition: service_healthy
+    command: ["python", "-m", "app.experiment_lab.advisor"]
+    user: app
+    restart: unless-stopped
+    environment:
+      CP_LAB_URL: http://experiment-lab:8010
+      CP_LAB_SERVICE_TOKEN: ${CP_LAB_ADVISOR_TOKEN:?Set a separate advisor token}
+      CP_LAB_ADVISOR_MODEL: ${CP_LAB_ADVISOR_MODEL:-gpt-5.5}
+      CP_CODEX_HOME: /data/codex
+    volumes:
+      - codex_data:/data/codex
+    mem_limit: 768m
+    cpus: 0.5
+    pids_limit: 128
+    read_only: true
+    tmpfs: [/tmp:size=128m,mode=1777]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    networks: [lab-private, lab-egress]
+
+volumes:
+  experiment_data:
+
+networks:
+  lab-private:
+    internal: true
+  lab-egress:

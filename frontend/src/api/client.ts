@@ -402,6 +402,7 @@ export interface BriefingSnapshot {
 }
 
 export interface Overview {
+  strategy_display_name: string;
   checked_at: string;
   fresh_for_seconds: number;
   environment: string;

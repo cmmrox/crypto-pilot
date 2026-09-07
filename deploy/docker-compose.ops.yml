@@ -3,8 +3,8 @@ name: cryptopilot
 services:
   deadman:
     build:
-      context: ../backend
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: backend/Dockerfile
     restart: always
     command: ["python", "-m", "app.bot.deadman_monitor"]
     environment:

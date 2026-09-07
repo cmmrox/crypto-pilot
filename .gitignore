@@ -81,3 +81,5 @@ Thumbs.db
 # Local tooling caches / scratch
 tmp/
 output/
+.lab-data/
+var/experiment-lab/

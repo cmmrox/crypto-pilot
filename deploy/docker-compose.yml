@@ -3,8 +3,8 @@ name: cryptopilot
 services:
   backend:
     build:
-      context: ../backend
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: backend/Dockerfile
     restart: unless-stopped
     # Connects to an EXISTING shared Postgres reachable on the `database`
     # network as ${CP_DB_HOST}. There is no postgres service here anymore —
@@ -22,6 +22,8 @@ services:
       CP_LIVE_TRADING_APPROVED: ${CP_LIVE_TRADING_APPROVED:-false}
       CP_LIVE_KEY_PERMISSIONS_VERIFIED: ${CP_LIVE_KEY_PERMISSIONS_VERIFIED:-false}
       CP_CODEX_HOME: /data/codex
+      CP_LAB_URL: ${CP_LAB_URL:-}
+      CP_LAB_SERVICE_TOKEN: ${CP_LAB_SERVICE_TOKEN:-}
     volumes:
       - codex_data:/data/codex
     healthcheck:

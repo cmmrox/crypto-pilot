@@ -24,7 +24,7 @@ class ExampleStrategy:
     manifest = StrategyManifest(
         contract_version=2,
         strategy_id="example_strategy_v1_4h",
-        display_name="Example Strategy v1 · 4h",
+        display_name="Example 1 · 4h",  # Follow docs/strategies/NAMING.md.
         release="1.0",
         packaged_default=False,
         direction="LONG ONLY",

@@ -56,6 +56,8 @@ the repository's `docs/` directory as the authoritative knowledge base.
 | Architecture, lifecycle, boundaries | `docs/architecture/ARCHITECTURE.md` |
 | Database, SQLAlchemy, Alembic | `docs/architecture/DATABASE_ARCHITECTURE.md` |
 | Binance, notify.lk, Codex news, RSS | `docs/architecture/INTEGRATIONS.md` |
+| Strategy creation, release names or display labels | `docs/strategies/CREATING_A_STRATEGY.md` and `docs/strategies/NAMING.md` |
+| Codex/Claude instructions or skill structure | `docs/guidelines/AGENT_SETUP.md` |
 | Backend | `docs/guidelines/BACKEND_GUIDELINES.md` |
 | Frontend | `docs/guidelines/FRONTEND_GUIDELINES.md` and `docs/guidelines/UIUX_GUIDELINES.md` |
 | Tests | `docs/guidelines/TESTING_GUIDELINES.md` |
@@ -129,6 +131,11 @@ This file is the single skill source for both tools:
   directory.
 - Codex loads `AGENTS.md`; Claude Code loads `CLAUDE.md`, a relative symlink to the
   same bootstrap file.
+
+Keep all project-specific code, skills, scripts and maintained references inside this
+repository. Do not create external personal copies of project instructions. See
+`docs/guidelines/AGENT_SETUP.md` for ownership and containment rules. Strategy naming
+is defined once in `docs/strategies/NAMING.md`; both tools must follow it.
 
 Edit this file only once when changing the workflow. Put durable product or engineering
 truth in the appropriate `docs/` file and keep this skill as a concise router. Do not

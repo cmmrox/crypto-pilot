@@ -83,6 +83,12 @@ async def verify_live_readiness(
         await client.signed_request("GET", "/fapi/v1/openOrders"),
         endpoint="openOrders",
     )
+    # Conditional stops are held separately by Binance; a flat account may still
+    # have a pending entry or stop on any symbol.
+    algo_orders = _as_list(
+        await client.signed_request("GET", "/fapi/v1/openAlgoOrders"),
+        endpoint="openAlgoOrders",
+    )
     if not isinstance(permissions, dict):
         raise BinanceError("unexpected response from apiRestrictions")
     if not isinstance(position_mode, dict) or not isinstance(multi_assets, dict):
@@ -101,7 +107,7 @@ async def verify_live_readiness(
     one_way_mode = position_mode.get("dualSidePosition") is False
     single_asset_mode = multi_assets.get("multiAssetsMargin") is False
     open_position_count = _nonzero_position_count(positions)
-    open_order_count = len(open_orders)
+    open_order_count = len(open_orders) + len(algo_orders)
 
     btcusdt = next((row for row in positions if row.get("symbol") == "BTCUSDT"), None)
     margin_type = str(btcusdt.get("marginType")) if btcusdt is not None else None

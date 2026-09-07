@@ -13,6 +13,7 @@ from app.api import (
     auth,
     bot,
     events,
+    experiment_lab,
     health,
     market,
     monthly,
@@ -25,6 +26,7 @@ from app.api import (
 )
 from app.core.config import get_settings
 from app.core.logging import configure_logging, get_logger
+from app.telemetry.api import router as observations_router
 
 
 @asynccontextmanager
@@ -90,6 +92,8 @@ def create_app() -> FastAPI:
     app.include_router(health.router)
     app.include_router(auth.router)
     app.include_router(events.router)
+    app.include_router(observations_router)
+    app.include_router(experiment_lab.router)
     app.include_router(market.router)
     app.include_router(settings_api.router)
     app.include_router(strategies_api.router)

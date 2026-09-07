@@ -17,7 +17,6 @@ import {
   ApiError,
   codexLogout,
   confirmSecurityChange,
-  getBotStatus,
   getCodexLoginStatus,
   getCodexStatus,
   getCredentialStatus,
@@ -44,6 +43,8 @@ import { ConfirmModal, type ModalSpec } from "../components/ConfirmModal";
 import { Activity, Database, RadioTower, RefreshCw, Server, Wifi } from "lucide-react";
 import { getDeepHealth, type DeepHealth } from "../api/client";
 import { LoadingState, Spinner } from "../components/AsyncState";
+
+import { useTradingStatus } from "../trading/TradingStatus";
 
 /** Stage 2 Settings: Binance API credentials (write-only) + connection test. */
 export function Settings() {
@@ -434,30 +435,14 @@ function OperationsCard() {
 }
 
 function EnvironmentCard() {
-  const [env, setEnv] = useState<string>("DEMO");
-  const [botRunning, setBotRunning] = useState(false);
+  const { status, loading, refresh } = useTradingStatus();
+  const env = status?.environment;
+  const botRunning = status?.status !== "stopped";
   const [modal, setModal] = useState<ModalSpec | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  const refresh = async () => {
-    setLoading(true);
-    try {
-      const s = await getBotStatus();
-      setEnv(s.environment);
-      setBotRunning(s.status !== "stopped");
-    } catch {
-      setMsg("Could not load the active environment.");
-    } finally {
-      setLoading(false);
-    }
-  };
-  useEffect(() => {
-    void refresh();
-  }, []);
 
   const request = (target: string) => {
-    if (target === env) return;
+    if (!status || target === env) return;
     if (botRunning) {
       setModal({
         tone: "warning",
@@ -497,8 +482,8 @@ function EnvironmentCard() {
           <h2>Environment</h2>
           <p>DEMO and LIVE share one code path with separate write-only credentials.</p>
         </div>
-        <span className={`pill ${env === "LIVE" ? "warn" : "ok"}`} data-testid="active-env">
-          {loading ? <><Spinner size={12} /> Checking…</> : `${env} active`}
+        <span className={`pill ${env === "LIVE" ? "danger" : env === "DEMO" ? "ok" : ""}`} data-testid="active-env">
+          {loading ? <><Spinner size={12} /> Checking…</> : env ? `${env} active` : "Unavailable"}
         </span>
       </div>
       <div className="env-options">
@@ -506,7 +491,7 @@ function EnvironmentCard() {
           className={env === "DEMO" ? "active" : ""}
           data-testid="env-demo"
           onClick={() => request("DEMO")}
-          disabled={loading}
+          disabled={loading || !status}
         >
           <strong>DEMO / Testnet</strong>
           <small>Fake funds · safe testing</small>
@@ -515,7 +500,7 @@ function EnvironmentCard() {
           className={`live ${env === "LIVE" ? "active" : ""}`}
           data-testid="env-live"
           onClick={() => request("LIVE")}
-          disabled={loading}
+          disabled={loading || !status}
         >
           <strong>LIVE trading</strong>
           <small>Real funds · production</small>
@@ -534,13 +519,16 @@ function EnvironmentCard() {
 function StrategyLibrary() {
   const [strategies, setStrategies] = useState<StrategyInfo[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [modal, setModal] = useState<ModalSpec | null>(null);
   const load = async () => {
     setLoading(true);
+    setError(null);
     try {
       setStrategies(await getStrategies());
     } catch {
       setStrategies([]);
+      setError("Strategy releases could not be loaded. Retry to confirm the current active release.");
     } finally {
       setLoading(false);
     }
@@ -548,15 +536,16 @@ function StrategyLibrary() {
   useEffect(() => {
     void load();
   }, []);
-  const selectStrategy = (name: string) =>
+  const selectStrategy = (strategy: StrategyInfo) =>
     setModal({
       tone: "warning",
       kicker: "VALIDATED RELEASE CHANGE",
-      title: `Select ${name}?`,
-      body: "Audit-logged; applies at the next reconciled start. The bot must be stopped.",
+      title: `Select ${strategy.display_name}?`,
+      body: "Audit-logged; requires a stopped bot and no open position. Applies at the next reconciled start; does not start trading or change DEMO/LIVE mode.",
+      details: [strategy.summary, ...strategy.caveats],
       confirmLabel: "Select release",
       onConfirm: async () => {
-        await switchStrategy(name);
+        await switchStrategy(strategy.name);
         await load();
         window.dispatchEvent(new Event("strategy-changed"));
       },
@@ -574,6 +563,7 @@ function StrategyLibrary() {
         </div>
       </div>
       <div className="strategy-list">
+        {error && <div role="alert"><p>{error}</p><button className="button ghost" onClick={() => void load()}>Retry</button></div>}
         {loading && strategies.length === 0 && (
           <LoadingState compact title="Loading strategy releases…" detail="Reading the deployed, parity-validated plugin manifest." />
         )}
@@ -603,6 +593,12 @@ function StrategyLibrary() {
               <ul>{s.risk_controls.map((item) => <li key={item}>{item}</li>)}</ul>
               <h4>Caveats</h4>
               <ul>{s.caveats.map((item) => <li key={item}>{item}</li>)}</ul>
+              <h4>Read-only release parameters</h4>
+              <ul data-testid={`parameters-${s.name}`}>
+                {Object.entries(s.params).map(([key, value]) => (
+                  <li key={key}>{key.replaceAll("_", " ")}: <strong>{value}</strong></li>
+                ))}
+              </ul>
               <small>
                 Warm-up {s.warmup_bars} bars · history {s.history_bars} bars ·
                 validation: {s.validation_method}
@@ -621,7 +617,7 @@ function StrategyLibrary() {
                 <button
                   className="button ghost small"
                   data-testid={`select-${s.name}`}
-                  onClick={() => selectStrategy(s.name)}
+                  onClick={() => selectStrategy(s)}
                 >
                   Select
                 </button>

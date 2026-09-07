@@ -4,6 +4,19 @@ CryptoPilot uses a versioned, fail-closed strategy plugin contract. Adding a
 validated strategy should require a new plugin, tests, and evidence—not edits to
 the scheduler, bot, market API, risk policy wiring, settings UI, or trade filter.
 
+For parameter-only releases, reuse a pure shared strategy implementation and pin
+the constructor parameters. Give the variant its own ID/release, no inherited
+legacy aliases and `packaged_default=False`. Do not mutate the original registered
+instance. `trend_rider_refined_v1_4h.py` is an example. Shared decision code lives in
+`packages/strategy_runtime`; the backend module only registers the release.
+
+Replay and live execution must use the same exchange-filter policy for quantity
+and protective-price rounding. The refined-release QA harness checks every public
+closed-candle decision against the prepared replay path and compares complete
+equity/trade histories. Its dataset hashes and source hashes are retained alongside
+the result. This checks software equivalence under fixed inputs, not identical
+exchange fills or forward profitability.
+
 ## Naming
 
 The module filename and `manifest.strategy_id` must be identical and include the
@@ -15,8 +28,9 @@ trend_rider_v6_4h.py
 ```
 
 Use lowercase letters, numbers, and underscores. The final suffix must match
-`manifest.market.interval`. The owner-facing `display_name` should also show the
-timeframe, for example `Trend Rider v6 · 4h`.
+`manifest.market.interval`. The owner-facing `display_name` follows
+[NAMING.md](NAMING.md), for example `Atlas 6 Trail · 4h`. Machine IDs remain stable
+when product labels change.
 
 ## Add a plugin
 

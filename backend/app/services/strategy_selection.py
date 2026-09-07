@@ -10,7 +10,7 @@ from app.bot.state import BotStatus
 from app.db.models import Trade
 from app.services.events import record_event
 from app.services.settings_store import get_settings_row
-from app.strategies import canonical_strategy_id
+from app.strategies import get_strategy
 
 
 class StrategySelectionBlockedError(RuntimeError):
@@ -40,10 +40,12 @@ async def select_active_strategy(
         raise StrategySelectionBlockedError("Close the active position before changing strategy.")
 
     try:
-        selected = canonical_strategy_id(requested_name)
+        strategy = get_strategy(requested_name)
     except KeyError as exc:
         raise UnknownStrategyError("unknown strategy") from exc
 
+    manifest = strategy.manifest
+    selected = manifest.strategy_id
     previous = row.active_strategy
     row.active_strategy = selected
     await record_event(
@@ -52,7 +54,15 @@ async def select_active_strategy(
         category="strategy",
         message=f"Active strategy switched {previous} → {selected}",
         ref="strategy_switch",
-        payload={"from": previous, "to": selected, "by": actor_email},
+        payload={
+            "from": previous,
+            "to": selected,
+            "by": actor_email,
+            "release": manifest.release,
+            "symbol": manifest.market.symbol,
+            "interval": manifest.market.interval,
+            "parameters": dict(strategy.params),
+        },
     )
     await session.commit()
     return selected

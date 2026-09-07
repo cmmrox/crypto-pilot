@@ -181,11 +181,12 @@ export function Overview() {
             <button
               className="button secondary"
               data-testid="start-btn"
+              disabled={!data || Boolean(pollError) || responseStale}
               onClick={() =>
                 setModal({
                   tone: "warning",
                   kicker: "RECONCILE & START",
-                  title: `Start on ${data?.environment ?? "DEMO"}?`,
+                  title: `Start on ${data?.environment ?? "Unavailable"}?`,
                   body: "CryptoPilot connects to Binance, reconciles account truth, then begins the 24/7 loop.",
                   details: ["No action before reconciliation", "Mismatch → safe mode", "Decisions only at 4h close"],
                   confirmLabel: "Reconcile & start",
@@ -416,7 +417,7 @@ export function Overview() {
               <div className="card-head">
                 <div>
                   <p className="kicker">WHAT THE STRATEGY IS WATCHING</p>
-                  <h2>{data.strategy} · closed 4h state</h2>
+                  <h2>{data.strategy_display_name} · closed-candle state</h2>
                 </div>
                 <span className="source-badge neutral">{watchRules.filter((rule) => rule.active).length} active</span>
               </div>

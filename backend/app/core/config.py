@@ -66,6 +66,10 @@ class Settings(BaseSettings):
     codex_home: str = "/data/codex"  # persisted auth dir (CODEX_HOME)
     news_model: str = "gpt-5.5"
 
+    # Optional isolated research service. Disabled until explicitly configured.
+    lab_url: str = ""
+    lab_service_token: str = ""
+
     # --- Logging ---
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     log_json: bool = True

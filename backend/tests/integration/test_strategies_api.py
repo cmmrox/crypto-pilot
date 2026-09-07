@@ -31,7 +31,19 @@ async def test_strategy_library_lists_both_with_parity(
     assert v6["active"] is True  # default active strategy
     assert by_name["trend_rider_v52_4h"]["direction"] == "LONG ONLY"
     assert v6["interval"] == "4h"
-    assert v6["display_name"] == "Trend Rider v6 · 4h"
+    assert v6["display_name"] == "Atlas 6 · 4h"
     assert v6["summary"]
     assert v6["risk_controls"]
     assert v6["params"]["stop_atr"] == 2.5
+
+
+async def test_strategy_names_are_distinct_and_ids_remain_compatible(app_client, owner):
+    headers = await auth_headers(app_client)
+    response = await app_client.get("/api/strategies", headers=headers)
+    assert response.status_code == 200
+    names = {row["name"]: row["display_name"] for row in response.json()}
+    assert names == {
+        "trend_rider_v52_4h": "Atlas 5.2 · 4h",
+        "trend_rider_v6_4h": "Atlas 6 · 4h",
+        "trend_rider_refined_v1_4h": "Atlas 6 Trail · 4h",
+    }

@@ -55,6 +55,11 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--reuse-data", action="store_true")
     run.add_argument("--no-funding", action="store_true")
     run.add_argument(
+        "--no-monthly-breakers",
+        action="store_true",
+        help="disable both independent monthly breakers for a controlled comparison",
+    )
+    run.add_argument(
         "--filters-path",
         type=Path,
         help="override the exchange-filter snapshot (for example current DEMO filters)",
@@ -215,6 +220,7 @@ def _run(args: argparse.Namespace) -> int:
     config = ReplayConfig(
         initial_capital=args.initial_capital,
         funding_enabled=not args.no_funding,
+        monthly_breakers_enabled=not args.no_monthly_breakers,
     )
     result = run_replay(
         candles,

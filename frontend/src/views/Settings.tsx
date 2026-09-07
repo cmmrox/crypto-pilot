@@ -17,7 +17,6 @@ import {
   ApiError,
   codexLogout,
   confirmSecurityChange,
-  getBotStatus,
   getCodexLoginStatus,
   getCodexStatus,
   getCredentialStatus,
@@ -44,6 +43,8 @@ import { ConfirmModal, type ModalSpec } from "../components/ConfirmModal";
 import { Activity, Database, RadioTower, RefreshCw, Server, Wifi } from "lucide-react";
 import { getDeepHealth, type DeepHealth } from "../api/client";
 import { LoadingState, Spinner } from "../components/AsyncState";
+
+import { useTradingStatus } from "../trading/TradingStatus";
 
 /** Stage 2 Settings: Binance API credentials (write-only) + connection test. */
 export function Settings() {
@@ -434,30 +435,14 @@ function OperationsCard() {
 }
 
 function EnvironmentCard() {
-  const [env, setEnv] = useState<string>("DEMO");
-  const [botRunning, setBotRunning] = useState(false);
+  const { status, loading, refresh } = useTradingStatus();
+  const env = status?.environment;
+  const botRunning = status?.status !== "stopped";
   const [modal, setModal] = useState<ModalSpec | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  const refresh = async () => {
-    setLoading(true);
-    try {
-      const s = await getBotStatus();
-      setEnv(s.environment);
-      setBotRunning(s.status !== "stopped");
-    } catch {
-      setMsg("Could not load the active environment.");
-    } finally {
-      setLoading(false);
-    }
-  };
-  useEffect(() => {
-    void refresh();
-  }, []);
 
   const request = (target: string) => {
-    if (target === env) return;
+    if (!status || target === env) return;
     if (botRunning) {
       setModal({
         tone: "warning",
@@ -497,8 +482,8 @@ function EnvironmentCard() {
           <h2>Environment</h2>
           <p>DEMO and LIVE share one code path with separate write-only credentials.</p>
         </div>
-        <span className={`pill ${env === "LIVE" ? "warn" : "ok"}`} data-testid="active-env">
-          {loading ? <><Spinner size={12} /> Checking…</> : `${env} active`}
+        <span className={`pill ${env === "LIVE" ? "danger" : env === "DEMO" ? "ok" : ""}`} data-testid="active-env">
+          {loading ? <><Spinner size={12} /> Checking…</> : env ? `${env} active` : "Unavailable"}
         </span>
       </div>
       <div className="env-options">
@@ -506,7 +491,7 @@ function EnvironmentCard() {
           className={env === "DEMO" ? "active" : ""}
           data-testid="env-demo"
           onClick={() => request("DEMO")}
-          disabled={loading}
+          disabled={loading || !status}
         >
           <strong>DEMO / Testnet</strong>
           <small>Fake funds · safe testing</small>
@@ -515,7 +500,7 @@ function EnvironmentCard() {
           className={`live ${env === "LIVE" ? "active" : ""}`}
           data-testid="env-live"
           onClick={() => request("LIVE")}
-          disabled={loading}
+          disabled={loading || !status}
         >
           <strong>LIVE trading</strong>
           <small>Real funds · production</small>

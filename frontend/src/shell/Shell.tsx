@@ -19,6 +19,8 @@ import { PlaceholderView } from "./PlaceholderView";
 import { getStrategies, type StrategyInfo } from "../api/client";
 import { LoadingState, Spinner } from "../components/AsyncState";
 
+import { useTradingStatus } from "../trading/TradingStatus";
+
 const Events = lazy(() => import("../views/Events").then((module) => ({ default: module.Events })));
 const LAB_ENABLED = import.meta.env.VITE_EXPERIMENT_LAB_ENABLED === "true";
 const ExperimentLab = LAB_ENABLED
@@ -51,6 +53,7 @@ const NAV = [
 ];
 
 export function Shell() {
+  const { status: trading, loading: tradingLoading } = useTradingStatus();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [activeStrategy, setActiveStrategy] = useState<StrategyInfo | null>(null);
   const user = useAuth((s) => s.user);
@@ -147,9 +150,21 @@ export function Shell() {
           >
             <Menu size={19} />
           </button>
-          <div className="environment-badge" data-testid="environment-badge">
-            <strong>DEMO</strong>
-            <span>Testnet funds</span>
+          <div
+            className={`environment-badge ${trading?.environment === "LIVE" ? "live" : ""}`}
+            data-testid="environment-badge"
+            role="status"
+          >
+            <strong>
+              {trading?.environment ?? (tradingLoading ? "Checking…" : "Unavailable")}
+            </strong>
+            <span>
+              {trading?.environment === "LIVE"
+                ? "Real funds"
+                : trading?.environment === "DEMO"
+                  ? "Testnet funds"
+                  : "Account not verified"}
+            </span>
           </div>
           <div className="topbar-actions">
             <div className="profile-chip" data-testid="owner-email">

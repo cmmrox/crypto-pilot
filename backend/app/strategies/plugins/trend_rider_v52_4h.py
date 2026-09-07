@@ -27,7 +27,7 @@ class TrendRiderV52(TrendRiderV6):
     manifest = replace(
         TrendRiderV6.manifest,
         strategy_id="trend_rider_v52_4h",
-        display_name="Trend Rider v5.2 · 4h",
+        display_name="Atlas 5.2 · 4h",
         release="5.2",
         packaged_default=False,
         direction="LONG ONLY",

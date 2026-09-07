@@ -209,3 +209,17 @@ scalar values and still has linear scan cost. The private Compose network expose
 no Lab host ports; runner/advisor have a separate egress network, read-only roots,
 PID/memory/CPU limits and scoped tokens. Production operations and unresolved
 release gates are recorded in the September 7 QA report.
+
+
+### Account labels and strategy names (2026-09-07)
+
+The authenticated frontend owns a session-scoped `TradingStatusProvider`, which
+reads `/api/bot/status` on mount, every ten seconds and on window focus. Header and
+Settings consume the same confirmed snapshot; switching refreshes that shared
+snapshot only after the server accepts the change. Failed or unknown environment
+reads show Unavailable, never DEMO. Late responses are fenced after a newer request
+or session teardown. Trading state is never changed by this display provider.
+
+The overview API exposes `strategy_display_name` alongside its stable `strategy`
+ID. Human-facing strategy names come from manifests and follow
+`docs/strategies/NAMING.md`; IDs, releases and trading math are unchanged by labels.

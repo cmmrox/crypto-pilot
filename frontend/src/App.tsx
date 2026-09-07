@@ -6,6 +6,8 @@ import { Shell } from "./shell/Shell";
 import { useAuth } from "./auth/store";
 import { Spinner } from "./components/AsyncState";
 
+import { TradingStatusProvider } from "./trading/TradingStatus";
+
 interface OtpFlow {
   token: string;
   phoneHint: string | null;
@@ -63,7 +65,9 @@ export function App() {
 
   return (
     <BrowserRouter>
-      <Shell />
+      <TradingStatusProvider>
+        <Shell />
+      </TradingStatusProvider>
     </BrowserRouter>
   );
 }

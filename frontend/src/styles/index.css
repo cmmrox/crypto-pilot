@@ -2454,3 +2454,9 @@ a {
     animation-iteration-count: 1 !important;
   }
 }
+
+.pill.danger {
+  color: var(--red);
+  border-color: rgb(255 92 92 / 45%);
+  background: rgb(255 92 92 / 10%);
+}

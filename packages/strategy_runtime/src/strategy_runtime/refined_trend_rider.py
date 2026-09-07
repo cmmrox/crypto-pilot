@@ -17,7 +17,7 @@ class RefinedTrendRider(TrendRider):
     manifest = replace(
         TrendRider.manifest,
         strategy_id="trend_rider_refined_v1_4h",
-        display_name="Refined live settings · 4h",
+        display_name="Atlas 6 Trail · 4h",
         release="1.0",
         packaged_default=False,
         legacy_ids=(),

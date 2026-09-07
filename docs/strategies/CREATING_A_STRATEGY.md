@@ -28,8 +28,9 @@ trend_rider_v6_4h.py
 ```
 
 Use lowercase letters, numbers, and underscores. The final suffix must match
-`manifest.market.interval`. The owner-facing `display_name` should also show the
-timeframe, for example `Trend Rider v6 · 4h`.
+`manifest.market.interval`. The owner-facing `display_name` follows
+[NAMING.md](NAMING.md), for example `Atlas 6 Trail · 4h`. Machine IDs remain stable
+when product labels change.
 
 ## Add a plugin
 

@@ -43,7 +43,7 @@ class TrendRider:
     manifest = StrategyManifest(
         contract_version=2,
         strategy_id="trend_rider_v6_4h",
-        display_name="Trend Rider v6 · 4h",
+        display_name="Atlas 6 · 4h",
         release="6.0",
         packaged_default=True,
         direction="LONG + SHORT",

@@ -30,6 +30,9 @@ fail() {
 
 required_paths=(
   docs/BUSINESS_SOLUTION_v2.pdf
+  docs/strategies/NAMING.md
+  docs/strategies/CREATING_A_STRATEGY.md
+  docs/guidelines/AGENT_SETUP.md
   docs/plan/IMPLEMENTATION_PLAN.md
   docs/architecture/ARCHITECTURE.md
   docs/architecture/DATABASE_ARCHITECTURE.md
@@ -46,6 +49,12 @@ required_paths=(
 
 for path in "${required_paths[@]}"; do
   [[ -e "$path" ]] || fail "referenced path is missing: $path"
+  [[ "$(realpath "$path")" == "$repo_root/"* ]] || fail "reference escapes repository: $path"
 done
+
+while IFS= read -r -d '' path; do
+  [[ "$(realpath "$path")" == "$repo_root/"* ]] ||
+    fail "agent file escapes repository: $path"
+done < <(find .agents .claude/skills -print0)
 
 printf 'agent setup valid: Claude Code and Codex share one bootstrap and one skill\n'

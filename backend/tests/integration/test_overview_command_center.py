@@ -87,6 +87,8 @@ async def test_overview_combines_market_watch_news_and_operations(
     response = await app_client.get("/api/overview", headers=headers)
     assert response.status_code == 200, response.text
     body = response.json()
+    assert body["strategy"] == "trend_rider_v6_4h"
+    assert body["strategy_display_name"] == "Atlas 6 · 4h"
 
     assert body["market"]["symbol"] == "BTCUSDT"
     assert body["market"]["interval"] == "4h"

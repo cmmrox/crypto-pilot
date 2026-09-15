@@ -681,8 +681,12 @@ class BotService:
             .all()
         )
         month = month_start.strftime("%Y-%m")
-        halted_long = await self._breaker_event_exists(session, book="LONG", month=month)
-        halted_short = await self._breaker_event_exists(session, book="SHORT", month=month)
+        halted_long = await self._breaker_event_exists(
+            session, book="LONG", month=month, environment=environment
+        )
+        halted_short = await self._breaker_event_exists(
+            session, book="SHORT", month=month, environment=environment
+        )
         if not snapshots:
             return MonthlyRiskState(
                 month=month,
@@ -722,10 +726,19 @@ class BotService:
             halted_short=halted_short,
         )
 
-    async def _breaker_event_exists(self, session: AsyncSession, *, book: str, month: str) -> bool:
+    async def _breaker_event_exists(
+        self, session: AsyncSession, *, book: str, month: str, environment: str
+    ) -> bool:
         return (
             await session.execute(
-                select(Event.id).where(Event.ref == f"breaker:{book}:{month}").limit(1)
+                select(Event.id)
+                .outerjoin(BotRun, BotRun.id == Event.payload_json["bot_run_id"].as_integer())
+                .where(
+                    Event.ref == f"breaker:{book}:{month}",
+                    # Older events without an attributable run remain fail-closed.
+                    (BotRun.environment == environment) | BotRun.id.is_(None),
+                )
+                .limit(1)
             )
         ).scalar_one_or_none() is not None
 

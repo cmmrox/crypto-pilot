@@ -223,3 +223,13 @@ or session teardown. Trading state is never changed by this display provider.
 The overview API exposes `strategy_display_name` alongside its stable `strategy`
 ID. Human-facing strategy names come from manifests and follow
 `docs/strategies/NAMING.md`; IDs, releases and trading math are unchanged by labels.
+
+### Strategy path and monthly-halt corrections (2026-09-15, local)
+
+The Atlas 5.2 long-only filter lives in its prepared-frame override so both the
+public candle entrypoint and optimized replay enforce the same direction policy.
+Monthly halt lookup attributes existing events through their BotRun environment;
+DEMO and LIVE do not share a known run's halt. Unattributable legacy halt events
+remain fail-closed. Same-environment halts still survive strategy changes and
+restarts. These local corrections and their production deployment status are
+recorded in `docs/qa/reports/ALL-STRATEGY-PATH-AUDIT-2026-09-15.md`.

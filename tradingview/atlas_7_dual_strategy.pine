@@ -1,0 +1,217 @@
+//@version=6
+strategy("Atlas 7 Dual | 4h Strategy (research)", overlay = true, initial_capital = 1000, currency = currency.USD, pyramiding = 0, commission_type = strategy.commission.percent, commission_value = 0.07, margin_long = 0, margin_short = 0, process_orders_on_close = false, calc_on_order_fills = false, calc_on_every_tick = false)
+// RESEARCH CANDIDATE from experiments/monthly_income_research (2026-09-22). Not a registered
+// bot release and not connected to any exchange. Use standard BINANCE:BTCUSDT.P 4h candles.
+// Two entry engines, one position, long and short, every position has a price stop:
+//   A) trend pullback: regime + close back above/below EMA20 (Atlas-style),
+//   B) volatility squeeze breakout: tight 24-bar range breaks in the regime direction.
+// Regime uses a 1 x ATR buffer around SMA200 (hysteresis) to avoid flip-flopping.
+// Commission 0.07% per side = 0.05% taker + 0.02% slippage allowance. Funding is absent.
+// Defaults are the owner-chosen profile: 4% risk per trade with an 8% monthly breaker per
+// side. A 4% breaker with 4% risk halts a side after ONE stopped trade and tested worse than
+// 2% risk everywhere; keep the breaker near twice the risk per trade.
+// TradingView's order emulator differs from the research engine (1h stop checks, funding),
+// so results will not match the research report exactly.
+int startAt = input.time(timestamp("01 Sep 2023 00:00:00 +0000"), "Simulation start", group = "Simulation")
+float riskPct = input.float(4.0, "Risk per trade (% of equity)", minval = 0.1, maxval = 10, step = 0.1, group = "Risk")
+float levCap = input.float(3.0, "Leverage cap", minval = 1, maxval = 10, step = 0.5, group = "Risk")
+bool breakers = input.bool(true, "Independent monthly breakers (per side)", group = "Risk")
+// Keep the breaker at roughly twice the risk per trade, so one stopped trade cannot halt a side.
+float breakerPct = input.float(8.0, "Monthly breaker per side (% of month-start equity)", minval = 1, maxval = 20, step = 0.5, group = "Risk")
+float step = input.float(0.001, "BTC quantity step", minval = 0.000001, group = "Exchange approximation")
+float minNotional = input.float(50, "Minimum order notional (USDT)", minval = 0, group = "Exchange approximation")
+bool showBands = input.bool(true, "Show regime band (SMA200 +/- 1 ATR)", group = "Display")
+
+// Pinned research parameters (change only for experiments).
+int FAST = 20
+int SLOW = 200
+float STOP_ATR = 2.5
+float TP_R = 2.0
+float TP_FRAC = 0.4
+float TRAIL_ATR = 3.0
+int RANGE_N = 24
+int WIDTH_LOOK = 360
+float WIDTH_PCT = 35
+float HYST_ATR = 1.0
+
+if barstate.isfirst
+    if not timeframe.isminutes or timeframe.multiplier != 240 or not chart.is_standard
+        runtime.error("Use standard 4-hour candles.")
+
+f_qty(float q) => math.floor(math.max(q, 0.0) / step + 1e-9) * step
+f_valid(float q) => q >= step and q * close >= minNotional
+f_price(float p) => math.round(p / syminfo.mintick) * syminfo.mintick
+
+float emaFast = ta.ema(close, FAST)
+float ema50 = ta.ema(close, 50)
+float emaSlow = ta.ema(close, SLOW)
+float smaSlow = ta.sma(close, SLOW)
+// First-valid true-range exponential seed (matches pandas ewm(alpha=1/14, adjust=False)).
+float tr = na(close[1]) ? na : math.max(high - low, math.max(math.abs(high - close[1]), math.abs(low - close[1])))
+var float atr = na
+atr := na(tr) ? atr[1] : na(atr[1]) ? tr : atr[1] + (tr - atr[1]) / 14.0
+bool ready = bar_index >= WIDTH_LOOK + RANGE_N and not na(smaSlow) and atr > 0
+
+float upLine = smaSlow + HYST_ATR * atr
+float dnLine = smaSlow - HYST_ATR * atr
+bool bull = ready and close > upLine and ema50 > emaSlow
+bool bear = ready and close < dnLine and ema50 < emaSlow
+
+// Engine A: pullback resumption memory within the current regime run.
+var bool armL = false
+var bool armS = false
+armL := bull ? (armL or close[1] < emaFast[1]) : false
+armS := bear ? (armS or close[1] > emaFast[1]) : false
+bool resumeL = armL and close > emaFast
+bool resumeS = armS and close < emaFast
+if resumeL
+    armL := false
+if resumeS
+    armS := false
+bool trendL = bull and (not bull[1] or resumeL)
+bool trendS = bear and (not bear[1] or resumeS)
+
+// Engine B: squeeze breakout of the previous 24 bars' range.
+float hh = ta.highest(high, RANGE_N)[1]
+float ll = ta.lowest(low, RANGE_N)[1]
+float width = (hh - ll) / close
+float widthCut = ta.percentile_linear_interpolation(width, WIDTH_LOOK, WIDTH_PCT)
+bool wasTight = width[1] <= widthCut[1]
+bool breakL = ready and wasTight and close > hh and close > upLine
+bool breakS = ready and wasTight and close < ll and close < dnLine
+
+bool goLong = trendL or breakL
+bool goShort = trendS or breakS
+
+// Per-side monthly breaker (attribute closed-candle equity change to the open side).
+int utcMonth = year(time_close, "UTC") * 100 + month(time_close, "UTC")
+var int curMonth = na
+var float monthEq = na
+var float prevEq = na
+var float longPnl = 0.0
+var float shortPnl = 0.0
+var bool haltL = false
+var bool haltS = false
+bool active = ready and time_close >= startAt
+if active
+    if na(curMonth) or utcMonth != curMonth
+        curMonth := utcMonth
+        monthEq := strategy.equity
+        longPnl := 0.0
+        shortPnl := 0.0
+        haltL := false
+        haltS := false
+    else if not na(prevEq)
+        float chg = strategy.equity - prevEq
+        if nz(strategy.position_size[1]) > 0 or strategy.position_size > 0
+            longPnl += chg
+        else if nz(strategy.position_size[1]) < 0 or strategy.position_size < 0
+            shortPnl += chg
+    prevEq := strategy.equity
+    haltL := haltL or (breakers and monthEq > 0 and longPnl <= -breakerPct / 100 * monthEq)
+    haltS := haltS or (breakers and monthEq > 0 and shortPnl <= -breakerPct / 100 * monthEq)
+
+// Position bookkeeping.
+var float stopPx = na
+var float tpPx = na
+var float dist = na
+var bool tpDone = false
+var float ext = na
+var float entQty = na
+float pos = strategy.position_size
+bool opened = pos != 0 and (nz(pos[1]) == 0 or math.sign(pos) != math.sign(nz(pos[1])))
+if opened
+    float avg = strategy.position_avg_price
+    stopPx := f_price(pos > 0 ? avg - dist : avg + dist)
+    tpPx := f_price(pos > 0 ? avg + TP_R * dist : avg - TP_R * dist)
+    // a partial take-profit can fill on the entry bar itself
+    tpDone := math.abs(pos) < nz(entQty, math.abs(pos)) - step / 2
+    ext := pos > 0 ? high : low
+else if pos > 0
+    ext := math.max(ext, high)
+    if pos < nz(pos[1])
+        tpDone := true
+else if pos < 0
+    ext := math.min(ext, low)
+    if pos > nz(pos[1])
+        tpDone := true
+
+f_size() =>
+    float d = STOP_ATR * atr
+    f_qty(math.min(riskPct / 100 * strategy.equity / d, levCap * strategy.equity / close))
+
+if active and barstate.isconfirmed
+    float d = STOP_ATR * atr
+    if pos > 0
+        bool revS = goShort and not haltS and not haltL and f_valid(f_size())
+        if haltL or close < dnLine or revS
+            strategy.cancel_all()
+            if not revS
+                strategy.close("Long", comment = haltL ? "Long monthly halt" : "SELL regime")
+            else
+                // strategy.entry reverses the long itself; a separate close would double the short
+                float q = f_size()
+                if f_valid(q)
+                    dist := d
+                    entQty := q
+                    strategy.entry("Short", strategy.short, qty = q, comment = trendS ? "SHORT trend" : "SHORT breakout")
+                    strategy.exit("S-TP", "Short", qty = f_qty(q * TP_FRAC), profit = TP_R * d / syminfo.mintick, loss = d / syminfo.mintick, comment_profit = "TP 40%", comment_loss = "Short SL")
+                    strategy.exit("S-SL", "Short", loss = d / syminfo.mintick, comment_loss = "Short SL")
+        else
+            if tpDone
+                stopPx := f_price(math.max(stopPx, math.max(strategy.position_avg_price, ext - TRAIL_ATR * atr)))
+                strategy.cancel("L-TP")
+            else
+                strategy.exit("L-TP", "Long", qty = f_qty(pos * TP_FRAC), stop = stopPx, limit = tpPx, comment_profit = "TP 40%", comment_loss = "Long SL")
+            strategy.exit("L-SL", "Long", stop = stopPx, comment_loss = tpDone ? "Trail SL" : "Long SL")
+    else if pos < 0
+        bool revL = goLong and not haltL and not haltS and f_valid(f_size())
+        if haltS or close > upLine or revL
+            strategy.cancel_all()
+            if not revL
+                strategy.close("Short", comment = haltS ? "Short monthly halt" : "COVER regime")
+            else
+                // strategy.entry reverses the short itself; a separate close would double the long
+                float q = f_size()
+                if f_valid(q)
+                    dist := d
+                    entQty := q
+                    strategy.entry("Long", strategy.long, qty = q, comment = trendL ? "BUY trend" : "BUY breakout")
+                    strategy.exit("L-TP", "Long", qty = f_qty(q * TP_FRAC), profit = TP_R * d / syminfo.mintick, loss = d / syminfo.mintick, comment_profit = "TP 40%", comment_loss = "Long SL")
+                    strategy.exit("L-SL", "Long", loss = d / syminfo.mintick, comment_loss = "Long SL")
+        else
+            if tpDone
+                stopPx := f_price(math.min(stopPx, math.min(strategy.position_avg_price, ext + TRAIL_ATR * atr)))
+                strategy.cancel("S-TP")
+            else
+                strategy.exit("S-TP", "Short", qty = f_qty(-pos * TP_FRAC), stop = stopPx, limit = tpPx, comment_profit = "TP 40%", comment_loss = "Short SL")
+            strategy.exit("S-SL", "Short", stop = stopPx, comment_loss = tpDone ? "Trail SL" : "Short SL")
+    else
+        if goLong and not haltL
+            float q = f_size()
+            if f_valid(q)
+                dist := d
+                entQty := q
+                strategy.entry("Long", strategy.long, qty = q, comment = trendL ? "BUY trend" : "BUY breakout")
+                strategy.exit("L-TP", "Long", qty = f_qty(q * TP_FRAC), profit = TP_R * d / syminfo.mintick, loss = d / syminfo.mintick, comment_profit = "TP 40%", comment_loss = "Long SL")
+                strategy.exit("L-SL", "Long", loss = d / syminfo.mintick, comment_loss = "Long SL")
+        else if goShort and not haltS
+            float q = f_size()
+            if f_valid(q)
+                dist := d
+                entQty := q
+                strategy.entry("Short", strategy.short, qty = q, comment = trendS ? "SHORT trend" : "SHORT breakout")
+                strategy.exit("S-TP", "Short", qty = f_qty(q * TP_FRAC), profit = TP_R * d / syminfo.mintick, loss = d / syminfo.mintick, comment_profit = "TP 40%", comment_loss = "Short SL")
+                strategy.exit("S-SL", "Short", loss = d / syminfo.mintick, comment_loss = "Short SL")
+
+plot(smaSlow, "SMA200", color = color.new(color.gray, 0), linewidth = 2)
+plot(showBands ? upLine : na, "Bull line (SMA200 + ATR)", color = color.new(color.green, 40))
+plot(showBands ? dnLine : na, "Bear line (SMA200 - ATR)", color = color.new(color.red, 40))
+plot(emaFast, "EMA20", color = color.new(color.orange, 30))
+plot(pos != 0 ? stopPx : na, "Active stop", color = color.red, style = plot.style_linebr)
+plot(pos != 0 and not tpDone ? tpPx : na, "Take profit (40%)", color = color.green, style = plot.style_linebr)
+bgcolor(wasTight ? color.new(color.yellow, 88) : na, title = "Squeeze (tight range)")
+plotshape(active and goLong and pos <= 0, "Long setup", shape.triangleup, location.belowbar, color.green, size = size.tiny)
+plotshape(active and goShort and pos >= 0, "Short setup", shape.triangledown, location.abovebar, color.red, size = size.tiny)
+alertcondition(active and goLong and pos <= 0, "Atlas 7 Dual long setup", "Atlas 7 Dual: long setup at 4h close")
+alertcondition(active and goShort and pos >= 0, "Atlas 7 Dual short setup", "Atlas 7 Dual: short setup at 4h close")

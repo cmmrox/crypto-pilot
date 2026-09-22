@@ -8,8 +8,9 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+import pandas as pd
+
 from app.strategies.base import (
-    Candle,
     EnterShort,
     Intent,
     ResizeShort,
@@ -62,9 +63,9 @@ class TrendRiderV52(TrendRiderV6):
         legacy_ids=("trend_rider_v52",),
     )
 
-    def on_candle(self, candles: list[Candle], state: TradeState) -> list[Intent]:
+    def on_prepared_frame(self, frame: pd.DataFrame, state: TradeState) -> list[Intent]:
         # Never hold or open a short; drop any short intents the base would emit.
-        intents = super().on_candle(candles, state)
+        intents = super().on_prepared_frame(frame, state)
         return [intent for intent in intents if not isinstance(intent, EnterShort | ResizeShort)]
 
 

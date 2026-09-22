@@ -9,6 +9,7 @@ approval. The manifest `display_name` is the sole source for UI labels.
 | Atlas 5.2 · 4h | `trend_rider_v52_4h` | 5.2 | Long-only fallback |
 | Atlas 6 · 4h | `trend_rider_v6_4h` | 6.0 | Long and short baseline |
 | Atlas 6 Trail · 4h | `trend_rider_refined_v1_4h` | 1.0 | Atlas 6 with a 4.5 ATR long trail |
+| Atlas 7 Dual · 4h | `atlas_dual_v1_4h` | 1.0 | Trend pullback + squeeze breakout, stops both sides |
 
 ## New strategies and releases
 

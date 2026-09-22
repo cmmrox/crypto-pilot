@@ -11,15 +11,19 @@ from app.execution.filters import round_price
 from app.execution.orders import OrderManager
 from app.risk.sizing import SizingResult
 from app.services.settings_store import get_settings_row
+from app.strategies import get_strategy, registered_names
 from app.strategies.base import Candle as StrategyCandle
 from app.strategies.base import MoveStop, TradeState
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from strategy_runtime.refined_trend_rider import RefinedTrendRider
 
 from tests.conftest import auth_headers
 from tests.fakes import FakeExchange
-from tests.integration.test_bot_lifecycle import _bull_candles, _fresh_regime_index
+from tests.integration.test_bot_lifecycle import (
+    _bull_candles,
+    _first_entry_index,
+    _regime_flip_candles,
+)
 
 REFINED = "trend_rider_refined_v1_4h"
 D = Decimal
@@ -103,24 +107,34 @@ async def test_refined_selection_refuses_unsafe_state(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("strategy_id", registered_names())
 async def test_refined_bot_uses_selected_release_and_rejects_duplicate_candle(
     db_session: AsyncSession,
+    strategy_id: str,
 ) -> None:
-    (await get_settings_row(db_session)).active_strategy = REFINED
+    (await get_settings_row(db_session)).active_strategy = strategy_id
     service = BotService()
-    candles = _bull_candles(320)
-    fresh = _fresh_regime_index(candles)
+    # Each release declares its own warm-up; flip the regime after it.
+    candles = _regime_flip_candles(get_strategy(strategy_id).manifest.market.warmup_bars + 40)
+    fresh = _first_entry_index(strategy_id, candles, side="LONG")
     exchange = FakeExchange(mark_price=candles[fresh].close)
     orders = OrderManager(exchange, symbol="BTCUSDT")
     run = await service.start(db_session, exchange, by="qa")
-    assert (run.strategy, run.strategy_release, run.strategy_interval) == (REFINED, "1.0", "4h")
+    assert (run.strategy, run.strategy_release, run.strategy_interval) == (
+        strategy_id,
+        get_strategy(strategy_id).manifest.release,
+        "4h",
+    )
     actions = await service.evaluate_once(
         db_session, exchange, orders, candles=candles[: fresh + 1]
     )
     assert "open_long" in actions
     trade = await db_session.scalar(select(Trade))
     assert trade is not None
-    assert (trade.strategy, trade.strategy_release) == (REFINED, "1.0")
+    assert (trade.strategy, trade.strategy_release) == (
+        strategy_id,
+        get_strategy(strategy_id).manifest.release,
+    )
     assert (
         await db_session.scalar(
             select(Order.id).where(
@@ -138,10 +152,12 @@ async def test_refined_bot_uses_selected_release_and_rejects_duplicate_candle(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("strategy_id", registered_names())
 async def test_refined_tp_fill_ratchets_to_exact_strategy_stop_in_safe_mode(
     db_session: AsyncSession,
+    strategy_id: str,
 ) -> None:
-    (await get_settings_row(db_session)).active_strategy = REFINED
+    (await get_settings_row(db_session)).active_strategy = strategy_id
     service = BotService()
     exchange = FakeExchange(mark_price=D("150"), balance=D("5000"))
     manager = OrderManager(exchange, symbol="BTCUSDT")
@@ -152,8 +168,8 @@ async def test_refined_tp_fill_ratchets_to_exact_strategy_stop_in_safe_mode(
         stop_price=D("100"),
         tp1_price=D("160"),
         tp1_fraction=D("0.4"),
-        strategy=REFINED,
-        strategy_release="1.0",
+        strategy=strategy_id,
+        strategy_release=get_strategy(strategy_id).manifest.release,
         strategy_interval="4h",
     )
     tp = (
@@ -163,13 +179,13 @@ async def test_refined_tp_fill_ratchets_to_exact_strategy_stop_in_safe_mode(
     ).scalar_one()
     exchange.fill_resting(tp.client_order_id, price=D("160"))
     await service.enter_safe_mode(db_session, reason="QA: management must continue")
-    candles = _bull_candles(320)
+    candles = _bull_candles(get_strategy(strategy_id).manifest.market.warmup_bars + 120)
     exchange.mark = candles[-1].close
     actions = await service.evaluate_once(db_session, exchange, manager, candles=candles)
     assert "move_stop" in actions
     assert trade.remaining_qty == D("0.6")
     assert trade.highest_high is not None
-    expected = RefinedTrendRider().on_candle(
+    expected = get_strategy(strategy_id).on_candle(
         [
             StrategyCandle(
                 int(c.open_time.timestamp() * 1000),
@@ -201,3 +217,46 @@ async def test_refined_tp_fill_ratchets_to_exact_strategy_stop_in_safe_mode(
         )
     ).scalar_one()
     assert stop.stop_price == expected_stop
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("strategy_id", registered_names())
+async def test_selected_plugin_short_dispatch_matches_capability(
+    db_session: AsyncSession,
+    strategy_id: str,
+) -> None:
+    from app.db.models import Candle
+
+    (await get_settings_row(db_session)).active_strategy = strategy_id
+    rising = _regime_flip_candles(get_strategy(strategy_id).manifest.market.warmup_bars + 40)
+    candles = [
+        Candle(
+            symbol="BTCUSDT",
+            interval="4h",
+            open_time=c.open_time,
+            open=D("1000") - c.open,
+            high=D("1000") - c.low,
+            low=D("1000") - c.high,
+            close=D("1000") - c.close,
+            volume=c.volume,
+        )
+        for c in rising
+    ]
+    entry_index = (
+        _first_entry_index(strategy_id, candles, side="SHORT")
+        if "short" in get_strategy(strategy_id).manifest.capabilities
+        else len(candles) - 1
+    )
+    candles = candles[: entry_index + 1]
+    exchange = FakeExchange(mark_price=candles[-1].close)
+    service = BotService()
+    await service.start(db_session, exchange, by="qa")
+    actions = await service.evaluate_once(
+        db_session, exchange, OrderManager(exchange, symbol="BTCUSDT"), candles=candles
+    )
+    if "short" in get_strategy(strategy_id).manifest.capabilities:
+        assert "open_short" in actions
+        assert (await exchange.get_position("BTCUSDT")).qty < 0
+    else:
+        assert "open_short" not in actions
+        assert (await exchange.get_position("BTCUSDT")).qty == 0

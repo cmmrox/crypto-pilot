@@ -55,6 +55,7 @@ class Strategy(Protocol):
 # Intents (complete vocabulary — do not extend casually):
 EnterLong(stop_distance, tp_levels)      # engine sizes from risk %, places stop+TP
 EnterShort(weight, vol_target)           # engine computes vol-scaled notional; NO price stop
+EnterShortStop(stop_distance, tp_levels) # stop-protected short: engine sizes from risk %
 ResizeShort(target_notional)             # engine applies >20% drift guard
 MoveStop(price)                          # ratchet-only; engine refuses to lower a long stop
 TakePartial(level_id)                    # informational; TP orders rest on-exchange
@@ -117,7 +118,13 @@ unless hotfix-critical. Health endpoint + dead-man cron.
 
 1. **News LLM = Codex SDK with GPT-5.5** (BSD said Claude API). No `OPENAI_API_KEY` anywhere; Codex credentials only. Pluggable provider; see `INTEGRATIONS.md §3`.
 2. **Binance demo endpoints updated** to `demo-fapi.binance.com` (BSD referenced the retired testnet host).
-3. **Strategy parameters are read-only in the operator UI** (prototype-approved override of FR-11's editable parameters); changes ship as versioned releases through parity tests.
+3. **Stop-protected short book (2026-09-22).** The intent vocabulary gained
+   `EnterShortStop`, so a release may run a short with a price stop, a partial target and a
+   one-way stop ratchet, sized from risk % like a long. Trend Rider v6's stop-free,
+   vol-sized sleeve is unchanged and remains the validated default; `atlas_dual_v1_4h` is
+   the first release using the new intent. Evidence:
+   `docs/qa/reports/ATLAS-7-DUAL-RELEASE-2026-09-22.md`.
+4. **Strategy parameters are read-only in the operator UI** (prototype-approved override of FR-11's editable parameters); changes ship as versioned releases through parity tests.
 4. **Overview live updates use short-interval polling (4s), not WebSocket** (BSD §12 said WebSocket). For a bot that decides once per 4h close, 4s polling delivers a real-time feel with far less complexity and better reconnection robustness. The WebSocket push channel remains a future optimization; the REST `/api/overview` aggregate is the source.
 5. **Owner-configurable SMS OTP replaces authenticator TOTP.** When enabled, the
    password step can issue only a five-minute `otp_pending` token bound to one
@@ -223,3 +230,13 @@ or session teardown. Trading state is never changed by this display provider.
 The overview API exposes `strategy_display_name` alongside its stable `strategy`
 ID. Human-facing strategy names come from manifests and follow
 `docs/strategies/NAMING.md`; IDs, releases and trading math are unchanged by labels.
+
+### Strategy path and monthly-halt corrections (2026-09-15, local)
+
+The Atlas 5.2 long-only filter lives in its prepared-frame override so both the
+public candle entrypoint and optimized replay enforce the same direction policy.
+Monthly halt lookup attributes existing events through their BotRun environment;
+DEMO and LIVE do not share a known run's halt. Unattributable legacy halt events
+remain fail-closed. Same-environment halts still survive strategy changes and
+restarts. These local corrections and their production deployment status are
+recorded in `docs/qa/reports/ALL-STRATEGY-PATH-AUDIT-2026-09-15.md`.

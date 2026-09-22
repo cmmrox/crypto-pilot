@@ -38,6 +38,20 @@ class EnterShort:
 
 
 @dataclass(frozen=True)
+class EnterShortStop:
+    """Open a stop-protected short: the engine sizes from risk % / stop distance.
+
+    Added for releases whose short book carries a protective price stop and a
+    partial take-profit, mirroring ``EnterLong``. ``EnterShort`` (the stop-free,
+    vol-sized sleeve used by Trend Rider v6) is unchanged and still valid.
+    """
+
+    stop_distance: float  # price distance (stop - entry), = stop_atr * ATR
+    tp_levels: tuple[tuple[float, float], ...]  # ((r_multiple, fraction), ...)
+    reason: str = "regime"
+
+
+@dataclass(frozen=True)
 class ResizeShort:
     """Adjust the short toward its vol target (engine applies the drift guard)."""
 
@@ -73,7 +87,16 @@ class Halt:
     until: str  # ISO month or date
 
 
-Intent = EnterLong | EnterShort | ResizeShort | MoveStop | TakePartial | ExitAll | Halt
+Intent = (
+    EnterLong
+    | EnterShort
+    | EnterShortStop
+    | ResizeShort
+    | MoveStop
+    | TakePartial
+    | ExitAll
+    | Halt
+)
 
 
 # --- Candle window + trade state passed to the strategy ---
@@ -105,6 +128,13 @@ class TradeState:
     last_long_closed_at_ms: int | None = None
     halted_long: bool = False
     halted_short: bool = False
+    # Stop-protected short book (releases that pair EnterShortStop with MoveStop).
+    # Stop-free sleeve releases leave these at their defaults.
+    short_position: bool = False
+    short_entry: float | None = None
+    short_stop: float | None = None
+    lowest_low: float | None = None
+    last_short_closed_at_ms: int | None = None
     extra: dict[str, float] = field(default_factory=dict)
 
 

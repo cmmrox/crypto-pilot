@@ -61,6 +61,7 @@ class BreakerSnapshot:
     month_to_date_pnl: str
     drawdown_pct: str
     progress_pct: str
+    cap_pct: str  # this release's own monthly cap, e.g. "4.0" or "8.0"
     tripped: bool
     available: bool
 
@@ -400,7 +401,8 @@ async def _breaker_snapshots(
                 book=book,
                 month_to_date_pnl=_decimal(pnl),
                 drawdown_pct=f"{state.drawdown_pct:.4f}",
-                progress_pct=_breaker_progress(state.drawdown_pct),
+                progress_pct=_breaker_progress(state.drawdown_pct, cap),
+                cap_pct=f"{cap * Decimal('100'):.1f}",
                 tripped=state.tripped if available else False,
                 available=available,
             )
@@ -590,12 +592,11 @@ def _decimal(value: Decimal) -> str:
     return format(value.quantize(PRICE_PLACES), "f")
 
 
-def _breaker_progress(drawdown_pct: Decimal) -> str:
-    """Return a bounded display-only percentage of the independent 4% breaker."""
-    progress = min(
-        Decimal("100"),
-        abs(drawdown_pct) / Decimal("0.04") * Decimal("100"),
-    )
+def _breaker_progress(drawdown_pct: Decimal, cap: Decimal) -> str:
+    """Bounded display-only percentage of *this release's* monthly breaker."""
+    if cap <= 0:
+        return "0.00"
+    progress = min(Decimal("100"), abs(drawdown_pct) / cap * Decimal("100"))
     return f"{progress:.2f}"
 
 

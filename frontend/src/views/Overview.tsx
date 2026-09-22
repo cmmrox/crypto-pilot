@@ -514,7 +514,7 @@ export function Overview() {
                       <ShieldAlert size={19} />
                       <div>
                         <strong>No price stop — validated size-managed short</strong>
-                        <p>Risk is controlled by volatility-scaled size, the independent −4% sleeve breaker, and a closed-candle regime exit.</p>
+                        <p>Risk is controlled by volatility-scaled size, the independent monthly sleeve breaker, and a closed-candle regime exit.</p>
                       </div>
                     </div>
                   )}
@@ -541,7 +541,7 @@ export function Overview() {
                       className={breaker.tripped ? "tripped" : ""}
                     />
                   </div>
-                  <small>{breaker.tripped ? "TRIPPED — halted until the 1st" : "Healthy · halts independently at −4.0% MTD"}</small>
+                  <small>{breaker.tripped ? "TRIPPED — halted until the 1st" : `Healthy · halts independently at −${breaker.cap_pct}% MTD`}</small>
                 </div>
               ))}
             </section>

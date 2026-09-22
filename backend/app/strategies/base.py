@@ -10,6 +10,9 @@ from strategy_runtime.contracts import (
     EnterShort as EnterShort,
 )
 from strategy_runtime.contracts import (
+    EnterShortStop as EnterShortStop,
+)
+from strategy_runtime.contracts import (
     ExitAll as ExitAll,
 )
 from strategy_runtime.contracts import (

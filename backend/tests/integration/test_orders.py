@@ -17,7 +17,7 @@ from app.execution.orders import (
     persist_emergency_exit,
 )
 from app.execution.reconcile import reconcile_position
-from app.risk.sizing import size_long, size_short
+from app.risk.sizing import size_by_risk, size_long, size_short
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -442,3 +442,150 @@ async def test_short_resize_increases_and_reduces_to_exact_target(
 
     assert (await ex.get_position("BTCUSDT")).qty == -reduced
     assert trade.remaining_qty == reduced
+
+
+# --- stop-protected short book (Atlas 7 Dual / EnterShortStop) ---
+
+
+@pytest.mark.asyncio
+async def test_open_short_with_stop_places_entry_stop_and_tp(db_session: AsyncSession) -> None:
+    ex = FakeExchange(mark_price=D("65000"))
+    om = OrderManager(ex, symbol="BTCUSDT")
+    sizing = size_by_risk(
+        equity=D("5000"),
+        risk_pct=D("4"),
+        stop_distance=D("2000"),
+        price=D("65000"),
+        leverage_cap=D("3"),
+        available_margin=AMPLE_MARGIN,
+        filters=await _filters(ex),
+    )
+    trade = await om.open_short_with_stop(
+        db_session,
+        sizing=sizing,
+        stop_price=D("67000"),
+        tp1_price=D("61000"),
+        tp1_fraction=D("0.4"),
+        strategy="atlas_dual_v1_4h",
+        strategy_release="1.0",
+        strategy_interval="4h",
+    )
+    await db_session.commit()
+    assert [t[0] for t in ex.placed] == ["MARKET", "STOP_MARKET", "LIMIT"]
+    # The protective stop buys back above the entry; the target buys back below it.
+    assert [t[1] for t in ex.placed] == ["SELL", "BUY", "BUY"]
+    assert trade.side == "SHORT"
+    assert trade.lowest_low == trade.entry_px
+    stop = (
+        await db_session.execute(
+            select(Order).where(Order.trade_id == trade.id, Order.type == "STOP_MARKET")
+        )
+    ).scalar_one()
+    assert stop.stop_price == D("67000")
+    assert stop.reduce_only is True
+    tp = (
+        await db_session.execute(
+            select(Order).where(Order.trade_id == trade.id, Order.type == "LIMIT")
+        )
+    ).scalar_one()
+    assert tp.price == D("61000")
+    assert tp.qty == sizing.qty * D("0.4")
+
+
+@pytest.mark.asyncio
+async def test_open_short_with_stop_emergency_flattens_when_stop_fails(
+    db_session: AsyncSession,
+) -> None:
+    class RejectingStops(FakeExchange):
+        async def place_stop_market(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+            raise RuntimeError("binance -2021: order would immediately trigger")
+
+    ex = RejectingStops(mark_price=D("65000"))
+    om = OrderManager(ex, symbol="BTCUSDT")
+    sizing = size_by_risk(
+        equity=D("5000"),
+        risk_pct=D("4"),
+        stop_distance=D("2000"),
+        price=D("65000"),
+        leverage_cap=D("3"),
+        available_margin=AMPLE_MARGIN,
+        filters=await _filters(ex),
+    )
+    with pytest.raises(ProtectiveStopFailed) as raised:
+        await om.open_short_with_stop(
+            db_session,
+            sizing=sizing,
+            stop_price=D("67000"),
+            tp1_price=D("61000"),
+            tp1_fraction=D("0.4"),
+            strategy="atlas_dual_v1_4h",
+            strategy_release="1.0",
+            strategy_interval="4h",
+        )
+    record = raised.value.record
+    assert record.side == "SHORT"
+    assert record.flattened is True
+    assert (await ex.get_position("BTCUSDT")).qty == 0  # never left unprotected
+    await db_session.rollback()
+    await persist_emergency_exit(db_session, record)
+    await db_session.commit()
+    trade = (await db_session.execute(select(Trade))).scalar_one()
+    assert trade.side == "SHORT"
+    assert trade.exit_reason == "protective_stop_failed_emergency_exit"
+
+
+@pytest.mark.asyncio
+async def test_short_stop_ratchets_down_and_never_raises(db_session: AsyncSession) -> None:
+    ex = FakeExchange(mark_price=D("65000"))
+    om = OrderManager(ex, symbol="BTCUSDT")
+    filters = await _filters(ex)
+    sizing = size_by_risk(
+        equity=D("5000"),
+        risk_pct=D("4"),
+        stop_distance=D("2000"),
+        price=D("65000"),
+        leverage_cap=D("3"),
+        available_margin=AMPLE_MARGIN,
+        filters=filters,
+    )
+    trade = await om.open_short_with_stop(
+        db_session,
+        sizing=sizing,
+        stop_price=D("67000"),
+        tp1_price=D("61000"),
+        tp1_fraction=D("0.4"),
+        strategy="atlas_dual_v1_4h",
+        strategy_release="1.0",
+        strategy_interval="4h",
+    )
+    await db_session.flush()
+    lowered = await om.move_short_stop(
+        db_session,
+        trade=trade,
+        new_stop_price=D("64000"),
+        remaining_qty=sizing.qty,
+        filters=filters,
+    )
+    assert lowered is True
+    raised_again = await om.move_short_stop(
+        db_session,
+        trade=trade,
+        new_stop_price=D("66000"),  # would widen the risk
+        remaining_qty=sizing.qty,
+        filters=filters,
+    )
+    assert raised_again is False
+    active = (
+        (
+            await db_session.execute(
+                select(Order).where(
+                    Order.trade_id == trade.id,
+                    Order.type == "STOP_MARKET",
+                    Order.status.in_(("NEW", "PARTIALLY_FILLED")),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert [order.stop_price for order in active] == [D("64000")]

@@ -13,6 +13,9 @@ from strategy_runtime.sizing import (
     margin_capped_qty as margin_capped_qty,
 )
 from strategy_runtime.sizing import (
+    size_by_risk as size_by_risk,
+)
+from strategy_runtime.sizing import (
     size_long as size_long,
 )
 from strategy_runtime.sizing import (

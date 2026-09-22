@@ -185,6 +185,7 @@ class Trade(Base):
     qty: Mapped[Decimal]
     remaining_qty: Mapped[Decimal] = mapped_column(default=Decimal("0"))
     highest_high: Mapped[Decimal | None] = mapped_column(nullable=True)
+    lowest_low: Mapped[Decimal | None] = mapped_column(nullable=True)
     fees: Mapped[Decimal] = mapped_column(default=Decimal("0"))
     funding: Mapped[Decimal] = mapped_column(default=Decimal("0"))
     realized_pnl: Mapped[Decimal | None] = mapped_column(nullable=True)

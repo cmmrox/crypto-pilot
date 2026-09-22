@@ -1,0 +1,22 @@
+# Downloaded market data and caches (regenerate with scripts/download.py)
+data/
+results/runs/
+results/cache/
+# Large intermediate grids (regenerate with the stage scripts)
+results/all_monthly.csv
+results/all_stats.csv
+results/stage*/monthly.csv
+results/stage*/stats.csv
+results/stage*/robust_selection.csv
+results/final/trades_*.csv
+results/final/equity_daily_*.csv
+results/final/monthly.csv
+results/risk/trades_*.csv
+results/jev/answers_4h.csv
+results/jev/gated_monthly.csv
+results/multi_asset_monthly.csv
+results/baseline/*_trades.csv
+__pycache__/
+.pytest_cache/
+*.secret
+.env

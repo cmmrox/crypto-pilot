@@ -28,12 +28,13 @@ from app.execution.orders import OrderManager
 from app.execution.reconcile import reconcile_position
 from app.execution.trade_sync import sync_open_trade
 from app.risk.breakers import evaluate_breaker
-from app.risk.sizing import SizingResult, margin_capped_qty, size_long
+from app.risk.sizing import SizingResult, margin_capped_qty, size_by_risk, size_long
 from app.services.events import record_event
 from app.services.settings_store import get_settings_row
 from app.strategies import (
     EnterLong,
     EnterShort,
+    EnterShortStop,
     ExitAll,
     Halt,
     MoveStop,
@@ -453,11 +454,27 @@ class BotService:
                 trade.highest_high or trade.entry_px,
                 candle_high,
             )
+        if trade is not None and trade.side == "SHORT" and pos.qty < 0:
+            candle_low = candles[-1].low
+            trade.lowest_low = min(
+                trade.lowest_low or trade.entry_px,
+                candle_low,
+            )
         last_long_closed_at = await session.scalar(
             select(Trade.closed_at)
             .where(
                 Trade.environment == run.environment,
                 Trade.side == "LONG",
+                Trade.closed_at.is_not(None),
+            )
+            .order_by(Trade.closed_at.desc())
+            .limit(1)
+        )
+        last_short_closed_at = await session.scalar(
+            select(Trade.closed_at)
+            .where(
+                Trade.environment == run.environment,
+                Trade.side == "SHORT",
                 Trade.closed_at.is_not(None),
             )
             .order_by(Trade.closed_at.desc())
@@ -484,6 +501,25 @@ class BotService:
             ),
             halted_long=monthly.halted_long or long_trip,
             halted_short=monthly.halted_short or short_trip,
+            short_position=pos.qty < 0,
+            short_entry=(
+                float(trade.entry_px) if trade is not None and trade.side == "SHORT" else None
+            ),
+            short_stop=(
+                float(synced.long_stop)
+                if synced.long_stop is not None and trade is not None and trade.side == "SHORT"
+                else None
+            ),
+            lowest_low=(
+                float(trade.lowest_low)
+                if trade is not None and trade.lowest_low is not None
+                else None
+            ),
+            last_short_closed_at_ms=(
+                int(last_short_closed_at.timestamp() * 1000)
+                if last_short_closed_at is not None
+                else None
+            ),
         )
         intents = strat.on_candle(strat_candles, state)
         entries_allowed = run.stop_reason != "safe_mode" and allow_new_entries
@@ -565,12 +601,56 @@ class BotService:
                         bot_run_id=run.id,
                     )
                     actions.append("open_short")
+            elif (
+                isinstance(intent, EnterShortStop)
+                and pos.qty == 0
+                and entries_allowed
+                and not state.halted_short
+            ):
+                sizing = size_by_risk(
+                    equity=equity,
+                    risk_pct=risk.long_risk_pct,
+                    stop_distance=Decimal(str(intent.stop_distance)),
+                    price=execution_price,
+                    leverage_cap=risk.leverage_cap,
+                    available_margin=acct.available,
+                    filters=filters,
+                )
+                if sizing.ok:
+                    # Round before the prices reach the exchange, or the protective
+                    # stop is rejected (-1111) and the short is left unprotected.
+                    stop_price = round_price(
+                        execution_price + Decimal(str(intent.stop_distance)),
+                        filters.tick_size,
+                    )
+                    tp_r, tp_frac = intent.tp_levels[0]
+                    tp1_price = round_price(
+                        execution_price - Decimal(str(tp_r)) * Decimal(str(intent.stop_distance)),
+                        filters.tick_size,
+                    )
+                    await orders.open_short_with_stop(
+                        session,
+                        sizing=sizing,
+                        stop_price=stop_price,
+                        tp1_price=tp1_price,
+                        tp1_fraction=Decimal(str(tp_frac)),
+                        strategy=strat.manifest.strategy_id,
+                        strategy_release=strat.manifest.release,
+                        strategy_interval=strat.manifest.market.interval,
+                        bot_run_id=run.id,
+                    )
+                    actions.append("open_short")
             elif isinstance(intent, ExitAll) and pos.qty != 0:
                 side = "LONG" if pos.qty > 0 else "SHORT"
                 await orders.flatten(session, side=side, qty=pos.qty, reason=intent.reason)
                 actions.append("exit_all")
-            elif isinstance(intent, MoveStop) and pos.qty > 0 and trade is not None:
-                moved = await orders.move_long_stop(
+                # A reversal emits ExitAll followed by the opposite entry in the same
+                # decision, so the entry guards below must see the now-flat account.
+                pos = await exchange.get_position(market.symbol)
+                trade = None
+            elif isinstance(intent, MoveStop) and pos.qty != 0 and trade is not None:
+                move = orders.move_long_stop if pos.qty > 0 else orders.move_short_stop
+                moved = await move(
                     session,
                     trade=trade,
                     new_stop_price=Decimal(str(intent.price)),
@@ -622,7 +702,9 @@ class BotService:
                 actions.append("halt")
 
         stale_entry_intents = [
-            intent for intent in intents if isinstance(intent, EnterLong | EnterShort)
+            intent
+            for intent in intents
+            if isinstance(intent, EnterLong | EnterShort | EnterShortStop)
         ]
         if not allow_new_entries and stale_entry_intents:
             await record_event(

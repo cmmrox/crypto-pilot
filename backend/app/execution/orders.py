@@ -43,6 +43,7 @@ class EmergencyExitRecord:
     entry: OrderResult
     exit_result: OrderResult | None
     qty: Decimal
+    side: str
     strategy: str
     strategy_release: str
     strategy_interval: str
@@ -99,13 +100,83 @@ class OrderManager:
         bot_run_id: int | None = None,
     ) -> Trade:
         """MARKET entry + STOP_MARKET protective stop + LIMIT TP1 (all reduce-only)."""
+        return await self._open_protected(
+            session,
+            side="LONG",
+            sizing=sizing,
+            stop_price=stop_price,
+            tp1_price=tp1_price,
+            tp1_fraction=tp1_fraction,
+            strategy=strategy,
+            strategy_release=strategy_release,
+            strategy_interval=strategy_interval,
+            bot_run_id=bot_run_id,
+        )
+
+    async def open_short_with_stop(
+        self,
+        session: AsyncSession,
+        *,
+        sizing: SizingResult,
+        stop_price: Decimal,
+        tp1_price: Decimal,
+        tp1_fraction: Decimal,
+        strategy: str,
+        strategy_release: str,
+        strategy_interval: str,
+        bot_run_id: int | None = None,
+    ) -> Trade:
+        """Stop-protected short: MARKET entry + STOP_MARKET + LIMIT TP1 (reduce-only).
+
+        Used by releases that emit ``EnterShortStop``. The stop-free, vol-sized
+        sleeve (``EnterShort`` / :meth:`open_short`) is unchanged.
+        """
+        return await self._open_protected(
+            session,
+            side="SHORT",
+            sizing=sizing,
+            stop_price=stop_price,
+            tp1_price=tp1_price,
+            tp1_fraction=tp1_fraction,
+            strategy=strategy,
+            strategy_release=strategy_release,
+            strategy_interval=strategy_interval,
+            bot_run_id=bot_run_id,
+        )
+
+    async def _open_protected(
+        self,
+        session: AsyncSession,
+        *,
+        side: str,
+        sizing: SizingResult,
+        stop_price: Decimal,
+        tp1_price: Decimal,
+        tp1_fraction: Decimal,
+        strategy: str,
+        strategy_release: str,
+        strategy_interval: str,
+        bot_run_id: int | None = None,
+    ) -> Trade:
+        """Open `side` with its protective stop and first take-profit.
+
+        If the protective stop cannot be placed the position is flattened
+        immediately and :class:`ProtectiveStopFailed` carries the executed fills,
+        so a trade is never left running without its stop.
+        """
+        long_side = side == "LONG"
+        entry_side = "BUY" if long_side else "SELL"
+        exit_side = "SELL" if long_side else "BUY"
         entry = await self._ex.place_market(
-            self._symbol, "BUY", sizing.qty, client_order_id=new_client_order_id("CPL")
+            self._symbol,
+            entry_side,
+            sizing.qty,
+            client_order_id=new_client_order_id("CPL" if long_side else "CPSH"),
         )
         _require_confirmed_market_fill(entry, sizing.qty)
         trade = await self._persist_trade(
             session,
-            "LONG",
+            side,
             entry,
             strategy,
             strategy_release,
@@ -124,7 +195,7 @@ class OrderManager:
         try:
             stop = await self._ex.place_stop_market(
                 self._symbol,
-                "SELL",
+                exit_side,
                 sizing.qty,
                 stop_price,
                 client_order_id=new_client_order_id("CPS"),
@@ -137,6 +208,7 @@ class OrderManager:
             _log.error(
                 "protective_stop_failed",
                 symbol=self._symbol,
+                side=side,
                 stop_price=str(stop_price),
                 qty=str(sizing.qty),
                 error=str(stop_error),
@@ -146,16 +218,17 @@ class OrderManager:
                 await self._ex.cancel_all(self._symbol)
                 emergency = await self._ex.place_market(
                     self._symbol,
-                    "SELL",
+                    exit_side,
                     sizing.qty,
                     client_order_id=new_client_order_id("CP-EMERGENCY"),
                     reduce_only=True,
                 )
             except Exception as flatten_error:
-                # Money-safety compromised: a long may remain open with no stop.
+                # Money-safety compromised: the position may remain open with no stop.
                 _log.critical(
                     "emergency_flatten_failed",
                     symbol=self._symbol,
+                    side=side,
                     qty=str(sizing.qty),
                     error=str(flatten_error),
                     error_type=type(flatten_error).__name__,
@@ -173,10 +246,11 @@ class OrderManager:
                         stop_price,
                         stop_error,
                         flatten_error,
+                        side=side,
                     ),
                 ) from flatten_error
             raise ProtectiveStopFailed(
-                "protective stop failed; long was emergency-flattened",
+                f"protective stop failed; {side.lower()} was emergency-flattened",
                 record=self._emergency_record(
                     entry,
                     emergency,
@@ -188,6 +262,7 @@ class OrderManager:
                     stop_price,
                     stop_error,
                     None,
+                    side=side,
                 ),
             ) from stop_error
         await self._persist_order(
@@ -203,7 +278,7 @@ class OrderManager:
         tp_qty = _round_to(sizing.qty * tp1_fraction, sizing.qty)
         tp1 = await self._ex.place_take_profit(
             self._symbol,
-            "SELL",
+            exit_side,
             tp_qty,
             tp1_price,
             client_order_id=new_client_order_id("CPT"),
@@ -221,9 +296,10 @@ class OrderManager:
             session,
             level="INFO",
             category="trade",
-            message=f"LONG opened {sizing.qty} {self._symbol} @ {entry.avg_price}",
+            message=f"{side} opened {sizing.qty} {self._symbol} @ {entry.avg_price}",
             ref=f"trade:{trade.id}",
             payload={
+                "side": side,
                 "qty": str(sizing.qty),
                 "entry": str(entry.avg_price),
                 "stop": str(stop_price),
@@ -236,7 +312,7 @@ class OrderManager:
             session,
             kind="trade_opened",
             payload={
-                "side": "LONG",
+                "side": side,
                 "qty": str(sizing.qty),
                 "price": str(entry.avg_price),
                 "risk_context": f"Stop {stop_price}, TP1 {tp1_price}",
@@ -373,7 +449,51 @@ class OrderManager:
         remaining_qty: Decimal,
         filters: SymbolFilters,
     ) -> bool:
-        """Ratchet a long stop by placing the replacement before cancelling the old."""
+        """Ratchet a long stop upward (never down)."""
+        return await self._move_stop(
+            session,
+            trade=trade,
+            side="LONG",
+            new_stop_price=new_stop_price,
+            remaining_qty=remaining_qty,
+            filters=filters,
+        )
+
+    async def move_short_stop(
+        self,
+        session: AsyncSession,
+        *,
+        trade: Trade,
+        new_stop_price: Decimal,
+        remaining_qty: Decimal,
+        filters: SymbolFilters,
+    ) -> bool:
+        """Ratchet a short stop downward (never up)."""
+        return await self._move_stop(
+            session,
+            trade=trade,
+            side="SHORT",
+            new_stop_price=new_stop_price,
+            remaining_qty=remaining_qty,
+            filters=filters,
+        )
+
+    async def _move_stop(
+        self,
+        session: AsyncSession,
+        *,
+        trade: Trade,
+        side: str,
+        new_stop_price: Decimal,
+        remaining_qty: Decimal,
+        filters: SymbolFilters,
+    ) -> bool:
+        """Ratchet a protective stop by placing the replacement before cancelling the old.
+
+        The ratchet is one-way: a long stop only rises, a short stop only falls, so a
+        retry or a stale intent can never widen the risk on an open position.
+        """
+        long_side = side == "LONG"
         active = (
             await session.execute(
                 select(Order)
@@ -387,17 +507,22 @@ class OrderManager:
             )
         ).scalar_one_or_none()
         if active is None or active.stop_price is None:
-            raise StopMoveFailed("cannot ratchet long stop: active stop is missing")
+            raise StopMoveFailed(f"cannot ratchet {side.lower()} stop: active stop is missing")
         rounded_stop = round_price(new_stop_price, filters.tick_size)
-        if rounded_stop <= active.stop_price:
+        improves = (
+            rounded_stop > active.stop_price if long_side else rounded_stop < active.stop_price
+        )
+        if not improves:
             return False
         qty = clamp_qty(remaining_qty, filters)
         if qty <= 0:
-            raise StopMoveFailed("cannot ratchet long stop: remaining quantity is below minimum")
+            raise StopMoveFailed(
+                f"cannot ratchet {side.lower()} stop: remaining quantity is below minimum"
+            )
 
         replacement = await self._ex.place_stop_market(
             self._symbol,
-            "SELL",
+            "SELL" if long_side else "BUY",
             qty,
             rounded_stop,
             client_order_id=new_client_order_id("CPSR"),
@@ -415,7 +540,7 @@ class OrderManager:
             cancelled = await self._ex.cancel_order(self._symbol, active.client_order_id)
         except Exception as exc:
             # Determine which stop survived an ambiguous cancel. Never blindly
-            # cancel the replacement and risk leaving the long unprotected.
+            # cancel the replacement and risk leaving the position unprotected.
             old_truth = await self._ex.get_order(self._symbol, active.client_order_id)
             if old_truth.status in {"NEW", "PARTIALLY_FILLED"}:
                 await self._ex.cancel_order(self._symbol, replacement.client_order_id)
@@ -429,7 +554,7 @@ class OrderManager:
             session,
             level="INFO",
             category="trade",
-            message=f"LONG stop ratcheted to {rounded_stop}",
+            message=f"{side} stop ratcheted to {rounded_stop}",
             ref=f"trade:{trade.id}",
             payload={
                 "previous_stop": str(active.stop_price),
@@ -565,12 +690,15 @@ class OrderManager:
         stop_price: Decimal,
         stop_error: BaseException,
         flatten_error: BaseException | None,
+        *,
+        side: str = "LONG",
     ) -> EmergencyExitRecord:
         """Snapshot the executed fills for durable recording by the caller."""
         return EmergencyExitRecord(
             entry=entry,
             exit_result=exit_result,
             qty=qty,
+            side=side,
             strategy=strategy,
             strategy_release=strategy_release,
             strategy_interval=strategy_interval,
@@ -599,6 +727,7 @@ class OrderManager:
             qty=entry.filled_qty,
             remaining_qty=entry.filled_qty,
             highest_high=entry.avg_price if side == "LONG" else None,
+            lowest_low=entry.avg_price if side == "SHORT" else None,
             strategy=strategy,
             strategy_release=strategy_release,
             strategy_interval=strategy_interval,
@@ -688,11 +817,15 @@ async def persist_emergency_exit(session: AsyncSession, record: EmergencyExitRec
         if record.exit_result is not None and record.exit_result.avg_price > 0
         else None
     )
-    realized = (exit_px - entry_px) * record.qty if exit_px is not None else None
+    realized = (
+        _gross_realized(side=record.side, entry_px=entry_px, exit_px=exit_px, qty=record.qty)
+        if exit_px is not None
+        else None
+    )
     trade = Trade(
         opened_at=now,
         closed_at=now if flattened else None,
-        side="LONG",
+        side=record.side,
         entry_px=entry_px,
         exit_px=exit_px,
         qty=record.qty,

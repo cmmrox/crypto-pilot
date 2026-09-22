@@ -380,6 +380,65 @@ async def test_every_close_reconciliation_blocks_new_risk(
     assert (await svc.status(db_session)).status == BotStatus.SAFE_MODE
 
 
+def _regime_flip_candles(
+    flat_bars: int, trend_bars: int = 200, *, direction: int = 1
+) -> list[Candle]:
+    """Drift against the trend for `flat_bars`, then trend — the regime flips *after* warm-up.
+
+    Releases declare different warm-up windows, so tests that need a fresh regime
+    build the flip past the longest one instead of assuming a fixed history.
+    """
+    out: list[Candle] = []
+    base = dt.datetime(2024, 1, 1, tzinfo=dt.UTC)
+    price = 100.0
+    for i in range(flat_bars + trend_bars):
+        if i < flat_bars:
+            price *= 1 - 0.001 * direction
+            shown = price * (1.003 if i % 2 else 0.997)
+        else:
+            price *= 1 + 0.006 * direction
+            shown = price
+        out.append(
+            Candle(
+                symbol="BTCUSDT",
+                interval="4h",
+                open_time=base + dt.timedelta(hours=4 * i),
+                open=Decimal(str(round(shown * 0.999, 2))),
+                high=Decimal(str(round(shown * 1.004, 2))),
+                low=Decimal(str(round(shown * 0.996, 2))),
+                close=Decimal(str(round(shown, 2))),
+                volume=Decimal("10"),
+            )
+        )
+    return out
+
+
+def _first_entry_index(strategy_id: str, candles: list[Candle], *, side: str = "LONG") -> int:
+    """First bar at which *this* release asks to open `side` from a flat account."""
+    from app.strategies import EnterLong, EnterShort, EnterShortStop, get_strategy
+    from app.strategies.base import Candle as StrategyCandle
+    from app.strategies.base import TradeState
+
+    wanted = (EnterLong,) if side == "LONG" else (EnterShort, EnterShortStop)
+    strategy = get_strategy(strategy_id)
+    window = [
+        StrategyCandle(
+            int(c.open_time.timestamp() * 1000),
+            float(c.open),
+            float(c.high),
+            float(c.low),
+            float(c.close),
+            float(c.volume),
+        )
+        for c in candles
+    ]
+    for index in range(strategy.manifest.market.warmup_bars, len(window)):
+        intents = strategy.on_candle(window[: index + 1], TradeState(equity=10_000.0))
+        if any(isinstance(intent, wanted) for intent in intents):
+            return index
+    raise AssertionError(f"{strategy_id} produced no {side} entry over {len(window)} candles")
+
+
 def _fresh_regime_index(candles: list[Candle]) -> int:
     """First bar where the trend regime flips on (so on_candle emits EnterLong)."""
     df = add_indicators(

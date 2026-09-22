@@ -63,7 +63,7 @@ def margin_capped_qty(
     return qty
 
 
-def size_long(
+def size_by_risk(
     *,
     equity: Decimal,
     risk_pct: Decimal,
@@ -73,7 +73,11 @@ def size_long(
     available_margin: Decimal,
     filters: SymbolFilters,
 ) -> SizingResult:
-    """Size a long: qty = (equity * risk%) / stop_distance, leverage-capped."""
+    """Size a stop-protected entry: qty = (equity * risk%) / stop_distance.
+
+    Direction-free: the quantity depends on the stop distance, not on the side, so
+    long and stop-protected short books share one sizing rule.
+    """
     if stop_distance <= 0 or price <= 0 or equity <= 0:
         return SizingResult(
             Decimal("0"), Decimal("0"), Decimal("0"), False, "invalid inputs"
@@ -137,3 +141,25 @@ def size_short(
         return SizingResult(qty, qty * price, Decimal("0"), False, "below min notional")
     final_notional = qty * price
     return SizingResult(qty, final_notional, final_notional / equity, True, "ok")
+
+
+def size_long(
+    *,
+    equity: Decimal,
+    risk_pct: Decimal,
+    stop_distance: Decimal,
+    price: Decimal,
+    leverage_cap: Decimal,
+    available_margin: Decimal,
+    filters: SymbolFilters,
+) -> SizingResult:
+    """Size a long: qty = (equity * risk%) / stop_distance, leverage-capped."""
+    return size_by_risk(
+        equity=equity,
+        risk_pct=risk_pct,
+        stop_distance=stop_distance,
+        price=price,
+        leverage_cap=leverage_cap,
+        available_margin=available_margin,
+        filters=filters,
+    )

@@ -46,4 +46,5 @@ async def test_strategy_names_are_distinct_and_ids_remain_compatible(app_client,
         "trend_rider_v52_4h": "Atlas 5.2 · 4h",
         "trend_rider_v6_4h": "Atlas 6 · 4h",
         "trend_rider_refined_v1_4h": "Atlas 6 Trail · 4h",
+        "atlas_dual_v1_4h": "Atlas 7 Dual · 4h",
     }

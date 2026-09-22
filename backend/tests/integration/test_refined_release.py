@@ -19,7 +19,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from tests.conftest import auth_headers
 from tests.fakes import FakeExchange
-from tests.integration.test_bot_lifecycle import _bull_candles, _fresh_regime_index
+from tests.integration.test_bot_lifecycle import (
+    _bull_candles,
+    _first_entry_index,
+    _regime_flip_candles,
+)
 
 REFINED = "trend_rider_refined_v1_4h"
 D = Decimal
@@ -110,8 +114,9 @@ async def test_refined_bot_uses_selected_release_and_rejects_duplicate_candle(
 ) -> None:
     (await get_settings_row(db_session)).active_strategy = strategy_id
     service = BotService()
-    candles = _bull_candles(320)
-    fresh = _fresh_regime_index(candles)
+    # Each release declares its own warm-up; flip the regime after it.
+    candles = _regime_flip_candles(get_strategy(strategy_id).manifest.market.warmup_bars + 40)
+    fresh = _first_entry_index(strategy_id, candles, side="LONG")
     exchange = FakeExchange(mark_price=candles[fresh].close)
     orders = OrderManager(exchange, symbol="BTCUSDT")
     run = await service.start(db_session, exchange, by="qa")
@@ -174,7 +179,7 @@ async def test_refined_tp_fill_ratchets_to_exact_strategy_stop_in_safe_mode(
     ).scalar_one()
     exchange.fill_resting(tp.client_order_id, price=D("160"))
     await service.enter_safe_mode(db_session, reason="QA: management must continue")
-    candles = _bull_candles(320)
+    candles = _bull_candles(get_strategy(strategy_id).manifest.market.warmup_bars + 120)
     exchange.mark = candles[-1].close
     actions = await service.evaluate_once(db_session, exchange, manager, candles=candles)
     assert "move_stop" in actions
@@ -223,7 +228,7 @@ async def test_selected_plugin_short_dispatch_matches_capability(
     from app.db.models import Candle
 
     (await get_settings_row(db_session)).active_strategy = strategy_id
-    rising = _bull_candles(320)
+    rising = _regime_flip_candles(get_strategy(strategy_id).manifest.market.warmup_bars + 40)
     candles = [
         Candle(
             symbol="BTCUSDT",
@@ -237,6 +242,12 @@ async def test_selected_plugin_short_dispatch_matches_capability(
         )
         for c in rising
     ]
+    entry_index = (
+        _first_entry_index(strategy_id, candles, side="SHORT")
+        if "short" in get_strategy(strategy_id).manifest.capabilities
+        else len(candles) - 1
+    )
+    candles = candles[: entry_index + 1]
     exchange = FakeExchange(mark_price=candles[-1].close)
     service = BotService()
     await service.start(db_session, exchange, by="qa")

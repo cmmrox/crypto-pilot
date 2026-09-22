@@ -331,6 +331,7 @@ export interface Breaker {
   month_to_date_pnl: string;
   drawdown_pct: string;
   progress_pct: string;
+  cap_pct: string;
   tripped: boolean;
   available: boolean;
 }

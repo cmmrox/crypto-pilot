@@ -43,6 +43,23 @@ class BinanceError(Exception):
         self.code = code
 
 
+def log_unreachable(environment: str, probe: str, error: BaseException) -> None:
+    """Record why a public read failed, so "unreachable" is never a dead end.
+
+    Public endpoints carry no credentials, so the exchange's message (for example a
+    geo-restriction notice) is safe to log.
+    """
+    _log.warning(
+        "binance_unreachable",
+        environment=environment,
+        probe=probe,
+        error_type=type(error).__name__,
+        status=getattr(error, "status", None),
+        code=getattr(error, "code", None),
+        detail=str(error)[:300],
+    )
+
+
 class RateLimitError(BinanceError):
     """HTTP 429/418 — back off before retrying."""
 

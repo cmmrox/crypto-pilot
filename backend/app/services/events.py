@@ -7,8 +7,10 @@ payload. This is the spine of auditability (BSD G5).
 from __future__ import annotations
 
 import datetime as dt
+from dataclasses import dataclass
 from typing import Any, Literal
 
+from sqlalchemy import ColumnElement, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
@@ -96,3 +98,44 @@ async def record_event_committed(
             sms_status=sms_status,
         )
         await session.commit()
+
+
+@dataclass(frozen=True)
+class EventFilter:
+    level: str | None = None
+    category: str | None = None
+    search: str | None = None  # message or reference text, case-insensitive
+
+
+async def event_page(
+    session: AsyncSession, selection: EventFilter, *, page: int, page_size: int
+) -> tuple[int, list[Event]]:
+    """Return the total matching count and one page of events, newest first."""
+    conditions: list[ColumnElement[bool]] = []
+    if selection.level:
+        conditions.append(Event.level == selection.level)
+    if selection.category:
+        conditions.append(Event.category == selection.category)
+    if selection.search:
+        like = f"%{selection.search.lower()}%"
+        conditions.append(
+            or_(
+                func.lower(Event.message).like(like),
+                func.lower(func.coalesce(Event.ref, "")).like(like),
+            )
+        )
+    total = (await session.execute(select(func.count(Event.id)).where(*conditions))).scalar_one()
+    rows = (
+        (
+            await session.execute(
+                select(Event)
+                .where(*conditions)
+                .order_by(Event.ts.desc(), Event.id.desc())
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return total, list(rows)

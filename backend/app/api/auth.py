@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUserDep
@@ -21,7 +20,6 @@ from app.api.schemas import (
 )
 from app.core.config import get_settings
 from app.core.security import TokenError, decode_token
-from app.db.models import User
 from app.db.session import get_session
 from app.services import auth as auth_service
 from app.services import otp as otp_service
@@ -126,17 +124,9 @@ async def dev_code(
     if authorization is not None:
         claims = _otp_pending_claims(authorization)
         challenge_id = int(claims["cid"])
-    if challenge_id is not None:
-        code = otp_service._TEST_CODES.get(f"challenge:{challenge_id}")
-        if code is None:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, detail="no code available")
-        return DevOtpOut(code=code)
-
-    target = otp_service.normalize_phone(phone) if phone else None
-    if target is None and email is not None:
-        user = (await session.execute(select(User).where(User.email == email))).scalar_one_or_none()
-        target = otp_service.user_phone(user) if user else None
-    code = otp_service._TEST_CODES.get(target) if target else None
+    code = await otp_service.captured_test_code(
+        session, challenge_id=challenge_id, phone=phone, email=email
+    )
     if code is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="no code available")
     return DevOtpOut(code=code)

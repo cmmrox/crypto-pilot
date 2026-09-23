@@ -6,14 +6,11 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUserDep
-from app.db.models import EquitySnapshot
 from app.db.session import get_session
-from app.services.overview_service import OverviewSnapshot, build_overview
-from app.services.settings_store import get_settings_row
+from app.services.overview_service import OverviewSnapshot, build_overview, equity_history
 
 router = APIRouter(prefix="/api/overview", tags=["overview"])
 
@@ -34,20 +31,7 @@ class EquityPoint(BaseModel):
 async def equity_curve(
     current: CurrentUserDep, session: SessionDep, limit: int = 500
 ) -> list[EquityPoint]:
-    settings_row = await get_settings_row(session)
-    rows = (
-        (
-            await session.execute(
-                select(EquitySnapshot)
-                .where(EquitySnapshot.environment == settings_row.active_environment)
-                .order_by(EquitySnapshot.ts.desc())
-                .limit(limit)
-            )
-        )
-        .scalars()
-        .all()
-    )
-    rows = list(reversed(rows))
+    rows = await equity_history(session, limit=limit)
     return [
         EquityPoint(ts=r.ts.isoformat(), equity=str(r.balance + r.unrealized_pnl)) for r in rows
     ]

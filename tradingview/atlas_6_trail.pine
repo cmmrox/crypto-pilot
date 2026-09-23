@@ -1,0 +1,220 @@
+//@version=6
+// Atlas 6 Trail: educational chart model of trend_rider_refined_v1_4h.
+// Signals are NOT bot orders: account breakers, fees, funding, exchange filters,
+// short rebalancing and reconciliation are not simulated. See README.md.
+indicator("Atlas 6 Trail | Entries, SL, TP and Runner", overlay = true, max_labels_count = 500)
+
+bool showAverages = input.bool(true, "Moving averages", group = "Display")
+bool showRegime = input.bool(true, "Regime background", group = "Display")
+bool showLevels = input.bool(true, "Trade levels", group = "Display")
+bool showLabels = input.bool(true, "Trade event labels", group = "Display")
+bool showPanel = input.bool(true, "Status panel", group = "Display")
+int startTime = input.time(timestamp("01 Jan 2023 00:00 +0000"), "Start modeled trades (UTC)", group = "Chart model")
+
+if barstate.isfirst and (not timeframe.isminutes or timeframe.multiplier != 240)
+    runtime.error("Atlas 6 Trail requires a 4-hour (240-minute) chart.")
+if barstate.isfirst and not chart.is_standard
+    runtime.error("Use standard candles, not Heikin Ashi, Renko or other synthetic bars.")
+
+// Pinned release parameters. ATR uses the Python first-valid-TR EWM seed;
+// ta.atr() uses a different initial seed. EMA starts at the first chart close.
+float ema20 = ta.ema(close, 20)
+float ema50 = ta.ema(close, 50)
+float ema200 = ta.ema(close, 200)
+float sma200 = ta.sma(close, 200)
+float tr = na(close[1]) ? na : math.max(high - low, math.max(math.abs(high - close[1]), math.abs(low - close[1])))
+var float atr = na
+atr := na(tr) ? atr[1] : na(atr[1]) ? tr : atr[1] + (tr - atr[1]) / 14.0
+bool ready = bar_index >= 199 and not na(sma200) and atr > 0
+bool bull = ready and close > sma200 and ema50 > ema200
+float bearThreshold = sma200 - 0.5 * atr
+bool bear = ready and close < sma200 and ema50 < ema200 and close < bearThreshold
+
+// pandas ewm(span=48, adjust=False).std(): unbiased exponentially weighted
+// variance, including the initial zero return. Annualization: 6 * 365 bars.
+float ret = na(close[1]) ? 0.0 : close / close[1] - 1.0
+float alpha = 2.0 / 49.0
+var float meanRet = 0.0
+var float variance = 0.0
+var float weightSquares = 1.0
+if not barstate.isfirst
+    float delta = ret - meanRet
+    meanRet += alpha * delta
+    variance := (1.0 - alpha) * (variance + alpha * delta * delta)
+    weightSquares := math.pow(1.0 - alpha, 2) * weightSquares + alpha * alpha
+float realizedVol = weightSquares < 1.0 ? math.sqrt(math.max(0.0, variance / (1.0 - weightSquares)) * 2190.0) : na
+float shortWeight = not na(realizedVol) and realizedVol > 0 ? 0.75 * math.min(1.0, 0.4 / realizedVol) : 0.0
+
+// One modeled position: 0 flat, 1 long, -1 short. No actual account connection.
+var int side = 0
+var int pending = 0  // 1 buy, -1 short, 2 exit long, -2 cover short
+var string pendingReason = ""
+var float signalAtr = na
+var float entry = na
+var float stop = na
+var float target = na
+var float highest = na
+var float nextStop = na
+var bool tpDone = false
+var bool pullbackArmed = false
+var string lastEvent = "Waiting for warm-up / start"
+
+f_price(float value) =>
+    na(value) ? "—" : str.tostring(value, format.mintick)
+
+f_label(float price, string message, color shade, bool above) =>
+    if showLabels
+        label.new(bar_index, price, message + "\n" + f_price(price), style = above ? label.style_label_down : label.style_label_up, color = shade, textcolor = color.white, size = size.small)
+
+// Prior closed-bar decisions execute at this bar's open. On a realtime bar,
+// Pine rollback replays this block from committed state on each tick.
+// No varip state and no future-bar data are used.
+bool bought = false
+bool shorted = false
+bool exited = false
+bool covered = false
+bool tpHit = false
+bool stopHit = false
+bool buySignal = false
+bool shortSignal = false
+bool exitSignal = false
+bool stopRaised = false
+if pending == 2 or pending == -2
+    exited := pending == 2
+    covered := pending == -2
+    lastEvent := pendingReason + " @ " + f_price(open)
+    f_label(open, exited ? "SELL: bull regime ended" : "COVER: deep bear ended", color.gray, exited)
+    side := 0
+    entry := na
+    stop := na
+    target := na
+    nextStop := na
+    tpDone := false
+    pullbackArmed := false
+else if pending == 1 or pending == -1
+    side := pending
+    entry := open
+    tpDone := false
+    highest := open
+    stop := side == 1 ? entry - 2.5 * signalAtr : na
+    target := side == 1 ? entry + 2.5 * signalAtr : na
+    bought := side == 1
+    shorted := side == -1
+    lastEvent := (bought ? "BUY" : "SHORT") + " @ " + f_price(entry)
+    f_label(entry, (bought ? "BUY: " : "SHORT: ") + pendingReason, bought ? color.green : color.maroon, shorted)
+    pullbackArmed := false
+pending := 0
+if side == 1 and not na(nextStop)
+    stop := math.max(stop, nextStop)
+nextStop := na
+
+// Preserve the levels active during this bar, including a bar that exits.
+float entryOnBar = side != 0 ? entry : na
+float stopOnBar = side == 1 ? stop : na
+float targetOnBar = side == 1 and not tpDone ? target : na
+
+if barstate.isconfirmed
+    // Conservative OHLC model: the active stop wins if SL and TP both touch.
+    // A newly raised stop becomes active NEXT bar, never against earlier lows.
+    if side == 1
+        if low <= stop
+            float fill = math.min(open, stop)
+            stopHit := true
+            lastEvent := (tpDone ? "Runner stop" : "Initial SL") + " @ " + f_price(fill)
+            f_label(fill, tpDone ? "SELL 60%: runner SL / BE" : "SELL 100%: initial SL", color.red, true)
+            side := 0
+            entry := na
+            stop := na
+            target := na
+            tpDone := false
+            pullbackArmed := false
+        else
+            highest := math.max(highest, high)
+            if not tpDone and high >= target
+                tpDone := true
+                tpHit := true
+                float fill = math.max(open, target)
+                lastEvent := "TP1: sell 40% @ " + f_price(fill)
+                f_label(fill, "TP1: SELL 40%\n60% remains", color.teal, true)
+
+    if ready and time >= startTime
+        if side == 1
+            pullbackArmed := false
+            if not bull
+                pending := 2
+                pendingReason := "SELL: bull regime ended"
+                exitSignal := true
+            else if tpDone
+                nextStop := math.max(stop, math.max(entry, highest - 4.5 * atr))
+                stopRaised := nextStop > stop
+        else if side == -1
+            pullbackArmed := false
+            if not bear
+                pending := -2
+                pendingReason := "COVER: deep bear ended"
+                exitSignal := true
+        else
+            if not bull
+                pullbackArmed := false
+            bool fresh = bull and not bull[1]
+            bool resume = bull and pullbackArmed and close > ema20
+            if bull and (fresh or resume)
+                pending := 1
+                signalAtr := atr
+                pendingReason := fresh ? "fresh bull regime" : "EMA20 pullback resume"
+                buySignal := true
+                pullbackArmed := false
+            else if bear and shortWeight > 0
+                pending := -1
+                pendingReason := "deep bear"
+                shortSignal := true
+            else if bull and close < ema20
+                pullbackArmed := true
+    if buySignal or shortSignal or exitSignal
+        lastEvent := pendingReason + " | next open"
+
+plot(showAverages ? sma200 : na, "SMA200", color.red, 2)
+plot(showAverages ? ema200 : na, "EMA200", color.purple)
+plot(showAverages ? ema50 : na, "EMA50", color.orange)
+plot(showAverages ? ema20 : na, "EMA20 pullback", color.blue)
+plot(showAverages ? bearThreshold : na, "Deep-bear boundary (not short SL)", color.new(color.maroon, 55))
+bgcolor(showRegime ? (bull ? color.new(color.green, 93) : bear ? color.new(color.red, 93) : na) : na, title = "Regime (developing until close)")
+plot(showLevels ? entryOnBar : na, "Modeled entry", color.aqua, 2, plot.style_linebr)
+plot(showLevels ? stopOnBar : na, "Active long SL", color.red, 2, plot.style_linebr)
+plot(showLevels ? targetOnBar : na, "TP1: 1R, close 40%", color.lime, 2, plot.style_linebr)
+plot(showLevels and side == 1 ? nextStop : na, "SL effective next bar", color.orange, 2, plot.style_circles)
+plotshape(buySignal, "Confirmed BUY setup", shape.triangleup, location.belowbar, color.lime, text = "BUY\nSETUP", size = size.tiny)
+plotshape(shortSignal, "Confirmed SHORT setup", shape.triangledown, location.abovebar, color.red, text = "SHORT\nSETUP", size = size.tiny)
+plotshape(exitSignal, "Confirmed regime exit setup", shape.xcross, location.abovebar, color.orange, text = "EXIT\nNEXT", size = size.tiny)
+plot(atr, "ATR14 (runtime seed)", display = display.data_window)
+plot(realizedVol * 100, "Annualized EWM volatility %", display = display.data_window)
+plot(shortWeight * 100, "Short target: % equity (informational)", display = display.data_window)
+
+var table panel = table.new(position.top_right, 2, 12, bgcolor = color.new(color.black, 12), border_width = 1)
+f_row(int row, string name, string value, color shade) =>
+    table.cell(panel, 0, row, name, text_color = color.silver, text_size = size.small)
+    table.cell(panel, 1, row, value, text_color = shade, text_size = size.small)
+if barstate.islast and showPanel
+    f_row(0, "ATLAS 6 TRAIL", "4h | chart model", color.aqua)
+    f_row(1, "Regime" + (barstate.isconfirmed ? "" : " (forming)"), not ready ? "Warm-up" : bull ? "BULL" : bear ? "DEEP BEAR" : "NEUTRAL", bull ? color.lime : bear ? color.red : color.silver)
+    f_row(2, "Modeled position", side == 1 ? (tpDone ? "LONG: 60% runner" : "LONG: 100%") : side == -1 ? "SHORT: size-managed" : "FLAT", color.white)
+    f_row(3, "Entry", f_price(entry), color.aqua)
+    f_row(4, "Active SL", side == -1 ? "NONE on shorts" : f_price(stop), color.red)
+    f_row(5, "TP1", side == -1 ? "NONE on shorts" : tpDone ? "Done: sold 40%" : f_price(target), color.lime)
+    f_row(6, "Next-bar SL", f_price(nextStop), color.orange)
+    f_row(7, "Short target (info)", str.tostring(shortWeight * 100, "#.##") + "% equity", color.white)
+    f_row(8, "Pending", pending == 0 ? "None" : pendingReason + " / next open", color.orange)
+    f_row(9, "Last event", lastEvent, color.white)
+    f_row(10, "Bot risk profile", "Long risk 15%, max 6x\nIndependent 4% monthly breakers", color.silver)
+    f_row(11, "Scope", "Account breakers / resizing NOT modeled\nChart signals are not bot fills", color.orange)
+
+// Create alerts with Once Per Bar Close. Fill/touch alerts confirm at bar close,
+// even though modeled fills are drawn at the next open / intrabar price.
+alertcondition(buySignal, "BUY setup", "Atlas 6 Trail: confirmed BUY setup. Modeled entry next open. {{ticker}} {{interval}}")
+alertcondition(shortSignal, "SHORT setup", "Atlas 6 Trail: confirmed SHORT setup; no short SL/TP. Modeled entry next open.")
+alertcondition(exitSignal, "Regime exit setup", "Atlas 6 Trail: confirmed regime exit. Modeled close next open.")
+alertcondition(tpHit, "TP1 touched", "Atlas 6 Trail: modeled TP1 touched, sell 40%; 60% runner remains.")
+alertcondition(stopHit, "Long SL touched", "Atlas 6 Trail: modeled long stop touched; remaining long closed.")
+alertcondition(stopRaised, "Long stop raised", "Atlas 6 Trail: breakeven / 4.5 ATR stop raised, effective next bar.")
+alertcondition(barstate.isconfirmed and (bought or shorted), "Modeled entry confirmed", "Atlas 6 Trail: modeled next-open entry confirmed at this bar close.")
+alertcondition(barstate.isconfirmed and (exited or covered), "Modeled regime exit confirmed", "Atlas 6 Trail: modeled next-open regime exit confirmed at this bar close.")

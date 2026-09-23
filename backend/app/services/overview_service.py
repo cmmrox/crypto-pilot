@@ -35,6 +35,7 @@ from app.strategies.base import (
 )
 from app.strategies.base import (
     Strategy,
+    StrategyWatch,
     WatchRule,
 )
 
@@ -177,13 +178,8 @@ async def build_overview(session: AsyncSession) -> OverviewSnapshot:
     strategy_market = strategy_plugin.manifest.market
     strategy_risk = strategy_plugin.manifest.risk
     bot = await bot_service.status(session)
-    candles = await _recent_candles(session, strategy_market)
-    gaps = await candle_svc.detect_gaps(
-        session,
-        strategy_market.symbol,
-        strategy_market.interval,
-    )
-    gap_count = len(gaps)
+    history = await _history_view(session, strategy_plugin)
+    candles = await _sparkline_candles(session, strategy_market)
     for candle in candles:
         session.expunge(candle)
     await session.rollback()
@@ -203,12 +199,8 @@ async def build_overview(session: AsyncSession) -> OverviewSnapshot:
         account.equity,
         strategy_risk,
     )
-    watch = _watch_snapshot(
-        candles,
-        market.mark_price,
-        strategy_plugin,
-    )
-    engine = _engine_snapshot(now, gap_count)
+    watch = _watch_snapshot(history.watch, market.mark_price, strategy_plugin)
+    engine = _engine_snapshot(now, history.gap_count)
     activity = await _activity_snapshots(session, engine, market)
     briefing = await _briefing_snapshot(session)
 
@@ -353,6 +345,110 @@ async def _market_snapshot(
     )
 
 
+@dataclass(frozen=True)
+class _HistoryView:
+    """What the Overview derives from candle history; it changes only when candles do."""
+
+    fingerprint: tuple[object, ...]
+    watch: StrategyWatch | None
+    gap_count: int
+
+
+# One entry per strategy release. Rebuilding the strategy's indicators over its whole
+# history (6,970 candles for Atlas 7 Dual) on every four-second poll cost ~170 ms of
+# event-loop time, yet the history only changes when a candle closes or a backfill
+# rewrites one, which the fingerprint detects.
+_history_views: dict[str, _HistoryView] = {}
+
+
+async def _history_view(session: AsyncSession, strategy: Strategy) -> _HistoryView:
+    market = strategy.manifest.market
+    key = f"{strategy.manifest.strategy_id}@{strategy.manifest.release}"
+    fingerprint = await _history_fingerprint(session, market)
+    cached = _history_views.get(key)
+    if cached is not None and cached.fingerprint == fingerprint:
+        return cached
+    candles = await _recent_candles(session, market)
+    gaps = await candle_svc.detect_gaps(session, market.symbol, market.interval)
+    strategy_candles = [
+        StrategyCandle(
+            open_time_ms=int(row.open_time.timestamp() * 1000),
+            open=float(row.open),
+            high=float(row.high),
+            low=float(row.low),
+            close=float(row.close),
+            volume=float(row.volume),
+        )
+        for row in candles
+    ]
+    # Strategies are pure, so the indicator work can leave the event loop that the
+    # scheduler and the bot share.
+    watch = await asyncio.to_thread(strategy.inspect, strategy_candles)
+    view = _HistoryView(fingerprint=fingerprint, watch=watch, gap_count=len(gaps))
+    _history_views[key] = view
+    return view
+
+
+async def _history_fingerprint(session: AsyncSession, market: MarketSpec) -> tuple[object, ...]:
+    """Identify the candle history exactly, computed in the database.
+
+    The table's count and time range cover gap detection. The exact Decimal sum of
+    every price and volume in the strategy's window changes whenever a stored
+    candle is rewritten in place (candles are upserted), not just when one is added.
+    """
+    scope = (Candle.symbol == market.symbol, Candle.interval == market.interval)
+    table = (
+        await session.execute(
+            select(func.count(), func.min(Candle.open_time), func.max(Candle.open_time)).where(
+                *scope
+            )
+        )
+    ).one()
+    window = (
+        select(Candle.open, Candle.high, Candle.low, Candle.close, Candle.volume)
+        .where(*scope)
+        .order_by(Candle.open_time.desc())
+        .limit(market.history_bars)
+        .subquery()
+    )
+    window_sum = (
+        await session.execute(
+            select(
+                func.coalesce(
+                    func.sum(
+                        window.c.open
+                        + window.c.high
+                        + window.c.low
+                        + window.c.close
+                        + window.c.volume
+                    ),
+                    0,
+                )
+            )
+        )
+    ).scalar_one()
+    return (*table, window_sum)
+
+
+async def _sparkline_candles(session: AsyncSession, market: MarketSpec) -> list[Candle]:
+    rows = (
+        (
+            await session.execute(
+                select(Candle)
+                .where(
+                    Candle.symbol == market.symbol,
+                    Candle.interval == market.interval,
+                )
+                .order_by(Candle.open_time.desc())
+                .limit(SPARKLINE_POINTS)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return list(reversed(rows))
+
+
 async def _recent_candles(session: AsyncSession, market: MarketSpec) -> list[Candle]:
     rows = (
         (
@@ -435,23 +531,11 @@ def _engine_snapshot(now: dt.datetime, gap_count: int) -> EngineSnapshot:
 
 
 def _watch_snapshot(
-    candles: list[Candle],
+    watch: StrategyWatch | None,
     mark_price: str | None,
     strategy: Strategy,
 ) -> StrategyWatchSnapshot:
     market = strategy.manifest.market
-    strategy_candles = [
-        StrategyCandle(
-            open_time_ms=int(row.open_time.timestamp() * 1000),
-            open=float(row.open),
-            high=float(row.high),
-            low=float(row.low),
-            close=float(row.close),
-            volume=float(row.volume),
-        )
-        for row in candles
-    ]
-    watch = strategy.inspect(strategy_candles)
     if watch is None:
         return StrategyWatchSnapshot(
             available=False,

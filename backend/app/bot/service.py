@@ -98,6 +98,18 @@ class _Decision:
     state: TradeState
     entries_allowed: bool
     actions: list[str]
+    # Equity change caused by this decision's own orders (fees, slippage against the
+    # mark), per book. Snapshots taken before the orders cannot see it.
+    execution_pnl: dict[str, Decimal] = field(
+        default_factory=lambda: {"LONG": Decimal("0"), "SHORT": Decimal("0")}
+    )
+
+    async def charge_execution(self, book: str) -> None:
+        """Charge the order just placed to `book` and refresh the account after it."""
+        self.account = await self.exchange.get_account()
+        after = self.account.balance + self.account.unrealized_pnl
+        self.execution_pnl[book] += after - self.equity
+        self.equity = after
 
     def can_enter(self, *, halted: bool) -> bool:
         """New positions open only from flat, with entries allowed and the book live."""
@@ -387,6 +399,8 @@ class BotService:
             position=synced.position,
         )
         if breakers.flattened:
+            flattened = await exchange.get_account()
+            book = "LONG" if synced.position.qty > 0 else "SHORT"
             await self._close_decision(
                 session,
                 exchange,
@@ -394,6 +408,7 @@ class BotService:
                 monthly=monthly,
                 snapshot_at=snapshot_at,
                 decision_candle_at=decision_candle_at,
+                execution_pnl={book: flattened.balance + flattened.unrealized_pnl - equity},
             )
             return breakers.actions
 
@@ -457,6 +472,7 @@ class BotService:
             monthly=monthly,
             snapshot_at=snapshot_at,
             decision_candle_at=decision_candle_at,
+            execution_pnl=decision.execution_pnl,
         )
         return decision.actions
 
@@ -703,14 +719,21 @@ class BotService:
         monthly: MonthlyRiskState,
         snapshot_at: dt.datetime,
         decision_candle_at: dt.datetime,
+        execution_pnl: dict[str, Decimal] | None = None,
     ) -> None:
-        """Snapshot equity for the monthly books and advance the decision cursor."""
+        """Snapshot equity for the monthly books and advance the decision cursor.
+
+        Each book's month-to-date P&L includes what this decision's own orders cost
+        it: the snapshot equity is taken after them, so the next decision's delta
+        cannot see those costs.
+        """
+        costs = execution_pnl or {}
         await self.write_equity_snapshot(
             session,
             exchange,
             snapshot_at=snapshot_at,
-            long_month_pnl=monthly.long_pnl,
-            short_month_pnl=monthly.short_pnl,
+            long_month_pnl=monthly.long_pnl + costs.get("LONG", Decimal("0")),
+            short_month_pnl=monthly.short_pnl + costs.get("SHORT", Decimal("0")),
         )
         run.last_evaluated_candle_at = decision_candle_at
 
@@ -774,6 +797,7 @@ class BotService:
             tp1_fraction=Decimal(str(tp_frac)),
             **decision.release_tags(),
         )
+        await decision.charge_execution(side)
         decision.actions.append("open_long" if side == "LONG" else "open_short")
 
     async def _enter_short_sleeve(self, decision: _Decision, intent: EnterShort) -> None:
@@ -793,6 +817,7 @@ class BotService:
             await decision.orders.open_short(
                 decision.session, sizing=sizing, **decision.release_tags()
             )
+            await decision.charge_execution("SHORT")
             decision.actions.append("open_short")
 
     async def _exit_all(self, decision: _Decision, intent: ExitAll) -> None:
@@ -804,13 +829,13 @@ class BotService:
         )
         decision.actions.append("exit_all")
         # A reversal emits ExitAll followed by the opposite entry in the same
-        # decision, so the entry guards must see the now-flat account. Refresh the
-        # account too: the closed position's initial margin was still locked in the
-        # pre-exit snapshot, which would cap the reversal entry below its risk budget.
+        # decision, so the entry guards must see the now-flat account. The account
+        # refresh also matters: the closed position's initial margin was still locked
+        # in the pre-exit snapshot, which would cap the reversal entry below its risk
+        # budget.
         symbol = decision.strategy.manifest.market.symbol
         decision.position = await decision.exchange.get_position(symbol)
-        decision.account = await decision.exchange.get_account()
-        decision.equity = decision.account.balance + decision.account.unrealized_pnl
+        await decision.charge_execution(side)
         decision.trade = None
 
     async def _move_stop(self, decision: _Decision, intent: MoveStop) -> None:
@@ -851,6 +876,7 @@ class BotService:
                 target_qty=target_qty,
             )
         ):
+            await decision.charge_execution("SHORT")
             decision.actions.append("resize_short")
 
     async def _take_partial(self, decision: _Decision, intent: TakePartial) -> None:
@@ -923,7 +949,11 @@ class BotService:
                 halted_short=halted_short,
             )
         first = snapshots[0]
-        month_start_equity = first.balance + first.unrealized_pnl
+        # The first snapshot is taken after that decision's orders and records their
+        # cost in its book P&L; adding it back gives the equity the month began with.
+        month_start_equity = (
+            first.balance + first.unrealized_pnl - first.month_to_date_pnl - first.sleeve_month_pnl
+        )
         existing = next((row for row in snapshots if row.ts == snapshot_at), None)
         if existing is not None:
             return MonthlyRiskState(

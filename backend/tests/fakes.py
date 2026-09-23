@@ -35,9 +35,13 @@ class FakeExchange:
         mark_price: Decimal = Decimal("65000"),
         balance: Decimal = Decimal("10000"),
         margin_leverage: Decimal | None = None,
+        book_fills: bool = False,
     ) -> None:
         self.mark = mark_price
         self._balance = balance
+        # Opt-in Binance-like wallet: realized P&L and commission move the balance.
+        # Off by default so existing scenarios keep a constant balance.
+        self._book_fills = book_fills
         # Opt-in Binance-like margin: an open position locks notional / leverage of the
         # available balance. Off by default so existing scenarios keep available == balance.
         self._margin_leverage = margin_leverage
@@ -120,6 +124,7 @@ class FakeExchange:
                 filled_at=dt.datetime.now(dt.UTC),
             )
         ]
+        self._book(self._fills[order_id][0])
         return result
 
     async def place_stop_market(
@@ -205,6 +210,11 @@ class FakeExchange:
                 filled_at=dt.datetime.now(dt.UTC),
             )
         ]
+        self._book(self._fills[row.exchange_order_id][0])
+
+    def _book(self, fill: Fill) -> None:
+        if self._book_fills:
+            self._balance += fill.realized_pnl - fill.commission
 
     async def set_leverage(self, symbol, leverage) -> None:
         self.leverage = leverage

@@ -12,8 +12,9 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import ColumnElement, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import InstrumentedAttribute
 
 from app.api.deps import CurrentUserDep
 from app.db.models import Trade, WithdrawalMark
@@ -24,6 +25,16 @@ router = APIRouter(prefix="/api/monthly", tags=["monthly"])
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
 WITHDRAWAL_RATE = Decimal("0.10")
+
+
+def _utc_month(column: InstrumentedAttribute[dt.datetime]) -> ColumnElement[str]:
+    """The UTC calendar month (YYYY-MM) of a timestamptz column.
+
+    Postgres renders timestamptz in the session's time zone, and production shares
+    its database server with other applications, so the server default is not ours
+    to rely on. The monthly breakers already use UTC months.
+    """
+    return func.to_char(func.timezone("UTC", column), "YYYY-MM")
 
 
 class MonthRow(BaseModel):
@@ -48,7 +59,7 @@ class MessageOut(BaseModel):
 
 @router.get("", response_model=list[MonthRow])
 async def monthly_ledger(_current: CurrentUserDep, session: SessionDep) -> list[MonthRow]:
-    month_col = func.to_char(Trade.opened_at, "YYYY-MM")
+    month_col = _utc_month(Trade.opened_at)
     stmt = (
         select(
             month_col.label("m"),
@@ -101,7 +112,7 @@ async def mark_withdrawn(
         return MessageOut(message="already marked")
 
     # Compute the allowance for that month.
-    month_col = func.to_char(Trade.opened_at, "YYYY-MM")
+    month_col = _utc_month(Trade.opened_at)
     row = (
         await session.execute(
             select(

@@ -132,3 +132,12 @@ Import-linter: **4 contracts kept, 0 broken**. Final Ruff lint/format and
 `git diff --check` passed. The stale virtualenv launcher paths were bypassed by
 invoking mypy/import-linter through the current Python interpreter; no runtime
 package or dependency changes were made.
+
+## Subsequent deployment
+
+Following explicit owner authorization, release `83ddaf8` was deployed September 15
+at 03:37 UTC. The earlier local-only status above records the audit-time state;
+deployment is now complete. Fresh post-cutover verification preserved LIVE run 14,
+its active refined strategy and September long halt. See
+`PRODUCTION-STRATEGY-FIX-2026-09-15.md` for image identity, backup, rollback and
+verification evidence.

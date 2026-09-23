@@ -1,0 +1,104 @@
+//@version=6
+indicator("Atlas 6 Trail | Account-aware signals", overlay = true)
+// Manual account snapshot, NOT a VPS connection or simulated fill history.
+// Defaults describe audited run 14. Refresh inputs after ANY account change.
+int validFrom = input.time(timestamp("07 Sep 2026 08:22:46 +0000"), "Account state valid from", group = "Manual account snapshot")
+int validUntil = input.time(timestamp("15 Sep 2026 18:12:00 +0000"), "Account state expires at", group = "Manual account snapshot", tooltip = "Local expiry, not an exchange fact. Extend only after checking the bot. No eligible signals outside this window.")
+bool entriesAllowed = input.bool(true, "Bot running and entry gates open", group = "Manual account snapshot")
+string positionState = input.string("Flat", "Actual account position", options = ["Flat", "Long", "Short"], group = "Manual account snapshot")
+bool haltLong = input.bool(true, "LONG monthly breaker is active", group = "Manual account snapshot")
+bool haltShort = input.bool(false, "SHORT monthly breaker is active", group = "Manual account snapshot")
+int lastLongExit = input.time(timestamp("01 Sep 2026 16:00:28 +0000"), "Last actual long close (epoch if none)", group = "Manual account snapshot")
+float actualEntry = input.float(0.0, "Actual entry price", minval = 0, group = "Actual open position")
+float actualStop = input.float(0.0, "Actual long stop", minval = 0, group = "Actual open position")
+float actualTp = input.float(0.0, "Actual outstanding TP1 price", minval = 0, group = "Actual open position")
+bool tpDone = input.bool(false, "Long TP1 filled (40%)", group = "Actual open position")
+float actualHigh = input.float(0.0, "Highest high since long entry", minval = 0, group = "Actual open position")
+bool showAverages = input.bool(true, "Show EMA20 and SMA200", group = "Display")
+
+if barstate.isfirst
+    if not timeframe.isminutes or timeframe.multiplier != 240 or not chart.is_standard
+        runtime.error("Use standard 4-hour candles.")
+    if syminfo.tickerid != "BINANCE:BTCUSDT.P"
+        runtime.error("Use BINANCE:BTCUSDT.P to compare with the bot.")
+    if validUntil <= validFrom
+        runtime.error("Account expiry must be after its valid-from date.")
+
+float ema20 = ta.ema(close, 20)
+float ema50 = ta.ema(close, 50)
+float ema200 = ta.ema(close, 200)
+float sma200 = ta.sma(close, 200)
+// Python first-valid-TR EWM seed; do not substitute ta.atr().
+float tr = na(close[1]) ? na : math.max(high - low, math.max(math.abs(high - close[1]), math.abs(low - close[1])))
+var float atr = na
+atr := na(tr) ? atr[1] : na(atr[1]) ? tr : atr[1] + (tr - atr[1]) / 14.0
+bool ready = bar_index >= 199 and not na(sma200) and atr > 0
+bool bull = ready and close > sma200 and ema50 > ema200
+bool bear = ready and close < sma200 and ema50 < ema200 and close < sma200 - 0.5 * atr
+// Remember only below-EMA closes in the current bull regime after the last exit.
+// Read the prior value before arming the current candle; mirrors the Python scan.
+var bool armed = false
+bool resume = bull and armed and close > ema20
+bool fresh = bull and not bull[1]
+if barstate.isconfirmed
+    if not bull or time_close <= lastLongExit
+        armed := false
+    else if close < ema20
+        armed := true
+
+// Never carry a dated snapshot into a new UTC month automatically.
+int snapshotMonth = year(validFrom, "UTC") * 100 + month(validFrom, "UTC")
+bool sameMonth = year(time_close, "UTC") * 100 + month(time_close, "UTC") == snapshotMonth
+bool known = time_close >= validFrom and time_close < validUntil and sameMonth
+bool closedReady = ready and barstate.isconfirmed
+bool flat = positionState == "Flat"
+bool longSetup = closedReady and bull and (fresh or resume)
+bool shortSetup = closedReady and bear
+bool buyEligible = longSetup and known and flat and entriesAllowed and not haltLong
+bool shortEligible = shortSetup and known and flat and entriesAllowed and not haltShort
+bool blockedLong = longSetup and known and flat and (haltLong or not entriesAllowed)
+bool blockedShort = shortSetup and known and flat and (haltShort or not entriesAllowed)
+bool unknownSetup = (longSetup or shortSetup) and not known
+bool exitLong = closedReady and known and positionState == "Long" and (haltLong or not bull)
+bool coverShort = closedReady and known and positionState == "Short" and (haltShort or not bear)
+// Only display levels supplied from a real position. No invented entry or fills.
+bool longLevels = known and positionState == "Long" and actualEntry > 0 and actualStop > 0
+float candidateStop = longLevels and tpDone and actualHigh >= actualEntry ? math.max(actualStop, math.max(actualEntry, math.max(actualHigh, high) - 4.5 * atr)) : na
+bool raiseStop = closedReady and bull and not haltLong and candidateStop > actualStop
+
+plot(showAverages ? ema20 : na, "EMA20", color = color.blue)
+plot(showAverages ? sma200 : na, "SMA200", color = color.gray)
+plot(known and positionState != "Flat" and actualEntry > 0 ? actualEntry : na, "Entered actual entry", color = color.aqua, style = plot.style_linebr)
+plot(longLevels ? actualStop : na, "Entered actual long SL", color = color.red, style = plot.style_linebr)
+plot(longLevels and not tpDone and actualTp > 0 ? actualTp : na, "Entered actual TP1 (40%)", color = color.green, style = plot.style_linebr)
+plot(raiseStop ? candidateStop : na, "Candidate 4.5 ATR stop (not placed)", color = color.orange, style = plot.style_circles)
+plot(atr * 2.5, "Long initial stop / TP1 distance", display = display.data_window)
+plotshape(buyEligible, title = "Long eligible setup", style = shape.triangleup, location = location.belowbar, color = color.lime, text = "LONG\nSETUP", size = size.tiny)
+plotshape(shortEligible, title = "Short eligible setup", style = shape.triangledown, location = location.abovebar, color = color.red, text = "SHORT\nSETUP", size = size.tiny)
+plotshape(blockedLong, title = "Long blocked", style = shape.xcross, location = location.belowbar, color = color.orange, text = "LONG\nBLOCKED", size = size.tiny)
+plotshape(blockedShort, title = "Short blocked", style = shape.xcross, location = location.abovebar, color = color.orange, text = "SHORT\nBLOCKED", size = size.tiny)
+plotshape(unknownSetup, title = "Unverified account state", style = shape.circle, location = location.belowbar, color = color.gray, text = "STATE\nUNKNOWN", size = size.tiny)
+plotshape(exitLong, title = "Long exit intent", style = shape.xcross, location = location.abovebar, color = color.red, text = "EXIT\nLONG", size = size.tiny)
+plotshape(coverShort, title = "Short cover intent", style = shape.xcross, location = location.belowbar, color = color.aqua, text = "COVER\nSHORT", size = size.tiny)
+
+var table panel = table.new(position.bottom_right, 2, 6, bgcolor = color.new(color.black, 15))
+if barstate.islast
+    table.cell(panel, 0, 0, "ATLAS 6 TRAIL", text_color = color.white)
+    table.cell(panel, 1, 0, "MANUAL SNAPSHOT", text_color = color.orange)
+    table.cell(panel, 0, 1, "Account state", text_color = color.white)
+    table.cell(panel, 1, 1, known ? positionState + " (entered)" : "UNKNOWN / REFRESH", text_color = color.orange)
+    table.cell(panel, 0, 2, "Long gate", text_color = color.white)
+    table.cell(panel, 1, 2, not known ? "UNKNOWN" : haltLong ? "MONTHLY HALT" : not entriesAllowed ? "ENTRIES DISABLED" : "OPEN (entered)", text_color = color.orange)
+    table.cell(panel, 0, 3, "Short gate", text_color = color.white)
+    table.cell(panel, 1, 3, not known ? "UNKNOWN" : haltShort ? "MONTHLY HALT" : not entriesAllowed ? "ENTRIES DISABLED" : "OPEN (entered)", text_color = color.orange)
+    table.cell(panel, 0, 4, "Chart regime", text_color = color.white)
+    table.cell(panel, 1, 4, (bull ? "BULL" : bear ? "DEEP BEAR" : "NEUTRAL") + (barstate.isconfirmed ? "" : " (forming)"), text_color = color.white)
+    table.cell(panel, 0, 5, "Signals only", text_color = color.white)
+    table.cell(panel, 1, 5, "No fills / VPS connection", text_color = color.orange)
+
+alertcondition(buyEligible, "Long eligible setup", "Atlas: long setup passes MANUAL account gates; NOT a confirmed bot order. Refresh account state after any fill.")
+alertcondition(shortEligible, "Short eligible setup", "Atlas: short setup passes MANUAL account gates; NOT a confirmed bot order. Refresh account state after any fill.")
+alertcondition(blockedLong or blockedShort, "Setup blocked", "Atlas: setup blocked by the entered monthly halt or entry gate.")
+alertcondition(unknownSetup, "Account state unknown", "Atlas: setup detected but account snapshot is outside its validity period. Check VPS and refresh inputs.")
+alertcondition(exitLong or coverShort, "Position exit intent", "Atlas: entered position qualifies for exit; confirm actual exchange position. No order placed.")
+alertcondition(raiseStop, "Long trailing stop candidate", "Atlas: 4.5 ATR trailing stop candidate above entered SL. Not an exchange stop update.")

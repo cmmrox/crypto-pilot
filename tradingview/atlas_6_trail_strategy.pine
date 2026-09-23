@@ -1,0 +1,200 @@
+//@version=6
+strategy("Atlas 6 Trail | 4h Strategy", overlay = true, initial_capital = 1000, currency = currency.USD, pyramiding = 1, commission_type = strategy.commission.percent, commission_value = 0.05, margin_long = 0, margin_short = 0, process_orders_on_close = false, calc_on_order_fills = false, calc_on_every_tick = false)
+// CryptoPilot trend_rider_refined_v1_4h / 1.0. SIMULATION, not a VPS mirror.
+// Use standard BINANCE:BTCUSDT.P 4h candles. No exchange connection.
+// Market orders fill next open. Relative brackets protect the long entry bar.
+// Sizing enforces the 6x cap. Native liquidation is disabled: TradingView
+// margin calls do not reproduce Binance isolated maintenance-margin rules.
+// Funding, liquidation, live gates, execution latency and exact fill parity are absent.
+int startAt = input.time(timestamp("01 Jan 2024 00:00:00 +0000"), "Simulation start", group = "Simulation")
+bool breakers = input.bool(true, "Simulate independent 4% monthly breakers", group = "Simulation")
+float step = input.float(0.001, "BTC quantity step", minval = 0.000001, group = "Exchange approximation")
+float minNotional = input.float(50, "Minimum order notional (USDT)", minval = 0, group = "Exchange approximation")
+bool showBlocked = input.bool(true, "Show breaker-blocked setups", group = "Display")
+bool showSlowEmas = input.bool(false, "Show EMA50 / EMA200", group = "Display")
+// Optional manual overlay. OFF by default; these are not fetched account facts.
+bool manualWindow = input.bool(false, "Apply manually verified halt window", group = "Manual account halt")
+int haltFrom = input.time(timestamp("01 Sep 2026 16:00:00 +0000"), "Halt begins (UTC)", group = "Manual account halt")
+int haltUntil = input.time(timestamp("01 Oct 2026 00:00:00 +0000"), "Halt expires (UTC)", group = "Manual account halt")
+bool manualLong = input.bool(true, "Block longs within window", group = "Manual account halt")
+bool manualShort = input.bool(false, "Block shorts within window", group = "Manual account halt")
+
+if barstate.isfirst
+    if not timeframe.isminutes or timeframe.multiplier != 240 or not chart.is_standard
+        runtime.error("Use standard 4-hour candles.")
+    if syminfo.tickerid != "BINANCE:BTCUSDT.P"
+        runtime.error("Use BINANCE:BTCUSDT.P (Binance USDT perpetual).")
+    if manualWindow and haltUntil <= haltFrom
+        runtime.error("Halt expiry must follow its start.")
+
+f_qty(float q) => math.floor(math.max(q, 0.0) / step + 1e-9) * step
+f_price(float p) => math.floor(p / syminfo.mintick + 1e-9) * syminfo.mintick
+f_valid(float q) => q >= step and q * close >= minNotional
+
+float ema20 = ta.ema(close, 20)
+float ema50 = ta.ema(close, 50)
+float ema200 = ta.ema(close, 200)
+float sma200 = ta.sma(close, 200)
+// Match Python's first-valid true-range EWM seed, not ta.atr's SMA seed.
+float tr = na(close[1]) ? na : math.max(high - low, math.max(math.abs(high - close[1]), math.abs(low - close[1])))
+var float atr = na
+atr := na(tr) ? atr[1] : na(atr[1]) ? tr : atr[1] + (tr - atr[1]) / 14.0
+bool ready = bar_index >= 199 and not na(sma200) and atr > 0
+bool bull = ready and close > sma200 and ema50 > ema200
+bool bear = ready and close < sma200 and ema50 < ema200 and close < sma200 - 0.5 * atr
+// pandas ewm(span=48, adjust=False).std(), unbiased, including first zero return.
+float ret = na(close[1]) ? 0.0 : close / close[1] - 1.0
+float alpha = 2.0 / 49.0
+var float meanRet = 0.0
+var float variance = 0.0
+var float weightSquares = 1.0
+if not barstate.isfirst
+    float delta = ret - meanRet
+    meanRet += alpha * delta
+    variance := (1 - alpha) * (variance + alpha * delta * delta)
+    weightSquares := (1 - alpha) * (1 - alpha) * weightSquares + alpha * alpha
+float rv = weightSquares < 1 ? math.sqrt(math.max(0, variance / (1 - weightSquares)) * 2190) : na
+float shortWeight = not na(rv) and rv > 0 ? 0.75 * math.min(1, 0.4 / rv) : 0
+
+var float distance = na
+var float longStop = na
+var float longTarget = na
+var float highest = na
+var float partialQty = na
+var bool tpDone = false
+var bool armed = false
+var int seenClosed = 0
+bool longClosedNow = false
+int filledSide = 0
+// Partial TP is recognized from an actual emulator fill, not a high-price guess.
+if strategy.closedtrades > seenClosed
+    for i = seenClosed to strategy.closedtrades - 1
+        bool wasLong = strategy.closedtrades.size(i) > 0
+        filledSide := wasLong ? 1 : -1
+        if wasLong and strategy.closedtrades.exit_comment(i) == "TP1 40%"
+            tpDone := true
+        if wasLong and strategy.position_size == 0
+            longClosedNow := true
+    seenClosed := strategy.closedtrades
+if longClosedNow
+    armed := false
+if strategy.position_size > 0
+    if nz(strategy.position_size[1]) <= 0
+        longStop := f_price(strategy.position_avg_price - distance)
+        longTarget := f_price(strategy.position_avg_price + distance)
+        highest := high
+    else
+        highest := math.max(highest, high)
+
+// Closed-4h, UTC monthly equity-delta attribution to the active sleeve.
+// Simulated equity includes commission and unrealized P&L, but no funding.
+int utcMonth = year(time_close, "UTC") * 100 + month(time_close, "UTC")
+var int riskMonth = na
+var float monthEquity = na
+var float previousEquity = na
+var float longPnl = 0.0
+var float shortPnl = 0.0
+var bool haltedLong = false
+var bool haltedShort = false
+bool active = ready and time_close >= startAt
+if active
+    if na(riskMonth) or utcMonth != riskMonth
+        riskMonth := utcMonth
+        monthEquity := strategy.equity
+        longPnl := 0
+        shortPnl := 0
+        haltedLong := false
+        haltedShort := false
+    else if not na(previousEquity)
+        int sleeve = nz(strategy.position_size[1]) > 0 ? 1 : nz(strategy.position_size[1]) < 0 ? -1 : strategy.position_size > 0 ? 1 : strategy.position_size < 0 ? -1 : filledSide
+        float change = strategy.equity - previousEquity
+        if sleeve == 1
+            longPnl += change
+        else if sleeve == -1
+            shortPnl += change
+    previousEquity := strategy.equity
+    haltedLong := haltedLong or (breakers and monthEquity > 0 and longPnl <= -0.04 * monthEquity)
+    haltedShort := haltedShort or (breakers and monthEquity > 0 and shortPnl <= -0.04 * monthEquity)
+bool withinManual = manualWindow and time_close >= haltFrom and time_close < haltUntil
+bool longBlocked = haltedLong or (withinManual and manualLong)
+bool shortBlocked = haltedShort or (withinManual and manualShort)
+bool flat = strategy.position_size == 0
+bool longSetup = active and flat and bull and (not bull[1] or armed and close > ema20)
+bool shortSetup = active and flat and bear
+bool buySignal = false
+bool shortSignal = false
+
+if active and barstate.isconfirmed
+    if strategy.position_size > 0
+        armed := false
+        if longBlocked or not bull
+            strategy.cancel_all()
+            strategy.close_all(comment = longBlocked ? "Long monthly halt" : "SELL: regime ended")
+        else
+            if tpDone
+                longStop := f_price(math.max(longStop, math.max(strategy.position_avg_price, highest - 4.5 * atr)))
+                strategy.cancel("L-TP1")
+            else
+                strategy.exit("L-TP1", "Long", qty = partialQty, stop = longStop, limit = longTarget, oca_name = "Partial", comment_profit = "TP1 40%", comment_loss = "Long SL")
+            strategy.exit("L-Runner", "Long", stop = longStop, qty_percent = 100, oca_name = "Runner", comment_loss = tpDone ? "Runner SL" : "Long SL")
+    else if strategy.position_size < 0
+        if shortBlocked or not bear
+            strategy.close_all(comment = shortBlocked ? "Short monthly halt" : "COVER: deep bear ended")
+        else
+            float target = f_qty(strategy.equity * shortWeight / close)
+            float current = math.abs(strategy.position_size)
+            float drift = math.abs(target - current) / current
+            if f_valid(target) and drift > 0.20
+                float adjustment = f_qty(math.abs(target - current))
+                if adjustment >= step and adjustment * close >= minNotional
+                    strategy.order("Short", target > current ? strategy.short : strategy.long, qty = adjustment, comment = target > current ? "Short add" : "Short reduce")
+    else if strategy.equity > 0
+        // Size from the signal close; actual next-open price can gap.
+        float marginCap = strategy.equity * 0.98 / (close * (1.0 / 6.0 + 0.0005))
+        if longSetup and not longBlocked
+            distance := 2.5 * atr
+            float qty = f_qty(math.min(strategy.equity * 0.15 / distance, math.min(strategy.equity * 6.0 / close, marginCap)))
+            partialQty := f_qty(qty * 0.4)
+            if f_valid(qty) and partialQty >= step and qty - partialQty >= step
+                tpDone := false
+                longStop := na
+                longTarget := na
+                highest := na
+                armed := false
+                buySignal := true
+                int ticks = math.max(1, int(math.round(distance / syminfo.mintick)))
+                strategy.entry("Long", strategy.long, qty = qty, comment = "BUY")
+                strategy.exit("L-TP1", "Long", qty = partialQty, loss = ticks, profit = ticks, oca_name = "Partial", comment_profit = "TP1 40%", comment_loss = "Long SL")
+                strategy.exit("L-Runner", "Long", qty_percent = 100, loss = ticks, oca_name = "Runner", comment_loss = "Long SL")
+        else if shortSetup and not shortBlocked
+            float qty = f_qty(math.min(strategy.equity * shortWeight / close, marginCap))
+            if f_valid(qty)
+                shortSignal := true
+                strategy.order("Short", strategy.short, qty = qty, comment = "SHORT")
+    // A below-EMA close on an exit candle can arm the next pullback resumption.
+    if not bull or strategy.position_size > 0 or buySignal
+        armed := false
+    else if close < ema20
+        armed := true
+
+plot(ema20, "EMA20", color = color.blue)
+plot(sma200, "SMA200", color = color.gray, linewidth = 2)
+plot(showSlowEmas ? ema50 : na, "EMA50", color = color.yellow)
+plot(showSlowEmas ? ema200 : na, "EMA200", color = color.purple)
+plot(strategy.position_size > 0 ? strategy.position_avg_price : na, "Long entry", color = color.aqua, style = plot.style_linebr)
+plot(strategy.position_size > 0 ? longStop : na, "Long stop for NEXT bar", color = color.red, style = plot.style_linebr)
+plot(strategy.position_size > 0 and not tpDone ? longTarget : na, "Outstanding TP1", color = color.green, style = plot.style_linebr)
+plotshape(buySignal, "BUY setup (fill next open)", shape.triangleup, location.belowbar, color.lime, text = "BUY", size = size.tiny)
+plotshape(shortSignal, "SHORT setup (fill next open)", shape.triangledown, location.abovebar, color.red, text = "SHORT", size = size.tiny)
+plotshape(showBlocked and longSetup and longBlocked, "Long blocked", shape.xcross, location.belowbar, color.orange, text = "HALT", size = size.tiny)
+plotshape(showBlocked and shortSetup and shortBlocked, "Short blocked", shape.xcross, location.abovebar, color.orange, text = "HALT", size = size.tiny)
+var table panel = table.new(position.bottom_right, 2, 4, bgcolor = color.new(color.black, 15))
+if barstate.islast
+    table.cell(panel, 0, 0, "ATLAS 6 TRAIL", text_color = color.white)
+    table.cell(panel, 1, 0, "SIMULATED", text_color = color.orange)
+    table.cell(panel, 0, 1, "Position", text_color = color.white)
+    table.cell(panel, 1, 1, strategy.position_size > 0 ? "LONG" : strategy.position_size < 0 ? "SHORT" : "FLAT", text_color = color.white)
+    table.cell(panel, 0, 2, "Long / short gate", text_color = color.white)
+    table.cell(panel, 1, 2, (longBlocked ? "HALTED" : "OPEN") + " / " + (shortBlocked ? "HALTED" : "OPEN"), text_color = color.orange)
+    table.cell(panel, 0, 3, "Live account", text_color = color.white)
+    table.cell(panel, 1, 3, "NOT CONNECTED", text_color = color.orange)

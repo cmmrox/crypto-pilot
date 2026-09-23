@@ -1,7 +1,8 @@
 //@version=6
-strategy("Atlas 7 Dual | 4h Strategy (research)", overlay = true, initial_capital = 1000, currency = currency.USD, pyramiding = 0, commission_type = strategy.commission.percent, commission_value = 0.07, margin_long = 0, margin_short = 0, process_orders_on_close = false, calc_on_order_fills = false, calc_on_every_tick = false)
-// RESEARCH CANDIDATE from experiments/monthly_income_research (2026-09-22). Not a registered
-// bot release and not connected to any exchange. Use standard BINANCE:BTCUSDT.P 4h candles.
+strategy("Atlas 7 Dual | 4h Strategy", overlay = true, initial_capital = 1000, currency = currency.USD, pyramiding = 0, commission_type = strategy.commission.percent, commission_value = 0.07, margin_long = 0, margin_short = 0, process_orders_on_close = false, calc_on_order_fills = false, calc_on_every_tick = false)
+// CryptoPilot atlas_dual_v1_4h / 1.0 (Atlas 7 Dual · 4h). SIMULATION, not a VPS mirror and not
+// connected to any exchange. Researched in experiments/monthly_income_research (2026-09-22).
+// Use standard BINANCE:BTCUSDT.P 4h candles.
 // Two entry engines, one position, long and short, every position has a price stop:
 //   A) trend pullback: regime + close back above/below EMA20 (Atlas-style),
 //   B) volatility squeeze breakout: tight 24-bar range breaks in the regime direction.

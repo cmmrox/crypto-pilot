@@ -78,3 +78,49 @@ backup and long-running trading acceptance gates.
 Final smoke checks: public root HTTP 200, unauthenticated strategy API HTTP 401,
 browser console zero errors/warnings, deadman healthy with zero consecutive
 failures, and no WARNING/ERROR application events in the cutover window.
+
+## Follow-up production deployment: merged main, 08:08 UTC
+
+The owner again requested production deployment without Lab. Deployed merged main
+`e0bf69090dd9d1e1943e5e5952fddabdd39b3958` from the clean VPS checkout at `117e667`.
+This adds the confirmed trading-environment display and Atlas strategy labels.
+The VPS checkout now matches freshly fetched `origin/main`.
+
+Fresh preflight and post-cutover signed Binance reads both showed zero positions,
+regular orders and Algo orders, matching zero open database trades. The existing
+LIVE run 13 and active `trend_rider_refined_v1_4h` strategy were preserved. Its full
+manifest compared equal between old and new images after excluding display name.
+No strategy selection, environment switch or test order was performed.
+
+Only backend, frontend and deadman containers were replaced. Caddy, backup and
+every unrelated running container retained their IDs. Compose still has exactly
+five production services, without the experiments overlay. Backend Lab URL/token
+remain empty; the frontend was built with `VITE_EXPERIMENT_LAB_ENABLED=false` and
+the image contains no ExperimentLab page bundle.
+
+Rollback images carry `rollback-e0bf690` tags. Previous configuration, image IDs,
+source identity, build logs and executable rollback script are protected under
+`/home/cmmrox/crypto-pilot-releases/e0bf690/`. The encrypted database snapshot is
+`/home/cmmrox/backups/cryptopilot-continuous/cryptopilot-pre-e0bf690.sql.gz.enc` with
+its HMAC sidecar. Authentication and decrypted gzip integrity passed; no fresh
+database restore drill was performed. Alembic remained `b7c8d9e0f1a2`; there were no
+new migrations.
+
+Running image identities:
+
+- Backend/deadman: `sha256:bbd4c250de94c9165a2bb676b089d45de57780acfebb58627482f49e4444592b`
+- Frontend: `sha256:78d3f2e4fef03299ec3934b8268924b2ff697e36b40af2a249ac7c5dff2bc7d3`
+
+All replacement containers had zero restarts. Deep health confirmed database OK,
+healthy worker, live scheduler and current ingestion. Public root and health
+returned HTTP 200; unauthenticated strategies returned HTTP 401. Browser smoke
+rendered the production login form with no warning/error console entries.
+
+Fresh local verification: dependency lock/export integrity passed; parity plus
+overview/catalog API tests passed (8 tests); frontend lint/types, seven unit tests
+and the Lab-disabled production build passed. The existing pytest executable had
+a stale interpreter path from the previous repository name; running the same
+suite through `.venv/bin/python -m pytest` passed. Prior broader regression is
+documented in `ENVIRONMENT-NAMES-AGENTS-2026-09-07.md`; it was not rerun here.
+Real-SMS authenticated browser acceptance and future trading outcomes were not
+tested during this deployment. Existing infrastructure gates remain unchanged.

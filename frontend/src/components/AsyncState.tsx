@@ -1,12 +1,6 @@
 import { LoaderCircle } from "lucide-react";
 
-export function Spinner({
-  size = 16,
-  label,
-}: {
-  size?: number;
-  label?: string;
-}) {
+export function Spinner({ size = 16, label }: { size?: number; label?: string }) {
   return (
     <span className="spinner-wrap" role={label ? "status" : undefined} aria-label={label}>
       <LoaderCircle className="spinner" size={size} aria-hidden="true" />

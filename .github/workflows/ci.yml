@@ -99,6 +99,8 @@ jobs:
         run: npm audit --audit-level=high
       - name: Lint + typecheck
         run: npm run lint
+      - name: Formatting (Prettier)
+        run: npm run format:check
       - name: Unit tests
         run: npm test
       - name: Build

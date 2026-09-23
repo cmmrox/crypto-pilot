@@ -85,3 +85,6 @@ tmp/
 output/
 .lab-data/
 var/experiment-lab/
+
+# TypeScript incremental build cache
+*.tsbuildinfo

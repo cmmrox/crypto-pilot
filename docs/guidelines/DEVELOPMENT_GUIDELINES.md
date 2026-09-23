@@ -50,13 +50,17 @@ The workflow rules for building CryptoPilot. Stack-specific rules:
   cd backend
   uv lock
   uv export --frozen --no-dev --no-emit-project \
+    --no-emit-package cryptopilot-strategy-runtime \
     --format requirements-txt --output-file requirements.lock
   uv sync --frozen --all-groups
   uv run --frozen pip-audit
   ```
 
   `uv.lock` pins the complete development/CI graph. The production image installs
-  the hash-verified `requirements.lock`; never hand-edit either generated file.
+  the hash-verified `requirements.lock`; never hand-edit either generated file. The
+  image copies `packages/strategy_runtime` separately, so the export must exclude it:
+  an editable path line cannot pass `pip install --require-hashes`. CI's lock
+  integrity step uses this exact command.
 
 ## When blocked or uncertain
 

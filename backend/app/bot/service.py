@@ -487,7 +487,11 @@ class BotService:
             long_entry=(
                 float(trade.entry_px) if trade is not None and trade.side == "LONG" else None
             ),
-            long_stop=(float(synced.long_stop) if synced.long_stop is not None else None),
+            long_stop=(
+                float(synced.stop_price)
+                if synced.stop_price is not None and trade is not None and trade.side == "LONG"
+                else None
+            ),
             highest_high=(
                 float(trade.highest_high)
                 if trade is not None and trade.highest_high is not None
@@ -506,8 +510,8 @@ class BotService:
                 float(trade.entry_px) if trade is not None and trade.side == "SHORT" else None
             ),
             short_stop=(
-                float(synced.long_stop)
-                if synced.long_stop is not None and trade is not None and trade.side == "SHORT"
+                float(synced.stop_price)
+                if synced.stop_price is not None and trade is not None and trade.side == "SHORT"
                 else None
             ),
             lowest_low=(

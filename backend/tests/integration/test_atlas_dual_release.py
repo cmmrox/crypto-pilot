@@ -365,3 +365,28 @@ async def test_overview_breaker_meter_uses_this_release_cap(db_session: AsyncSes
     # Half of an 8% cap is a half-full meter, not a full one.
     assert _breaker_progress(D("-0.04"), risk.long_monthly_loss_cap) == "50.00"
     assert _breaker_progress(D("-0.08"), risk.long_monthly_loss_cap) == "100.00"
+
+
+@pytest.mark.asyncio
+async def test_decision_state_reports_each_stop_on_its_own_side(
+    db_session: AsyncSession,
+) -> None:
+    """The strategy must never read a short's stop through ``long_stop`` (or vice versa)."""
+    await _replay(db_session, bars=1233)
+    payloads = (
+        (
+            await db_session.execute(
+                select(Event.payload_json).where(
+                    Event.category == "strategy", Event.ref.like("decision:%")
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    states = [payload["state"] for payload in payloads]
+    in_long = [state for state in states if state["long_position"]]
+    in_short = [state for state in states if state["short_position"]]
+    assert in_long and in_short, "the replay must hold both books at some point"
+    assert all(s["long_stop"] is not None and s["short_stop"] is None for s in in_long)
+    assert all(s["short_stop"] is not None and s["long_stop"] is None for s in in_short)

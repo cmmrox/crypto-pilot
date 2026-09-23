@@ -26,7 +26,8 @@ class SyncedTrade:
     position: Position
     expected_qty: Decimal
     matched: bool
-    long_stop: Decimal | None
+    # The active protective stop of the open trade, whichever side it is on.
+    stop_price: Decimal | None
     tp1_done: bool
 
 
@@ -56,7 +57,7 @@ async def sync_open_trade(
             position=position,
             expected_qty=Decimal("0"),
             matched=position.qty == 0,
-            long_stop=None,
+            stop_price=None,
             tp1_done=False,
         )
 
@@ -116,7 +117,7 @@ async def sync_open_trade(
         and order.status in {"NEW", "PARTIALLY_FILLED"}
         and order.stop_price is not None
     ]
-    long_stop = active_stops[-1].stop_price if active_stops else None
+    stop_price = active_stops[-1].stop_price if active_stops else None
     tp1_done = any(
         order.type == "LIMIT"
         and order.reduce_only
@@ -129,7 +130,7 @@ async def sync_open_trade(
         position=position,
         expected_qty=expected_qty,
         matched=matched,
-        long_stop=long_stop,
+        stop_price=stop_price,
         tp1_done=tp1_done,
     )
 

@@ -22,7 +22,7 @@ from app.bot.scheduler import (
     utc_now,
 )
 from app.bot.service import bot_service
-from app.db.models import Briefing, Candle, Event, Trade
+from app.db.models import Briefing, Candle, EquitySnapshot, Event, Trade
 from app.execution import candles as candle_svc
 from app.execution.binance_client import BinanceError, console_client, log_unreachable
 from app.execution.binance_exchange import BinanceExchange
@@ -703,3 +703,21 @@ def _sparkline(candles: list[Candle]) -> list[SparkPoint]:
         )
         for row in rows
     ]
+
+
+async def equity_history(session: AsyncSession, *, limit: int) -> list[EquitySnapshot]:
+    """The active environment's most recent equity snapshots, oldest first."""
+    environment = (await get_settings_row(session)).active_environment
+    rows = (
+        (
+            await session.execute(
+                select(EquitySnapshot)
+                .where(EquitySnapshot.environment == environment)
+                .order_by(EquitySnapshot.ts.desc())
+                .limit(limit)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return list(reversed(rows))

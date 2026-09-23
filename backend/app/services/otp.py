@@ -293,6 +293,26 @@ def user_phone(user: User) -> str | None:
     return decrypt(user.phone_encrypted, get_settings().master_key)
 
 
+async def captured_test_code(
+    session: AsyncSession,
+    *,
+    challenge_id: int | None,
+    phone: str | None,
+    email: str | None,
+) -> str | None:
+    """The last code captured in test mode, looked up by challenge, phone or user email.
+
+    Only the E2E dev-code endpoint (test mode) uses this; production never captures.
+    """
+    if challenge_id is not None:
+        return _TEST_CODES.get(f"challenge:{challenge_id}")
+    target = normalize_phone(phone) if phone else None
+    if target is None and email is not None:
+        user = (await session.execute(select(User).where(User.email == email))).scalar_one_or_none()
+        target = user_phone(user) if user else None
+    return _TEST_CODES.get(target) if target else None
+
+
 async def cleanup_expired(session: AsyncSession) -> int:
     """Delete challenges that can no longer be used.
 

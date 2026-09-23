@@ -127,7 +127,15 @@ export function Login({
             </div>
           )}
           <button className="button primary full" type="submit" disabled={busy}>
-            {busy ? <><Spinner /> Verifying credentials…</> : <>Continue <ArrowRight size={16} /></>}
+            {busy ? (
+              <>
+                <Spinner /> Verifying credentials…
+              </>
+            ) : (
+              <>
+                Continue <ArrowRight size={16} />
+              </>
+            )}
           </button>
           <div className="auth-security-note">
             <ShieldCheck size={16} />

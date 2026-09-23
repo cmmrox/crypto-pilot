@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import { getBotStatus, type BotStatus } from "../api/client";
+import { usePolling } from "../hooks/usePolling";
 
 interface TradingStatus {
   status: BotStatus | null;
@@ -35,15 +36,13 @@ export function TradingStatusProvider({ children }: { children: ReactNode }) {
       if (request === requestState.current.generation) setLoading(false);
     }
   }, []);
+  usePolling(() => void refresh(), 10000);
   useEffect(() => {
     const state = requestState.current;
-    void refresh();
-    const poll = window.setInterval(() => void refresh(), 10000);
     const focus = () => void refresh();
     window.addEventListener("focus", focus);
     return () => {
       ++state.generation;
-      window.clearInterval(poll);
       window.removeEventListener("focus", focus);
     };
   }, [refresh]);

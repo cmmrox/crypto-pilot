@@ -131,7 +131,13 @@ export function ConfirmModal({ modal, onClose }: { modal: ModalSpec; onClose: ()
             disabled={!canConfirm || busy}
             onClick={() => void confirm()}
           >
-            {busy ? <><Spinner /> Confirming…</> : (modal.confirmLabel ?? "Confirm")}
+            {busy ? (
+              <>
+                <Spinner /> Confirming…
+              </>
+            ) : (
+              (modal.confirmLabel ?? "Confirm")
+            )}
           </button>
         </div>
       </section>

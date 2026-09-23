@@ -148,7 +148,13 @@ export function Otp({
           </div>
         )}
         <button className="button primary full" type="submit" disabled={busy}>
-          {busy ? <><Spinner /> Verifying code…</> : "Verify & enter"}
+          {busy ? (
+            <>
+              <Spinner /> Verifying code…
+            </>
+          ) : (
+            "Verify & enter"
+          )}
         </button>
         <button
           type="button"
@@ -157,7 +163,15 @@ export function Otp({
           onClick={() => void resend()}
           disabled={cooldown > 0 || resendBusy}
         >
-          {resendBusy ? <><Spinner /> Sending code…</> : cooldown > 0 ? `Resend code in ${cooldown}s` : "Resend code"}
+          {resendBusy ? (
+            <>
+              <Spinner /> Sending code…
+            </>
+          ) : cooldown > 0 ? (
+            `Resend code in ${cooldown}s`
+          ) : (
+            "Resend code"
+          )}
         </button>
         <div className="otp-required">
           <ShieldCheck size={15} />

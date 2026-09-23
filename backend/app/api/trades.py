@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import csv
-import datetime as dt
 import io
 import math
 from collections.abc import AsyncIterator
@@ -12,13 +11,20 @@ from typing import Annotated, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import Select, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.sql.elements import ColumnElement
 
 from app.api.deps import CurrentUserDep
-from app.db.models import Order, Trade
+from app.db.models import Trade
 from app.db.session import get_session
+from app.services.trade_history import (
+    InvalidMonthError,
+    TradeFilter,
+    stream_trades,
+    trade_outcome,
+    trade_page,
+    trade_with_orders,
+    validate_filter,
+)
 
 router = APIRouter(prefix="/api/trades", tags=["trades"])
 
@@ -65,14 +71,6 @@ class TradePageOut(BaseModel):
     total_pages: int
 
 
-def _outcome(t: Trade) -> str:
-    if t.closed_at is None:
-        return "OPEN"
-    if t.realized_pnl is None:
-        return "OPEN"
-    return "WIN" if t.realized_pnl > 0 else "LOSS"
-
-
 def _to_out(t: Trade) -> TradeOut:
     return TradeOut(
         id=t.id,
@@ -88,55 +86,26 @@ def _to_out(t: Trade) -> TradeOut:
         exit_reason=t.exit_reason,
         strategy=t.strategy,
         environment=t.environment,
-        outcome=_outcome(t),
+        outcome=trade_outcome(t),
     )
 
 
-def _trade_filters(
-    side: Literal["LONG", "SHORT"] | None,
-    environment: Literal["DEMO", "LIVE"] | None,
+def _selection(
+    side: str | None,
+    environment: str | None,
     strategy: str | None,
     month: str | None,
     search: str | None,
-) -> list[ColumnElement[bool]]:
-    filters: list[ColumnElement[bool]] = []
-    if side:
-        filters.append(Trade.side == side)
-    if environment:
-        filters.append(Trade.environment == environment)
-    if strategy:
-        filters.append(Trade.strategy == strategy)
-    if month:
-        try:
-            month_start = dt.date.fromisoformat(f"{month}-01")
-        except ValueError as exc:
-            raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail="month must be a valid YYYY-MM value",
-            ) from exc
-        next_month = (
-            dt.date(month_start.year + 1, 1, 1)
-            if month_start.month == 12
-            else dt.date(month_start.year, month_start.month + 1, 1)
-        )
-        start = dt.datetime.combine(month_start, dt.time.min, tzinfo=dt.UTC)
-        end = dt.datetime.combine(next_month, dt.time.min, tzinfo=dt.UTC)
-        filters.extend((Trade.opened_at >= start, Trade.opened_at < end))
-    if search:
-        from sqlalchemy import String, cast
-
-        like = f"%{search.lower()}%"
-        filters.append(
-            or_(
-                func.lower(func.coalesce(Trade.exit_reason, "")).like(like),
-                cast(Trade.id, String).like(f"%{search}%"),
-            )
-        )
-    return filters
-
-
-def _filtered_query(filters: list[ColumnElement[bool]]) -> Select[tuple[Trade]]:
-    return select(Trade).where(*filters).order_by(Trade.opened_at.desc(), Trade.id.desc())
+) -> TradeFilter:
+    selection = TradeFilter(side, environment, strategy, month, search)
+    try:
+        validate_filter(selection)
+    except InvalidMonthError as exc:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="month must be a valid YYYY-MM value",
+        ) from exc
+    return selection
 
 
 @router.get("", response_model=TradePageOut)
@@ -151,10 +120,8 @@ async def list_trades(
     page: Annotated[int, Query(ge=1, le=100_000)] = 1,
     page_size: Annotated[int, Query(ge=1, le=50)] = 50,
 ) -> TradePageOut:
-    filters = _trade_filters(side, environment, strategy, month, search)
-    total = (await session.execute(select(func.count(Trade.id)).where(*filters))).scalar_one()
-    stmt = _filtered_query(filters).offset((page - 1) * page_size).limit(page_size)
-    rows = (await session.execute(stmt)).scalars().all()
+    selection = _selection(side, environment, strategy, month, search)
+    total, rows = await trade_page(session, selection, page=page, page_size=page_size)
     return TradePageOut(
         items=[_to_out(t) for t in rows],
         total=total,
@@ -174,7 +141,7 @@ async def export_csv(
     month: Annotated[str | None, Query(pattern=r"^\d{4}-\d{2}$")] = None,
     search: Annotated[str | None, Query(max_length=100)] = None,
 ) -> StreamingResponse:
-    filters = _trade_filters(side, environment, strategy, month, search)
+    selection = _selection(side, environment, strategy, month, search)
 
     async def generate() -> AsyncIterator[str]:
         buf = io.StringIO()
@@ -203,8 +170,7 @@ async def export_csv(
                 "exit_reason",
             ]
         )
-        result = await session.stream_scalars(_filtered_query(filters))
-        async for trade in result:
+        async for trade in stream_trades(session, selection):
             yield line(
                 [
                     trade.id,
@@ -234,14 +200,10 @@ async def export_csv(
 async def trade_detail(
     trade_id: int, _current: CurrentUserDep, session: SessionDep
 ) -> TradeDetailOut:
-    t = (await session.execute(select(Trade).where(Trade.id == trade_id))).scalar_one_or_none()
-    if t is None:
+    found = await trade_with_orders(session, trade_id)
+    if found is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="trade not found")
-    orders = (
-        (await session.execute(select(Order).where(Order.trade_id == trade_id).order_by(Order.id)))
-        .scalars()
-        .all()
-    )
+    t, orders = found
     base = _to_out(t)
     return TradeDetailOut(
         **base.model_dump(),

@@ -7,14 +7,12 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
-from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.sql.elements import ColumnElement
 
 from app.api.deps import CurrentUserDep
 from app.api.schemas import EventOut
-from app.db.models import Event
 from app.db.session import get_session
+from app.services.events import EventFilter, event_page
 
 router = APIRouter(prefix="/api/events", tags=["events"])
 
@@ -55,28 +53,9 @@ async def list_events(
     page_size: Annotated[int, Query(ge=1, le=50)] = 50,
 ) -> EventPageOut:
     """Return recent events (newest first) with optional filters."""
-    filters: list[ColumnElement[bool]] = []
-    if level:
-        filters.append(Event.level == level)
-    if category:
-        filters.append(Event.category == category)
-    if search:
-        like = f"%{search.lower()}%"
-        filters.append(
-            or_(
-                func.lower(Event.message).like(like),
-                func.lower(func.coalesce(Event.ref, "")).like(like),
-            )
-        )
-    total = (await session.execute(select(func.count(Event.id)).where(*filters))).scalar_one()
-    stmt = (
-        select(Event)
-        .where(*filters)
-        .order_by(Event.ts.desc(), Event.id.desc())
-        .offset((page - 1) * page_size)
-        .limit(page_size)
+    total, rows = await event_page(
+        session, EventFilter(level, category, search), page=page, page_size=page_size
     )
-    rows = (await session.execute(stmt)).scalars().all()
     return EventPageOut(
         items=[
             EventOut(

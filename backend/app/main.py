@@ -66,7 +66,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
         await news_scheduler.stop()
     from app.db.session import dispose_engine
+    from app.execution.binance_client import close_console_clients
 
+    await close_console_clients()
     await dispose_engine()
     log.info("app_stopped")
 

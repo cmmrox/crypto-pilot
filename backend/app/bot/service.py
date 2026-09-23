@@ -650,7 +650,12 @@ class BotService:
                 actions.append("exit_all")
                 # A reversal emits ExitAll followed by the opposite entry in the same
                 # decision, so the entry guards below must see the now-flat account.
+                # Refresh the account too: the closed position's initial margin was
+                # still locked in the pre-exit snapshot, which would cap the reversal
+                # entry well below its risk budget.
                 pos = await exchange.get_position(market.symbol)
+                acct = await exchange.get_account()
+                equity = acct.balance + acct.unrealized_pnl
                 trade = None
             elif isinstance(intent, MoveStop) and pos.qty != 0 and trade is not None:
                 move = orders.move_long_stop if pos.qty > 0 else orders.move_short_stop

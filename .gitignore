@@ -79,6 +79,8 @@ Thumbs.db
 .vscode/
 
 # Local tooling caches / scratch
+# Local QA/deploy evidence exports (live account data) — never commit
+.artifacts/
 tmp/
 output/
 .lab-data/

@@ -53,7 +53,7 @@ The workflow rules for building CryptoPilot. Stack-specific rules:
     --no-emit-package cryptopilot-strategy-runtime \
     --format requirements-txt --output-file requirements.lock
   uv sync --frozen --all-groups
-  uv run --frozen pip-audit
+  uv run --frozen pip-audit --skip-editable
   ```
 
   `uv.lock` pins the complete development/CI graph. The production image installs

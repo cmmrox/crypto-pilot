@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -12,6 +13,7 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from app.core.config import get_settings
+from app.core.logging import get_logger
 
 _engine: AsyncEngine | None = None
 _sessionmaker: async_sessionmaker[AsyncSession] | None = None
@@ -59,3 +61,13 @@ async def dispose_engine() -> None:
         await _engine.dispose()
         _engine = None
         _sessionmaker = None
+
+
+async def database_ok(session: AsyncSession) -> bool:
+    """Whether the database answers a trivial query. Health probes report, never raise."""
+    try:
+        await session.execute(text("SELECT 1"))
+    except Exception as exc:
+        get_logger("db").warning("database_unreachable", error_type=type(exc).__name__)
+        return False
+    return True

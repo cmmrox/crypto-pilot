@@ -70,6 +70,7 @@ def audit(repo_root: Path) -> LivePathAudit:
             handled.add(type_node.id)
         elif isinstance(type_node, ast.Tuple):
             handled.update(item.id for item in type_node.elts if isinstance(item, ast.Name))
+    handled.update(_dispatch_table_intents(tree))
     breaker_connected = (
         "halted_long=" in bot_source
         and "halted_short=" in bot_source
@@ -136,6 +137,27 @@ def audit(repo_root: Path) -> LivePathAudit:
         next_open_execution_available=next_open_execution,
         passed=all(checks),
     )
+
+
+def _dispatch_table_intents(tree: ast.Module) -> set[str]:
+    """Intent types registered in the bot's ``_INTENT_HANDLERS`` dispatch table.
+
+    The live service dispatches each intent through that table rather than an
+    isinstance chain; an intent counts as handled only if it has an entry.
+    """
+    intents: set[str] = set()
+    for node in tree.body:
+        target = node.target if isinstance(node, ast.AnnAssign) else None
+        if isinstance(node, ast.Assign) and len(node.targets) == 1:
+            target = node.targets[0]
+        value = node.value if isinstance(node, ast.Assign | ast.AnnAssign) else None
+        if (
+            isinstance(target, ast.Name)
+            and target.id == "_INTENT_HANDLERS"
+            and isinstance(value, ast.Dict)
+        ):
+            intents.update(key.id for key in value.keys if isinstance(key, ast.Name))
+    return intents
 
 
 def _function_source(source: str, name: str) -> str:

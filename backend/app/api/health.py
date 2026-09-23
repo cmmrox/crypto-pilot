@@ -6,11 +6,10 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings, get_settings
-from app.db.session import get_session
+from app.db.session import database_ok, get_session
 
 router = APIRouter(tags=["health"])
 
@@ -27,11 +26,7 @@ async def health(
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> HealthResponse:
     """Return service + database health."""
-    try:
-        await session.execute(text("SELECT 1"))
-        db_status = "ok"
-    except Exception:  # pragma: no cover - exercised via integration
-        db_status = "error"
+    db_status = "ok" if await database_ok(session) else "error"
     return HealthResponse(
         status="ok" if db_status == "ok" else "degraded",
         version=settings.version,
@@ -59,11 +54,7 @@ async def deep_health(
     """Deeper health for the dead-man's-switch cron and ops page."""
     import datetime as dt
 
-    try:
-        await session.execute(text("SELECT 1"))
-        db_status = "ok"
-    except Exception:  # pragma: no cover
-        db_status = "error"
+    db_status = "ok" if await database_ok(session) else "error"
 
     from app.bot.ingest import WORKER_HEARTBEAT_SECONDS, ingest_service
 

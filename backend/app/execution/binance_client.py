@@ -13,6 +13,7 @@ import hmac
 import random
 import time
 import urllib.parse
+import weakref
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
@@ -297,3 +298,53 @@ class BinanceClient:
         except ValueError:
             pass
         raise BinanceError(message, status=resp.status_code, code=code)
+
+
+# --- Owner-console reads ---------------------------------------------------
+#
+# The Overview and market status poll every few seconds. They share one
+# keep-alive connection pool per environment (a fresh TLS handshake per call
+# dominated their latency) and fail fast: one attempt with a short timeout. For a
+# display, "unreachable" now beats a request that retries for a minute. Trading
+# paths keep the retrying, per-call client above.
+
+CONSOLE_TIMEOUT_SECONDS = 5.0
+_console_pools: dict[str, tuple[weakref.ref[asyncio.AbstractEventLoop], httpx.AsyncClient]] = {}
+
+
+def console_client(
+    environment: str,
+    *,
+    api_key: str | None = None,
+    api_secret: str | None = None,
+) -> BinanceClient:
+    """Return a fail-fast client on this event loop's shared pool for `environment`.
+
+    Credentials stay on the returned `BinanceClient` and travel per request, so
+    sharing the connection pool never shares a key.
+    """
+    if environment not in BASE_URLS:
+        raise ValueError(f"unknown environment: {environment}")
+    loop = asyncio.get_running_loop()
+    pooled = _console_pools.get(environment)
+    if pooled is None or pooled[0]() is not loop or pooled[1].is_closed:
+        http = httpx.AsyncClient(base_url=BASE_URLS[environment], timeout=CONSOLE_TIMEOUT_SECONDS)
+        _console_pools[environment] = (weakref.ref(loop), http)
+    else:
+        http = pooled[1]
+    return BinanceClient(
+        environment,
+        api_key=api_key,
+        api_secret=api_secret,
+        client=http,
+        max_retries=1,
+    )
+
+
+async def close_console_clients() -> None:
+    """Close the pools owned by the running event loop (application shutdown)."""
+    loop = asyncio.get_running_loop()
+    for environment, (owner, http) in list(_console_pools.items()):
+        if owner() is loop:
+            await http.aclose()
+            del _console_pools[environment]

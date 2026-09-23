@@ -49,7 +49,10 @@ jobs:
             <(sed '1,2d' requirements.lock) \
             <(sed '1,2d' /tmp/cryptopilot-requirements.check)
       - name: Dependency audit
-        run: uv run --frozen pip-audit
+        # Our own packages (the backend and the strategy runtime) are editable local
+        # installs that PyPI has never published; querying PyPI for them only adds a
+        # way for a PyPI outage to fail the audit. Every real dependency is audited.
+        run: uv run --frozen pip-audit --skip-editable
       - name: Lint (ruff)
         run: source .venv/bin/activate && ruff check app tests
       - name: Formatting
@@ -99,6 +102,8 @@ jobs:
         run: npm audit --audit-level=high
       - name: Lint + typecheck
         run: npm run lint
+      - name: Formatting (Prettier)
+        run: npm run format:check
       - name: Unit tests
         run: npm test
       - name: Build

@@ -1,11 +1,4 @@
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type CSSProperties,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Link } from "react-router-dom";
 import {
   Activity,
@@ -37,6 +30,7 @@ import {
 } from "../api/client";
 import { ConfirmModal, type ModalSpec } from "../components/ConfirmModal";
 import { LoadingState, Spinner } from "../components/AsyncState";
+import { usePolling } from "../hooks/usePolling";
 
 const POLL_MS = 4000;
 
@@ -115,15 +109,11 @@ export function Overview() {
     }
   }, []);
 
+  usePolling(() => void load(), POLL_MS);
   useEffect(() => {
-    void load();
-    const poll = window.setInterval(() => void load(), POLL_MS);
     const clock = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => {
-      window.clearInterval(poll);
-      window.clearInterval(clock);
-    };
-  }, [load]);
+    return () => window.clearInterval(clock);
+  }, []);
 
   const showToast = (message: string) => {
     setToast(message);
@@ -188,7 +178,11 @@ export function Overview() {
                   kicker: "RECONCILE & START",
                   title: `Start on ${data?.environment ?? "Unavailable"}?`,
                   body: "CryptoPilot connects to Binance, reconciles account truth, then begins the 24/7 loop.",
-                  details: ["No action before reconciliation", "Mismatch → safe mode", "Decisions only at 4h close"],
+                  details: [
+                    "No action before reconciliation",
+                    "Mismatch → safe mode",
+                    "Decisions only at 4h close",
+                  ],
                   confirmLabel: "Reconcile & start",
                   onConfirm: () => act(startBot, "Bot started; awaiting the next 4h close"),
                 })
@@ -237,12 +231,14 @@ export function Overview() {
 
       {safeMode && (
         <div className="banner warn" data-testid="safe-mode-banner">
-          <ShieldAlert size={18} /> Safe mode — new entries are blocked; management and reconciliation continue.
+          <ShieldAlert size={18} /> Safe mode — new entries are blocked; management and
+          reconciliation continue.
         </div>
       )}
       {pollError && (
         <div className="banner err" data-testid="overview-refresh-error">
-          <Radio size={18} /> Live refresh failed: {pollError}. Last known values remain visible and are marked stale.
+          <Radio size={18} /> Live refresh failed: {pollError}. Last known values remain visible and
+          are marked stale.
         </div>
       )}
 
@@ -253,7 +249,13 @@ export function Overview() {
             data-testid="bot-status"
           >
             <i className="dot" />
-            {!data ? "Checking status" : safeMode ? "Safe mode" : running ? "Bot running" : "Bot stopped"}
+            {!data
+              ? "Checking status"
+              : safeMode
+                ? "Safe mode"
+                : running
+                  ? "Bot running"
+                  : "Bot stopped"}
           </span>
           <div>
             <strong>
@@ -265,7 +267,9 @@ export function Overview() {
             </strong>
             <small data-testid="heartbeat-age">
               Heartbeat {relativeTime(data?.engine.heartbeat_at ?? null, now)}
-              {data?.engine.heartbeat_age_seconds != null ? ` · ${data.engine.heartbeat_age_seconds.toFixed(1)}s at last poll` : ""}
+              {data?.engine.heartbeat_age_seconds != null
+                ? ` · ${data.engine.heartbeat_age_seconds.toFixed(1)}s at last poll`
+                : ""}
             </small>
           </div>
         </div>
@@ -304,7 +308,8 @@ export function Overview() {
         <>
           {!data.account_available && (
             <div className="banner warn" data-testid="account-unavailable">
-              <Wallet size={18} /> Binance account credentials are unavailable. Public market, worker, strategy, and news state remain live; account values show zero.
+              <Wallet size={18} /> Binance account credentials are unavailable. Public market,
+              worker, strategy, and news state remain live; account values show zero.
             </div>
           )}
 
@@ -313,16 +318,22 @@ export function Overview() {
               <div className="card-head">
                 <div>
                   <p className="kicker">MARKET NOW · BINANCE MARK PRICE</p>
-                  <h2>{data.market.symbol} · {data.market.interval}</h2>
+                  <h2>
+                    {data.market.symbol} · {data.market.interval}
+                  </h2>
                 </div>
-                <span className={`source-badge ${data.market.stale || responseStale ? "warn" : "ok"}`}>
+                <span
+                  className={`source-badge ${data.market.stale || responseStale ? "warn" : "ok"}`}
+                >
                   <i className="dot" /> {data.market.stale || responseStale ? "Stale" : "Live"}
                 </span>
               </div>
               <div className="market-price-row">
                 <div>
                   <strong className="market-price">
-                    {data.market.mark_price ? `$${fixedDecimal(data.market.mark_price, 2)}` : "Unavailable"}
+                    {data.market.mark_price
+                      ? `$${fixedDecimal(data.market.mark_price, 2)}`
+                      : "Unavailable"}
                   </strong>
                   <span className={marketChangeNegative ? "tone-err" : "tone-ok"}>
                     {data.market.price_change_24h_pct
@@ -378,7 +389,9 @@ export function Overview() {
                 </div>
                 <CalendarClock size={20} />
               </div>
-              <strong className="decision-countdown" data-testid="decision-countdown">{nextDecision}</strong>
+              <strong className="decision-countdown" data-testid="decision-countdown">
+                {nextDecision}
+              </strong>
               <p>Until {dateTime(data.market.next_close_utc)}</p>
               <div className="decision-rule">
                 <Clock3 size={16} />
@@ -410,7 +423,9 @@ export function Overview() {
               <div className="news-isolation" data-testid="news-isolation-notice">
                 <ShieldCheck size={14} /> {data.briefing.isolation_notice}
               </div>
-              <Link to="/news" className="card-link">Open news briefing <ArrowRight size={14} /></Link>
+              <Link to="/news" className="card-link">
+                Open news briefing <ArrowRight size={14} />
+              </Link>
             </section>
 
             <section className="panel watch-card" data-testid="strategy-watch-panel">
@@ -419,13 +434,21 @@ export function Overview() {
                   <p className="kicker">WHAT THE STRATEGY IS WATCHING</p>
                   <h2>{data.strategy_display_name} · closed-candle state</h2>
                 </div>
-                <span className="source-badge neutral">{watchRules.filter((rule) => rule.active).length} active</span>
+                <span className="source-badge neutral">
+                  {watchRules.filter((rule) => rule.active).length} active
+                </span>
               </div>
               {data.watch.available ? (
                 <div className="watch-list">
                   {watchRules.map((rule) => (
-                    <article key={rule.key} className={`watch-rule ${rule.tone}`} data-testid={`watch-${rule.key}`}>
-                      <span className="watch-marker"><i /></span>
+                    <article
+                      key={rule.key}
+                      className={`watch-rule ${rule.tone}`}
+                      data-testid={`watch-${rule.key}`}
+                    >
+                      <span className="watch-marker">
+                        <i />
+                      </span>
                       <div>
                         <div className="watch-rule-head">
                           <strong>{rule.label}</strong>
@@ -433,8 +456,11 @@ export function Overview() {
                         </div>
                         <p>{rule.condition}</p>
                         <small>
-                          Threshold ${rule.threshold_price ? fixedDecimal(rule.threshold_price, 2) : "—"}
-                          {rule.distance_pct ? ` · mark distance ${fixedDecimal(rule.distance_pct, 2)}%` : ""}
+                          Threshold $
+                          {rule.threshold_price ? fixedDecimal(rule.threshold_price, 2) : "—"}
+                          {rule.distance_pct
+                            ? ` · mark distance ${fixedDecimal(rule.distance_pct, 2)}%`
+                            : ""}
                         </small>
                       </div>
                     </article>
@@ -475,16 +501,33 @@ export function Overview() {
                   <div className="inline-empty">No activity has been recorded yet.</div>
                 )}
               </div>
-              <Link to="/events" className="card-link">Open event ledger <ArrowRight size={14} /></Link>
+              <Link to="/events" className="card-link">
+                Open event ledger <ArrowRight size={14} />
+              </Link>
             </aside>
 
             <div className="stats-grid command-stats">
-              <Stat label="Account balance" value={signedMoney(data.balance)} icon={<Wallet size={18} />} />
-              <Stat label="Total equity" value={signedMoney(data.equity)} icon={<Activity size={18} />} tone={isNegative(data.equity) ? "err" : "ok"} />
+              <Stat
+                label="Account balance"
+                value={signedMoney(data.balance)}
+                icon={<Wallet size={18} />}
+              />
+              <Stat
+                label="Total equity"
+                value={signedMoney(data.equity)}
+                icon={<Activity size={18} />}
+                tone={isNegative(data.equity) ? "err" : "ok"}
+              />
               <Stat
                 label="Unrealized P&L"
                 value={signedMoney(data.unrealized_pnl)}
-                icon={isNegative(data.unrealized_pnl) ? <TrendingDown size={18} /> : <TrendingUp size={18} />}
+                icon={
+                  isNegative(data.unrealized_pnl) ? (
+                    <TrendingDown size={18} />
+                  ) : (
+                    <TrendingUp size={18} />
+                  )
+                }
                 tone={isNegative(data.unrealized_pnl) ? "err" : "ok"}
               />
               <Stat
@@ -500,27 +543,61 @@ export function Overview() {
               {data.position ? (
                 <>
                   <h2>
-                    {data.market.symbol} · <span className={data.position.side === "SHORT" ? "tone-err" : "tone-ok"}>{data.position.side}</span>
+                    {data.market.symbol} ·{" "}
+                    <span className={data.position.side === "SHORT" ? "tone-err" : "tone-ok"}>
+                      {data.position.side}
+                    </span>
                   </h2>
                   <div className="position-values">
-                    <span><small>Entry</small><strong>${fixedDecimal(data.position.entry_price)}</strong></span>
-                    <span><small>Mark</small><strong>{data.position.mark_price ? `$${fixedDecimal(data.position.mark_price)}` : "Unavailable"}</strong></span>
-                    <span><small>Quantity</small><strong>{data.position.qty} BTC</strong></span>
-                    <span><small>Effective leverage</small><strong>{data.position.leverage}×</strong></span>
-                    <span><small>Unrealized P&L</small><strong className={isNegative(data.position.unrealized_pnl) ? "tone-err" : "tone-ok"}>{signedMoney(data.position.unrealized_pnl)}</strong></span>
+                    <span>
+                      <small>Entry</small>
+                      <strong>${fixedDecimal(data.position.entry_price)}</strong>
+                    </span>
+                    <span>
+                      <small>Mark</small>
+                      <strong>
+                        {data.position.mark_price
+                          ? `$${fixedDecimal(data.position.mark_price)}`
+                          : "Unavailable"}
+                      </strong>
+                    </span>
+                    <span>
+                      <small>Quantity</small>
+                      <strong>{data.position.qty} BTC</strong>
+                    </span>
+                    <span>
+                      <small>Effective leverage</small>
+                      <strong>{data.position.leverage}×</strong>
+                    </span>
+                    <span>
+                      <small>Unrealized P&L</small>
+                      <strong
+                        className={
+                          isNegative(data.position.unrealized_pnl) ? "tone-err" : "tone-ok"
+                        }
+                      >
+                        {signedMoney(data.position.unrealized_pnl)}
+                      </strong>
+                    </span>
                   </div>
                   {!data.position.has_price_stop && (
                     <div className="short-risk-callout" data-testid="no-stop-callout">
                       <ShieldAlert size={19} />
                       <div>
                         <strong>No price stop — validated size-managed short</strong>
-                        <p>Risk is controlled by volatility-scaled size, the independent monthly sleeve breaker, and a closed-candle regime exit.</p>
+                        <p>
+                          Risk is controlled by volatility-scaled size, the independent monthly
+                          sleeve breaker, and a closed-candle regime exit.
+                        </p>
                       </div>
                     </div>
                   )}
                 </>
               ) : (
-                <div className="empty-state"><ShieldCheck size={22} /><p>Flat — no open position.</p></div>
+                <div className="empty-state">
+                  <ShieldCheck size={22} />
+                  <p>Flat — no open position.</p>
+                </div>
               )}
             </section>
 
@@ -528,11 +605,26 @@ export function Overview() {
               <p className="kicker">INDEPENDENT GUARDRAILS</p>
               <h2>Monthly circuit breakers</h2>
               {data.breakers.map((breaker) => (
-                <div className="breaker-item" key={breaker.book} data-testid={`breaker-${breaker.book.split(" ")[0].toLowerCase()}`}>
+                <div
+                  className="breaker-item"
+                  key={breaker.book}
+                  data-testid={`breaker-${breaker.book.split(" ")[0].toLowerCase()}`}
+                >
                   <div>
-                    <span>{breaker.book.includes("Long") ? <TrendingUp size={14} /> : <TrendingDown size={14} />}{breaker.book}</span>
-                    <strong className={isNegative(breaker.month_to_date_pnl) ? "tone-err" : "tone-ok"}>
-                      {breaker.available ? signedMoney(breaker.month_to_date_pnl) : "Account unavailable"}
+                    <span>
+                      {breaker.book.includes("Long") ? (
+                        <TrendingUp size={14} />
+                      ) : (
+                        <TrendingDown size={14} />
+                      )}
+                      {breaker.book}
+                    </span>
+                    <strong
+                      className={isNegative(breaker.month_to_date_pnl) ? "tone-err" : "tone-ok"}
+                    >
+                      {breaker.available
+                        ? signedMoney(breaker.month_to_date_pnl)
+                        : "Account unavailable"}
                     </strong>
                   </div>
                   <div className="breaker-track">
@@ -541,7 +633,11 @@ export function Overview() {
                       className={breaker.tripped ? "tripped" : ""}
                     />
                   </div>
-                  <small>{breaker.tripped ? "TRIPPED — halted until the 1st" : `Healthy · halts independently at −${breaker.cap_pct}% MTD`}</small>
+                  <small>
+                    {breaker.tripped
+                      ? "TRIPPED — halted until the 1st"
+                      : `Healthy · halts independently at −${breaker.cap_pct}% MTD`}
+                  </small>
                 </div>
               ))}
             </section>
@@ -573,7 +669,10 @@ function RailCheck({
   return (
     <div className="rail-check">
       <span className={ok ? "tone-ok" : "tone-err"}>{icon}</span>
-      <span><small>{label}</small><strong>{value}</strong></span>
+      <span>
+        <small>{label}</small>
+        <strong>{value}</strong>
+      </span>
     </div>
   );
 }

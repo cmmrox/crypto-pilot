@@ -12,8 +12,10 @@ a FakeExchange + seeded candles.
 from __future__ import annotations
 
 import datetime as dt
-from dataclasses import dataclass
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
 from decimal import Decimal
+from typing import Any, TypedDict
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,13 +24,13 @@ from app.bot.scheduler import INTERVAL_SECONDS
 from app.bot.state import BotSnapshot, BotStatus
 from app.core.logging import get_logger
 from app.db.models import BotRun, Candle, EquitySnapshot, Event, Trade
-from app.execution.exchange import Exchange
+from app.execution.exchange import AccountState, Exchange, Position
 from app.execution.filters import SymbolFilters, clamp_qty, meets_min_notional, round_price
 from app.execution.orders import OrderManager
 from app.execution.reconcile import reconcile_position
-from app.execution.trade_sync import sync_open_trade
+from app.execution.trade_sync import SyncedTrade, sync_open_trade
 from app.risk.breakers import evaluate_breaker
-from app.risk.sizing import SizingResult, margin_capped_qty, size_by_risk, size_long
+from app.risk.sizing import SizingResult, margin_capped_qty, size_by_risk
 from app.services.events import record_event
 from app.services.settings_store import get_settings_row
 from app.strategies import (
@@ -37,8 +39,11 @@ from app.strategies import (
     EnterShortStop,
     ExitAll,
     Halt,
+    Intent,
     MoveStop,
     ResizeShort,
+    RiskSpec,
+    Strategy,
     TakePartial,
     TradeState,
     canonical_strategy_id,
@@ -58,6 +63,54 @@ class MonthlyRiskState:
     short_pnl: Decimal
     halted_long: bool
     halted_short: bool
+
+
+class _ReleaseTags(TypedDict):
+    strategy: str
+    strategy_release: str
+    strategy_interval: str
+    bot_run_id: int
+
+
+@dataclass
+class _BreakerOutcome:
+    long_tripped: bool
+    short_tripped: bool
+    actions: list[str] = field(default_factory=list)
+    flattened: bool = False
+
+
+@dataclass
+class _Decision:
+    """One closed-candle decision's inputs, updated as its intents execute."""
+
+    session: AsyncSession
+    exchange: Exchange
+    orders: OrderManager
+    run: BotRun
+    strategy: Strategy
+    filters: SymbolFilters
+    execution_price: Decimal
+    account: AccountState
+    equity: Decimal
+    position: Position
+    trade: Trade | None
+    state: TradeState
+    entries_allowed: bool
+    actions: list[str]
+
+    def can_enter(self, *, halted: bool) -> bool:
+        """New positions open only from flat, with entries allowed and the book live."""
+        return self.position.qty == 0 and self.entries_allowed and not halted
+
+    def release_tags(self) -> _ReleaseTags:
+        manifest = self.strategy.manifest
+        return _ReleaseTags(
+            strategy=manifest.strategy_id,
+            strategy_release=manifest.release,
+            strategy_interval=manifest.market.interval,
+            bot_run_id=self.run.id,
+        )
 
 
 class BotService:
@@ -281,97 +334,222 @@ class BotService:
         if run is None or not candles:
             return []
         settings_row = await get_settings_row(session)
+        environment = settings_row.active_environment
         strategy = get_strategy(run.strategy)
         market = strategy.manifest.market
-        risk = strategy.manifest.risk
         decision_candle_at = candles[-1].open_time
         synced = await sync_open_trade(
             session,
             exchange,
-            environment=settings_row.active_environment,
+            environment=environment,
             symbol=market.symbol,
         )
         if not synced.matched:
-            reconciliation = await reconcile_position(
-                exchange, market.symbol, expected_qty=synced.expected_qty
-            )
-            await self.enter_safe_mode(
-                session, reason=f"every-close reconciliation: {reconciliation.detail}"
-            )
-            await record_event(
+            return await self._block_on_mismatch(
                 session,
-                level="WARN",
-                category="reconciliation",
-                message="Closed-candle decision blocked by reconciliation mismatch",
-                ref=f"bot_run:{run.id}",
-                payload={
-                    "expected_qty": str(reconciliation.expected_qty),
-                    "actual_qty": str(reconciliation.actual_qty),
-                },
+                exchange,
+                run=run,
+                symbol=market.symbol,
+                synced=synced,
+                decision_candle_at=decision_candle_at,
             )
-            run.last_evaluated_candle_at = decision_candle_at
-            return ["safe_mode"]
 
         previous_decision = run.last_evaluated_candle_at
         if previous_decision is not None and decision_candle_at <= previous_decision:
             return []
-
-        interval = dt.timedelta(seconds=INTERVAL_SECONDS[market.interval])
-        missed_decision = (
-            previous_decision is not None and decision_candle_at > previous_decision + interval
-        )
-        if missed_decision:
-            assert previous_decision is not None
+        if await self._guard_missed_decision(
+            session,
+            run=run,
+            interval=market.interval,
+            previous_decision=previous_decision,
+            decision_candle_at=decision_candle_at,
+        ):
             allow_new_entries = False
-            await self.enter_safe_mode(
-                session,
-                reason=(
-                    "one or more closed-candle decisions were missed; "
-                    "stale entries are blocked pending owner review"
-                ),
-            )
-            await record_event(
-                session,
-                level="ERROR",
-                category="reconciliation",
-                message="Missed closed-candle decision; stale entries blocked",
-                ref=f"bot_run:{run.id}",
-                payload={
-                    "previous_candle": previous_decision.isoformat(),
-                    "current_candle": decision_candle_at.isoformat(),
-                    "strategy": run.strategy,
-                    "interval": market.interval,
-                },
-            )
-            from app.services.notify_config import notify_event
 
-            await notify_event(
-                session,
-                kind="error",
-                payload={
-                    "error": (
-                        "missed closed-candle decision; stale entries blocked "
-                        "and bot entered safe mode"
-                    )
-                },
-            )
-
-        acct = await exchange.get_account()
-        equity = acct.balance + acct.unrealized_pnl
-        pos = synced.position
+        account = await exchange.get_account()
+        equity = account.balance + account.unrealized_pnl
         filters = await exchange.get_filters(market.symbol)
         execution_price = await exchange.get_mark_price(market.symbol)
-        snapshot_at = candles[-1].open_time + dt.timedelta(
-            seconds=INTERVAL_SECONDS[market.interval]
-        )
+        snapshot_at = decision_candle_at + dt.timedelta(seconds=INTERVAL_SECONDS[market.interval])
         monthly = await self._monthly_risk_state(
             session,
-            environment=settings_row.active_environment,
+            environment=environment,
             snapshot_at=snapshot_at,
             equity=equity,
             active_trade=synced.trade,
         )
-        actions: list[str] = []
+        breakers = await self._enforce_breakers(
+            session,
+            orders,
+            run=run,
+            risk=strategy.manifest.risk,
+            monthly=monthly,
+            position=synced.position,
+        )
+        if breakers.flattened:
+            await self._close_decision(
+                session,
+                exchange,
+                run=run,
+                monthly=monthly,
+                snapshot_at=snapshot_at,
+                decision_candle_at=decision_candle_at,
+            )
+            return breakers.actions
+
+        strategy_candles = _strategy_candles(candles)
+        state = await self._trade_state(
+            session,
+            run=run,
+            decision_candle=candles[-1],
+            synced=synced,
+            equity=equity,
+            monthly=monthly,
+            breakers=breakers,
+        )
+        intents = strategy.on_candle(strategy_candles, state)
+        entries_allowed = run.stop_reason != "safe_mode" and allow_new_entries
+        record_decision(
+            session,
+            strategy=strategy,
+            candles=strategy_candles,
+            state=state,
+            intents=intents,
+            entries_allowed=entries_allowed,
+            run_id=run.id,
+            equity=equity,
+            execution_price=execution_price,
+        )
+
+        decision = _Decision(
+            session=session,
+            exchange=exchange,
+            orders=orders,
+            run=run,
+            strategy=strategy,
+            filters=filters,
+            execution_price=execution_price,
+            account=account,
+            equity=equity,
+            position=synced.position,
+            trade=synced.trade,
+            state=state,
+            entries_allowed=entries_allowed,
+            actions=breakers.actions,
+        )
+        for intent in intents:
+            handler = _INTENT_HANDLERS.get(type(intent))
+            if handler is not None:
+                await handler(self, decision, intent)
+
+        await self._report_stale_entries(
+            session,
+            run=run,
+            intents=intents,
+            allow_new_entries=allow_new_entries,
+            decision_candle_at=decision_candle_at,
+            actions=decision.actions,
+        )
+        await self._close_decision(
+            session,
+            exchange,
+            run=run,
+            monthly=monthly,
+            snapshot_at=snapshot_at,
+            decision_candle_at=decision_candle_at,
+        )
+        return decision.actions
+
+    # --- Decision steps --------------------------------------------------------
+
+    async def _block_on_mismatch(
+        self,
+        session: AsyncSession,
+        exchange: Exchange,
+        *,
+        run: BotRun,
+        symbol: str,
+        synced: SyncedTrade,
+        decision_candle_at: dt.datetime,
+    ) -> list[str]:
+        """Exchange and database disagree: enter safe mode instead of deciding."""
+        reconciliation = await reconcile_position(
+            exchange, symbol, expected_qty=synced.expected_qty
+        )
+        await self.enter_safe_mode(
+            session, reason=f"every-close reconciliation: {reconciliation.detail}"
+        )
+        await record_event(
+            session,
+            level="WARN",
+            category="reconciliation",
+            message="Closed-candle decision blocked by reconciliation mismatch",
+            ref=f"bot_run:{run.id}",
+            payload={
+                "expected_qty": str(reconciliation.expected_qty),
+                "actual_qty": str(reconciliation.actual_qty),
+            },
+        )
+        run.last_evaluated_candle_at = decision_candle_at
+        return ["safe_mode"]
+
+    async def _guard_missed_decision(
+        self,
+        session: AsyncSession,
+        *,
+        run: BotRun,
+        interval: str,
+        previous_decision: dt.datetime | None,
+        decision_candle_at: dt.datetime,
+    ) -> bool:
+        """Return True, after entering safe mode and paging, if a close was skipped."""
+        step = dt.timedelta(seconds=INTERVAL_SECONDS[interval])
+        if previous_decision is None or decision_candle_at <= previous_decision + step:
+            return False
+        await self.enter_safe_mode(
+            session,
+            reason=(
+                "one or more closed-candle decisions were missed; "
+                "stale entries are blocked pending owner review"
+            ),
+        )
+        await record_event(
+            session,
+            level="ERROR",
+            category="reconciliation",
+            message="Missed closed-candle decision; stale entries blocked",
+            ref=f"bot_run:{run.id}",
+            payload={
+                "previous_candle": previous_decision.isoformat(),
+                "current_candle": decision_candle_at.isoformat(),
+                "strategy": run.strategy,
+                "interval": interval,
+            },
+        )
+        from app.services.notify_config import notify_event
+
+        await notify_event(
+            session,
+            kind="error",
+            payload={
+                "error": (
+                    "missed closed-candle decision; stale entries blocked and bot entered safe mode"
+                )
+            },
+        )
+        return True
+
+    async def _enforce_breakers(
+        self,
+        session: AsyncSession,
+        orders: OrderManager,
+        *,
+        run: BotRun,
+        risk: RiskSpec,
+        monthly: MonthlyRiskState,
+        position: Position,
+    ) -> _BreakerOutcome:
+        """Trip each book's monthly breaker independently and flatten that book."""
         long_trip = evaluate_breaker(
             month_start_equity=monthly.month_start_equity,
             month_to_date_pnl=monthly.long_pnl,
@@ -382,7 +560,7 @@ class BotService:
             month_to_date_pnl=monthly.short_pnl,
             cap=risk.short_monthly_loss_cap,
         ).tripped
-        breaker_acted = False
+        outcome = _BreakerOutcome(long_tripped=long_trip, short_tripped=short_trip)
         if long_trip and not monthly.halted_long:
             await self._trip_breaker(
                 session,
@@ -392,16 +570,16 @@ class BotService:
                 pnl=monthly.long_pnl,
                 month_start_equity=monthly.month_start_equity,
             )
-            actions.append("halt_long")
-            if pos.qty > 0:
+            outcome.actions.append("halt_long")
+            if position.qty > 0:
                 await orders.flatten(
                     session,
                     side="LONG",
-                    qty=pos.qty,
+                    qty=position.qty,
                     reason="long monthly breaker",
                 )
-                actions.append("breaker_exit_long")
-                breaker_acted = True
+                outcome.actions.append("breaker_exit_long")
+                outcome.flattened = True
         if short_trip and not monthly.halted_short:
             await self._trip_breaker(
                 session,
@@ -411,78 +589,44 @@ class BotService:
                 pnl=monthly.short_pnl,
                 month_start_equity=monthly.month_start_equity,
             )
-            actions.append("halt_short")
-            if pos.qty < 0:
+            outcome.actions.append("halt_short")
+            if position.qty < 0:
                 await orders.flatten(
                     session,
                     side="SHORT",
-                    qty=pos.qty,
+                    qty=position.qty,
                     reason="short monthly breaker",
                 )
-                actions.append("breaker_exit_short")
-                breaker_acted = True
-        if breaker_acted:
-            await self.write_equity_snapshot(
-                session,
-                exchange,
-                snapshot_at=snapshot_at,
-                long_month_pnl=monthly.long_pnl,
-                short_month_pnl=monthly.short_pnl,
-            )
-            run.last_evaluated_candle_at = decision_candle_at
-            return actions
+                outcome.actions.append("breaker_exit_short")
+                outcome.flattened = True
+        return outcome
 
-        strat = strategy
-        strat_candles = [
-            StratCandle(
-                open_time_ms=int(c.open_time.timestamp() * 1000),
-                open=float(c.open),
-                high=float(c.high),
-                low=float(c.low),
-                close=float(c.close),
-                volume=float(c.volume),
-            )
-            for c in candles
-        ]
-        short_weight = 0.0
-        if pos.qty < 0 and equity > 0:
-            short_weight = float(abs(pos.qty) * pos.entry_price / equity)
+    async def _trade_state(
+        self,
+        session: AsyncSession,
+        *,
+        run: BotRun,
+        decision_candle: Candle,
+        synced: SyncedTrade,
+        equity: Decimal,
+        monthly: MonthlyRiskState,
+        breakers: _BreakerOutcome,
+    ) -> TradeState:
+        """Advance the open trade's extremes and describe the account to the strategy."""
+        position = synced.position
         trade = synced.trade
-        if trade is not None and trade.side == "LONG" and pos.qty > 0:
-            candle_high = candles[-1].high
-            trade.highest_high = max(
-                trade.highest_high or trade.entry_px,
-                candle_high,
-            )
-        if trade is not None and trade.side == "SHORT" and pos.qty < 0:
-            candle_low = candles[-1].low
-            trade.lowest_low = min(
-                trade.lowest_low or trade.entry_px,
-                candle_low,
-            )
-        last_long_closed_at = await session.scalar(
-            select(Trade.closed_at)
-            .where(
-                Trade.environment == run.environment,
-                Trade.side == "LONG",
-                Trade.closed_at.is_not(None),
-            )
-            .order_by(Trade.closed_at.desc())
-            .limit(1)
-        )
-        last_short_closed_at = await session.scalar(
-            select(Trade.closed_at)
-            .where(
-                Trade.environment == run.environment,
-                Trade.side == "SHORT",
-                Trade.closed_at.is_not(None),
-            )
-            .order_by(Trade.closed_at.desc())
-            .limit(1)
-        )
-        state = TradeState(
+        short_weight = 0.0
+        if position.qty < 0 and equity > 0:
+            short_weight = float(abs(position.qty) * position.entry_price / equity)
+        if trade is not None and trade.side == "LONG" and position.qty > 0:
+            trade.highest_high = max(trade.highest_high or trade.entry_px, decision_candle.high)
+        if trade is not None and trade.side == "SHORT" and position.qty < 0:
+            trade.lowest_low = min(trade.lowest_low or trade.entry_px, decision_candle.low)
+        last_long_closed_at = await _last_closed_at(session, run.environment, "LONG")
+        last_short_closed_at = await _last_closed_at(session, run.environment, "SHORT")
+        return TradeState(
             equity=float(equity),
-            long_position=pos.qty > 0,
+            long_position=position.qty > 0,
             short_weight=short_weight,
             long_entry=(
                 float(trade.entry_px) if trade is not None and trade.side == "LONG" else None
@@ -498,14 +642,10 @@ class BotService:
                 else None
             ),
             tp1_done=synced.tp1_done,
-            last_long_closed_at_ms=(
-                int(last_long_closed_at.timestamp() * 1000)
-                if last_long_closed_at is not None
-                else None
-            ),
-            halted_long=monthly.halted_long or long_trip,
-            halted_short=monthly.halted_short or short_trip,
-            short_position=pos.qty < 0,
+            last_long_closed_at_ms=_epoch_ms(last_long_closed_at),
+            halted_long=monthly.halted_long or breakers.long_tripped,
+            halted_short=monthly.halted_short or breakers.short_tripped,
+            short_position=position.qty < 0,
             short_entry=(
                 float(trade.entry_px) if trade is not None and trade.side == "SHORT" else None
             ),
@@ -519,217 +659,52 @@ class BotService:
                 if trade is not None and trade.lowest_low is not None
                 else None
             ),
-            last_short_closed_at_ms=(
-                int(last_short_closed_at.timestamp() * 1000)
-                if last_short_closed_at is not None
-                else None
-            ),
-        )
-        intents = strat.on_candle(strat_candles, state)
-        entries_allowed = run.stop_reason != "safe_mode" and allow_new_entries
-        record_decision(
-            session,
-            strategy=strat,
-            candles=strat_candles,
-            state=state,
-            intents=intents,
-            entries_allowed=entries_allowed,
-            run_id=run.id,
-            equity=equity,
-            execution_price=execution_price,
+            last_short_closed_at_ms=_epoch_ms(last_short_closed_at),
         )
 
-        for intent in intents:
-            if (
-                isinstance(intent, EnterLong)
-                and pos.qty == 0
-                and entries_allowed
-                and not state.halted_long
-            ):
-                sizing = size_long(
-                    equity=equity,
-                    risk_pct=risk.long_risk_pct,
-                    stop_distance=Decimal(str(intent.stop_distance)),
-                    price=execution_price,
-                    leverage_cap=risk.leverage_cap,
-                    available_margin=acct.available,
-                    filters=filters,
-                )
-                if sizing.ok:
-                    # Strategy distances are floats, so the raw prices land on
-                    # sub-tick precision. Round before they reach the exchange or
-                    # the protective stop is rejected (-1111) and the long is
-                    # left naked until the emergency flatten.
-                    stop_price = round_price(
-                        execution_price - Decimal(str(intent.stop_distance)),
-                        filters.tick_size,
-                    )
-                    tp_r, tp_frac = intent.tp_levels[0]
-                    tp1_price = round_price(
-                        execution_price + Decimal(str(tp_r)) * Decimal(str(intent.stop_distance)),
-                        filters.tick_size,
-                    )
-                    await orders.open_long(
-                        session,
-                        sizing=sizing,
-                        stop_price=stop_price,
-                        tp1_price=tp1_price,
-                        tp1_fraction=Decimal(str(tp_frac)),
-                        strategy=strat.manifest.strategy_id,
-                        strategy_release=strat.manifest.release,
-                        strategy_interval=strat.manifest.market.interval,
-                        bot_run_id=run.id,
-                    )
-                    actions.append("open_long")
-            elif (
-                isinstance(intent, EnterShort)
-                and pos.qty == 0
-                and entries_allowed
-                and not state.halted_short
-            ):
-                sizing = _size_short_from_intent(
-                    intent,
-                    equity,
-                    execution_price,
-                    filters,
-                    leverage_cap=risk.leverage_cap,
-                    available_margin=acct.available,
-                )
-                if sizing.ok:
-                    await orders.open_short(
-                        session,
-                        sizing=sizing,
-                        strategy=strat.manifest.strategy_id,
-                        strategy_release=strat.manifest.release,
-                        strategy_interval=strat.manifest.market.interval,
-                        bot_run_id=run.id,
-                    )
-                    actions.append("open_short")
-            elif (
-                isinstance(intent, EnterShortStop)
-                and pos.qty == 0
-                and entries_allowed
-                and not state.halted_short
-            ):
-                sizing = size_by_risk(
-                    equity=equity,
-                    risk_pct=risk.long_risk_pct,
-                    stop_distance=Decimal(str(intent.stop_distance)),
-                    price=execution_price,
-                    leverage_cap=risk.leverage_cap,
-                    available_margin=acct.available,
-                    filters=filters,
-                )
-                if sizing.ok:
-                    # Round before the prices reach the exchange, or the protective
-                    # stop is rejected (-1111) and the short is left unprotected.
-                    stop_price = round_price(
-                        execution_price + Decimal(str(intent.stop_distance)),
-                        filters.tick_size,
-                    )
-                    tp_r, tp_frac = intent.tp_levels[0]
-                    tp1_price = round_price(
-                        execution_price - Decimal(str(tp_r)) * Decimal(str(intent.stop_distance)),
-                        filters.tick_size,
-                    )
-                    await orders.open_short_with_stop(
-                        session,
-                        sizing=sizing,
-                        stop_price=stop_price,
-                        tp1_price=tp1_price,
-                        tp1_fraction=Decimal(str(tp_frac)),
-                        strategy=strat.manifest.strategy_id,
-                        strategy_release=strat.manifest.release,
-                        strategy_interval=strat.manifest.market.interval,
-                        bot_run_id=run.id,
-                    )
-                    actions.append("open_short")
-            elif isinstance(intent, ExitAll) and pos.qty != 0:
-                side = "LONG" if pos.qty > 0 else "SHORT"
-                await orders.flatten(session, side=side, qty=pos.qty, reason=intent.reason)
-                actions.append("exit_all")
-                # A reversal emits ExitAll followed by the opposite entry in the same
-                # decision, so the entry guards below must see the now-flat account.
-                # Refresh the account too: the closed position's initial margin was
-                # still locked in the pre-exit snapshot, which would cap the reversal
-                # entry well below its risk budget.
-                pos = await exchange.get_position(market.symbol)
-                acct = await exchange.get_account()
-                equity = acct.balance + acct.unrealized_pnl
-                trade = None
-            elif isinstance(intent, MoveStop) and pos.qty != 0 and trade is not None:
-                move = orders.move_long_stop if pos.qty > 0 else orders.move_short_stop
-                moved = await move(
-                    session,
-                    trade=trade,
-                    new_stop_price=Decimal(str(intent.price)),
-                    remaining_qty=abs(pos.qty),
-                    filters=filters,
-                )
-                if moved:
-                    actions.append("move_stop")
-            elif isinstance(intent, ResizeShort) and pos.qty < 0 and trade is not None:
-                target_qty = clamp_qty(
-                    equity * Decimal(str(intent.target_weight)) / execution_price,
-                    filters,
-                )
-                current_qty = abs(pos.qty)
-                drift = (
-                    abs(target_qty - current_qty) / current_qty if current_qty > 0 else Decimal("0")
-                )
-                if (
-                    target_qty > 0
-                    and meets_min_notional(target_qty, execution_price, filters)
-                    and drift > risk.short_resize_drift
-                    and await orders.resize_short(
-                        session,
-                        trade=trade,
-                        current_qty=pos.qty,
-                        target_qty=target_qty,
-                    )
-                ):
-                    actions.append("resize_short")
-            elif isinstance(intent, TakePartial):
-                await record_event(
-                    session,
-                    level="INFO",
-                    category="trade",
-                    message=f"TP level {intent.level_id} synchronized",
-                    ref=f"trade:{trade.id}" if trade is not None else "take_partial",
-                    payload={"level_id": intent.level_id},
-                )
-                actions.append("take_partial")
-            elif isinstance(intent, Halt):
-                await record_event(
-                    session,
-                    level="WARN",
-                    category="breaker",
-                    message=f"Strategy halt requested until {intent.until}",
-                    ref=f"strategy_halt:{intent.until}",
-                    payload={"until": intent.until},
-                )
-                actions.append("halt")
-
+    async def _report_stale_entries(
+        self,
+        session: AsyncSession,
+        *,
+        run: BotRun,
+        intents: list[Intent],
+        allow_new_entries: bool,
+        decision_candle_at: dt.datetime,
+        actions: list[str],
+    ) -> None:
+        """Audit entry signals that arrived outside their validated execution window."""
         stale_entry_intents = [
             intent
             for intent in intents
             if isinstance(intent, EnterLong | EnterShort | EnterShortStop)
         ]
-        if not allow_new_entries and stale_entry_intents:
-            await record_event(
-                session,
-                level="WARN",
-                category="reconciliation",
-                message="Stale entry signal skipped outside its validated execution window",
-                ref=f"bot_run:{run.id}",
-                payload={
-                    "candle_open_time": decision_candle_at.isoformat(),
-                    "strategy": run.strategy,
-                    "intents": [type(intent).__name__ for intent in stale_entry_intents],
-                },
-            )
-            actions.append("stale_entry_skipped")
+        if allow_new_entries or not stale_entry_intents:
+            return
+        await record_event(
+            session,
+            level="WARN",
+            category="reconciliation",
+            message="Stale entry signal skipped outside its validated execution window",
+            ref=f"bot_run:{run.id}",
+            payload={
+                "candle_open_time": decision_candle_at.isoformat(),
+                "strategy": run.strategy,
+                "intents": [type(intent).__name__ for intent in stale_entry_intents],
+            },
+        )
+        actions.append("stale_entry_skipped")
 
+    async def _close_decision(
+        self,
+        session: AsyncSession,
+        exchange: Exchange,
+        *,
+        run: BotRun,
+        monthly: MonthlyRiskState,
+        snapshot_at: dt.datetime,
+        decision_candle_at: dt.datetime,
+    ) -> None:
+        """Snapshot equity for the monthly books and advance the decision cursor."""
         await self.write_equity_snapshot(
             session,
             exchange,
@@ -738,7 +713,167 @@ class BotService:
             short_month_pnl=monthly.short_pnl,
         )
         run.last_evaluated_candle_at = decision_candle_at
-        return actions
+
+    # --- Intent handlers ---------------------------------------------------------
+    #
+    # One handler per intent in the architecture's vocabulary. Each applies its own
+    # guard; a new intent needs a handler and an _INTENT_HANDLERS entry, nothing more.
+
+    async def _enter_long(self, decision: _Decision, intent: EnterLong) -> None:
+        if decision.can_enter(halted=decision.state.halted_long):
+            await self._open_protected(decision, intent, side="LONG")
+
+    async def _enter_short_with_stop(self, decision: _Decision, intent: EnterShortStop) -> None:
+        if decision.can_enter(halted=decision.state.halted_short):
+            await self._open_protected(decision, intent, side="SHORT")
+
+    async def _open_protected(
+        self,
+        decision: _Decision,
+        intent: EnterLong | EnterShortStop,
+        *,
+        side: str,
+    ) -> None:
+        """Open a stop-protected entry sized so a stop-out loses the risk budget."""
+        risk = decision.strategy.manifest.risk
+        stop_distance = Decimal(str(intent.stop_distance))
+        # Stop-protected entries on either side draw on the release's one
+        # risk-per-trade budget (RiskSpec.long_risk_pct).
+        sizing = size_by_risk(
+            equity=decision.equity,
+            risk_pct=risk.long_risk_pct,
+            stop_distance=stop_distance,
+            price=decision.execution_price,
+            leverage_cap=risk.leverage_cap,
+            available_margin=decision.account.available,
+            filters=decision.filters,
+        )
+        if not sizing.ok:
+            return
+        # The stop sits against the position and the target in its favour. Strategy
+        # distances are floats, so round both to the tick before they reach the
+        # exchange, or the protective stop is rejected (-1111) and the position is
+        # left unprotected until the emergency flatten.
+        direction = Decimal("1") if side == "LONG" else Decimal("-1")
+        tp_r, tp_frac = intent.tp_levels[0]
+        stop_price = round_price(
+            decision.execution_price - direction * stop_distance, decision.filters.tick_size
+        )
+        tp1_price = round_price(
+            decision.execution_price + direction * Decimal(str(tp_r)) * stop_distance,
+            decision.filters.tick_size,
+        )
+        open_protected = (
+            decision.orders.open_long if side == "LONG" else decision.orders.open_short_with_stop
+        )
+        await open_protected(
+            decision.session,
+            sizing=sizing,
+            stop_price=stop_price,
+            tp1_price=tp1_price,
+            tp1_fraction=Decimal(str(tp_frac)),
+            **decision.release_tags(),
+        )
+        decision.actions.append("open_long" if side == "LONG" else "open_short")
+
+    async def _enter_short_sleeve(self, decision: _Decision, intent: EnterShort) -> None:
+        """Open the stop-free, volatility-sized short sleeve (no price stop, by design)."""
+        if not decision.can_enter(halted=decision.state.halted_short):
+            return
+        risk = decision.strategy.manifest.risk
+        sizing = _size_short_from_intent(
+            intent,
+            decision.equity,
+            decision.execution_price,
+            decision.filters,
+            leverage_cap=risk.leverage_cap,
+            available_margin=decision.account.available,
+        )
+        if sizing.ok:
+            await decision.orders.open_short(
+                decision.session, sizing=sizing, **decision.release_tags()
+            )
+            decision.actions.append("open_short")
+
+    async def _exit_all(self, decision: _Decision, intent: ExitAll) -> None:
+        if decision.position.qty == 0:
+            return
+        side = "LONG" if decision.position.qty > 0 else "SHORT"
+        await decision.orders.flatten(
+            decision.session, side=side, qty=decision.position.qty, reason=intent.reason
+        )
+        decision.actions.append("exit_all")
+        # A reversal emits ExitAll followed by the opposite entry in the same
+        # decision, so the entry guards must see the now-flat account. Refresh the
+        # account too: the closed position's initial margin was still locked in the
+        # pre-exit snapshot, which would cap the reversal entry below its risk budget.
+        symbol = decision.strategy.manifest.market.symbol
+        decision.position = await decision.exchange.get_position(symbol)
+        decision.account = await decision.exchange.get_account()
+        decision.equity = decision.account.balance + decision.account.unrealized_pnl
+        decision.trade = None
+
+    async def _move_stop(self, decision: _Decision, intent: MoveStop) -> None:
+        if decision.position.qty == 0 or decision.trade is None:
+            return
+        move = (
+            decision.orders.move_long_stop
+            if decision.position.qty > 0
+            else decision.orders.move_short_stop
+        )
+        moved = await move(
+            decision.session,
+            trade=decision.trade,
+            new_stop_price=Decimal(str(intent.price)),
+            remaining_qty=abs(decision.position.qty),
+            filters=decision.filters,
+        )
+        if moved:
+            decision.actions.append("move_stop")
+
+    async def _resize_short(self, decision: _Decision, intent: ResizeShort) -> None:
+        if decision.position.qty >= 0 or decision.trade is None:
+            return
+        target_qty = clamp_qty(
+            decision.equity * Decimal(str(intent.target_weight)) / decision.execution_price,
+            decision.filters,
+        )
+        current_qty = abs(decision.position.qty)
+        drift = abs(target_qty - current_qty) / current_qty if current_qty > 0 else Decimal("0")
+        if (
+            target_qty > 0
+            and meets_min_notional(target_qty, decision.execution_price, decision.filters)
+            and drift > decision.strategy.manifest.risk.short_resize_drift
+            and await decision.orders.resize_short(
+                decision.session,
+                trade=decision.trade,
+                current_qty=decision.position.qty,
+                target_qty=target_qty,
+            )
+        ):
+            decision.actions.append("resize_short")
+
+    async def _take_partial(self, decision: _Decision, intent: TakePartial) -> None:
+        await record_event(
+            decision.session,
+            level="INFO",
+            category="trade",
+            message=f"TP level {intent.level_id} synchronized",
+            ref=f"trade:{decision.trade.id}" if decision.trade is not None else "take_partial",
+            payload={"level_id": intent.level_id},
+        )
+        decision.actions.append("take_partial")
+
+    async def _halt(self, decision: _Decision, intent: Halt) -> None:
+        await record_event(
+            decision.session,
+            level="WARN",
+            category="breaker",
+            message=f"Strategy halt requested until {intent.until}",
+            ref=f"strategy_halt:{intent.until}",
+            payload={"until": intent.until},
+        )
+        decision.actions.append("halt")
 
     async def _monthly_risk_state(
         self,
@@ -868,6 +1003,53 @@ class BotService:
                 "month": month,
             },
         )
+
+
+def _strategy_candles(candles: list[Candle]) -> list[StratCandle]:
+    return [
+        StratCandle(
+            open_time_ms=int(c.open_time.timestamp() * 1000),
+            open=float(c.open),
+            high=float(c.high),
+            low=float(c.low),
+            close=float(c.close),
+            volume=float(c.volume),
+        )
+        for c in candles
+    ]
+
+
+async def _last_closed_at(session: AsyncSession, environment: str, side: str) -> dt.datetime | None:
+    """When this environment's book on `side` last closed a trade (re-entry gating)."""
+    return await session.scalar(
+        select(Trade.closed_at)
+        .where(
+            Trade.environment == environment,
+            Trade.side == side,
+            Trade.closed_at.is_not(None),
+        )
+        .order_by(Trade.closed_at.desc())
+        .limit(1)
+    )
+
+
+def _epoch_ms(moment: dt.datetime | None) -> int | None:
+    return int(moment.timestamp() * 1000) if moment is not None else None
+
+
+# Intent vocabulary (ARCHITECTURE.md §3) -> handler. Dispatch is by exact type: the
+# intents are independent classes joined by the `Intent` union.
+_IntentHandler = Callable[[BotService, _Decision, Any], Awaitable[None]]
+_INTENT_HANDLERS: dict[type[Any], _IntentHandler] = {
+    EnterLong: BotService._enter_long,
+    EnterShortStop: BotService._enter_short_with_stop,
+    EnterShort: BotService._enter_short_sleeve,
+    ExitAll: BotService._exit_all,
+    MoveStop: BotService._move_stop,
+    ResizeShort: BotService._resize_short,
+    TakePartial: BotService._take_partial,
+    Halt: BotService._halt,
+}
 
 
 def _size_short_from_intent(

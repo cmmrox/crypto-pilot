@@ -14,7 +14,7 @@ from app.bot.scheduler import next_close_time, seconds_until_next_close, utc_now
 from app.db.models import Candle
 from app.db.session import get_session
 from app.execution import candles as candle_svc
-from app.execution.binance_client import BinanceClient, log_unreachable
+from app.execution.binance_client import BinanceClient, console_client, log_unreachable
 from app.services.settings_store import get_settings_row
 from app.strategies import get_strategy
 
@@ -45,7 +45,7 @@ async def market_status(_current: CurrentUserDep, session: SessionDep) -> Market
 
     drift: int | None = None
     reachable = False
-    async with BinanceClient(env) as client:
+    async with console_client(env) as client:
         try:
             drift = await client.clock_drift_ms()
             reachable = True

@@ -24,7 +24,7 @@ from app.bot.scheduler import (
 from app.bot.service import bot_service
 from app.db.models import Briefing, Candle, Event, Trade
 from app.execution import candles as candle_svc
-from app.execution.binance_client import BinanceClient, BinanceError, log_unreachable
+from app.execution.binance_client import BinanceError, console_client, log_unreachable
 from app.execution.binance_exchange import BinanceExchange
 from app.risk.breakers import evaluate_breaker
 from app.services import credentials as cred_svc
@@ -260,13 +260,14 @@ async def _account_snapshot(
 
     api_key, api_secret = credentials
     try:
-        async with BinanceClient(
+        async with console_client(
             environment,
             api_key=api_key,
             api_secret=api_secret,
         ) as client:
             account = await BinanceExchange(client).get_account()
-    except BinanceError:
+    except BinanceError as exc:
+        log_unreachable(environment, "account", exc)
         return _unavailable_account()
 
     position_out: PositionSnapshot | None = None
@@ -322,7 +323,7 @@ async def _market_snapshot(
     stale = True
 
     try:
-        async with BinanceClient(environment) as client:
+        async with console_client(environment) as client:
             mark, ticker = await asyncio.gather(
                 client.get_mark_price(market.symbol),
                 client.get_ticker_24h(market.symbol),

@@ -37,6 +37,7 @@ import {
 } from "../api/client";
 import { ConfirmModal, type ModalSpec } from "../components/ConfirmModal";
 import { LoadingState, Spinner } from "../components/AsyncState";
+import { usePolling } from "../hooks/usePolling";
 
 const POLL_MS = 4000;
 
@@ -115,15 +116,11 @@ export function Overview() {
     }
   }, []);
 
+  usePolling(() => void load(), POLL_MS);
   useEffect(() => {
-    void load();
-    const poll = window.setInterval(() => void load(), POLL_MS);
     const clock = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => {
-      window.clearInterval(poll);
-      window.clearInterval(clock);
-    };
-  }, [load]);
+    return () => window.clearInterval(clock);
+  }, []);
 
   const showToast = (message: string) => {
     setToast(message);

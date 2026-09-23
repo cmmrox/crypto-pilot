@@ -45,6 +45,7 @@ import { getDeepHealth, type DeepHealth } from "../api/client";
 import { LoadingState, Spinner } from "../components/AsyncState";
 
 import { useTradingStatus } from "../trading/TradingStatus";
+import { usePolling } from "../hooks/usePolling";
 
 /** Stage 2 Settings: Binance API credentials (write-only) + connection test. */
 export function Settings() {
@@ -374,11 +375,7 @@ function OperationsCard() {
       setLoading(false);
     }
   };
-  useEffect(() => {
-    void load();
-    const t = setInterval(() => void load(), 10000);
-    return () => clearInterval(t);
-  }, []);
+  usePolling(() => void load(), 10000);
   const tick = h?.ingest_last_tick ? h.ingest_last_tick.slice(11, 19) + " UTC" : "—";
   return (
     <div className="panel" data-testid="operations-card">

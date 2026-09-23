@@ -23,7 +23,7 @@ from app.execution.orders import OrderManager
 from app.services.settings_store import get_settings_row
 from app.strategies import get_strategy
 from app.strategies.base import Candle as StrategyCandle
-from app.strategies.base import EnterLong, EnterShortStop, TradeState
+from app.strategies.base import EnterLong, EnterShortStop, ExitAll, Intent, TradeState
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -365,3 +365,89 @@ async def test_overview_breaker_meter_uses_this_release_cap(db_session: AsyncSes
     # Half of an 8% cap is a half-full meter, not a full one.
     assert _breaker_progress(D("-0.04"), risk.long_monthly_loss_cap) == "50.00"
     assert _breaker_progress(D("-0.08"), risk.long_monthly_loss_cap) == "100.00"
+
+
+@pytest.mark.asyncio
+async def test_decision_state_reports_each_stop_on_its_own_side(
+    db_session: AsyncSession,
+) -> None:
+    """The strategy must never read a short's stop through ``long_stop`` (or vice versa)."""
+    await _replay(db_session, bars=1233)
+    payloads = (
+        (
+            await db_session.execute(
+                select(Event.payload_json).where(
+                    Event.category == "strategy", Event.ref.like("decision:%")
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    states = [payload["state"] for payload in payloads]
+    in_long = [state for state in states if state["long_position"]]
+    in_short = [state for state in states if state["short_position"]]
+    assert in_long and in_short, "the replay must hold both books at some point"
+    assert all(s["long_stop"] is not None and s["short_stop"] is None for s in in_long)
+    assert all(s["short_stop"] is not None and s["long_stop"] is None for s in in_short)
+
+
+class _ScriptedStrategy:
+    """Atlas 7 Dual's real manifest and risk, with intents scripted per decision."""
+
+    def __init__(self, script: list[list[Intent]]) -> None:
+        self.manifest = get_strategy(STRATEGY).manifest
+        self._script = script
+
+    def on_candle(self, candles: list[StrategyCandle], state: TradeState) -> list[Intent]:
+        return self._script.pop(0)
+
+
+@pytest.mark.asyncio
+async def test_reversal_entry_is_sized_from_the_post_exit_account(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A same-decision reversal must not size against margin the closed trade still held.
+
+    The exchange locks notional / leverage while a position is open. Sizing the
+    reversal from the pre-exit account would cap it well below its risk budget.
+    """
+    stop = 1500.0
+    tp_levels = ((2.0, 0.4),)
+    scripted = _ScriptedStrategy(
+        [
+            [EnterLong(stop_distance=stop, tp_levels=tp_levels)],
+            [
+                ExitAll(reason="reversal"),
+                EnterShortStop(stop_distance=stop, tp_levels=tp_levels),
+            ],
+        ]
+    )
+    monkeypatch.setattr("app.bot.service.get_strategy", lambda _name: scripted)
+    candles = _load_candles(WARMUP + 2)
+    db_session.add_all(candles)
+    await db_session.flush()
+    (await get_settings_row(db_session)).active_strategy = STRATEGY
+    service = BotService()
+    exchange = FakeExchange(
+        mark_price=D("60000"),
+        balance=D("1000"),
+        margin_leverage=scripted.manifest.risk.leverage_cap,
+    )
+    orders = OrderManager(exchange, symbol="BTCUSDT")
+    run = await service.start(db_session, exchange, by="qa")
+    run.last_evaluated_candle_at = candles[WARMUP - 1].open_time
+
+    first = await service.evaluate_once(db_session, exchange, orders, candles=candles[: WARMUP + 1])
+    await exchange.cancel_all("BTCUSDT")  # resting stop/TP of the long leave with it
+    second = await service.evaluate_once(
+        db_session, exchange, orders, candles=candles[: WARMUP + 2]
+    )
+
+    assert first == ["open_long"]
+    assert second == ["exit_all", "open_short"]
+    trades = (await db_session.execute(select(Trade).order_by(Trade.id))).scalars().all()
+    long_trade, short_trade = trades
+    assert (long_trade.side, short_trade.side) == ("LONG", "SHORT")
+    # Same equity, price, stop distance and risk budget: the reversal is the same size.
+    assert short_trade.qty == long_trade.qty

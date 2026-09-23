@@ -30,10 +30,17 @@ class FakeExchange:
     """Implements the Exchange protocol in memory."""
 
     def __init__(
-        self, *, mark_price: Decimal = Decimal("65000"), balance: Decimal = Decimal("10000")
+        self,
+        *,
+        mark_price: Decimal = Decimal("65000"),
+        balance: Decimal = Decimal("10000"),
+        margin_leverage: Decimal | None = None,
     ) -> None:
         self.mark = mark_price
         self._balance = balance
+        # Opt-in Binance-like margin: an open position locks notional / leverage of the
+        # available balance. Off by default so existing scenarios keep available == balance.
+        self._margin_leverage = margin_leverage
         self._pos = Decimal("0")
         self._entry = Decimal("0")
         self._open_orders: dict[str, OrderResult] = {}
@@ -53,7 +60,10 @@ class FakeExchange:
     async def get_account(self) -> AccountState:
         upnl = (self.mark - self._entry) * self._pos if self._pos != 0 else Decimal("0")
         positions = [Position("BTCUSDT", self._pos, self._entry)] if self._pos != 0 else []
-        return AccountState(self._balance, self._balance, upnl, positions)
+        available = self._balance
+        if self._margin_leverage is not None and self._pos != 0:
+            available -= abs(self._pos) * self._entry / self._margin_leverage
+        return AccountState(self._balance, available, upnl, positions)
 
     async def get_position(self, symbol: str) -> Position:
         return Position(symbol, self._pos, self._entry)

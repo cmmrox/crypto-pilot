@@ -8,6 +8,7 @@ from decimal import Decimal
 
 import httpx
 import pytest
+import structlog.testing
 from app.db.models import Event
 from app.execution.binance_client import Kline
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
@@ -59,6 +60,29 @@ def _mock_binance(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.mark.asyncio
 async def test_market_status_requires_auth(app_client: httpx.AsyncClient, owner: str) -> None:
     assert (await app_client.get("/api/market/status")).status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_unreachable_status_records_the_reason(
+    app_client: httpx.AsyncClient, owner: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unreachable exchange must say why, or failures cannot be diagnosed."""
+    import app.execution.binance_client as bc
+
+    async def geo_blocked(self: bc.BinanceClient) -> int:
+        raise bc.BinanceError("Service unavailable from a restricted location", status=451)
+
+    monkeypatch.setattr(bc.BinanceClient, "clock_drift_ms", geo_blocked)
+    headers = await _auth_headers(app_client, owner)
+    with structlog.testing.capture_logs() as logs:
+        resp = await app_client.get("/api/market/status", headers=headers)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["exchange_reachable"] is False
+    probe = [entry for entry in logs if entry["event"] == "binance_unreachable"]
+    assert probe, logs
+    assert probe[0]["status"] == 451
+    assert probe[0]["error_type"] == "BinanceError"
+    assert "restricted location" in probe[0]["detail"]
 
 
 @pytest.mark.asyncio

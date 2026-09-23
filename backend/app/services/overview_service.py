@@ -24,7 +24,7 @@ from app.bot.scheduler import (
 from app.bot.service import bot_service
 from app.db.models import Briefing, Candle, Event, Trade
 from app.execution import candles as candle_svc
-from app.execution.binance_client import BinanceClient, BinanceError
+from app.execution.binance_client import BinanceClient, BinanceError, log_unreachable
 from app.execution.binance_exchange import BinanceExchange
 from app.risk.breakers import evaluate_breaker
 from app.services import credentials as cred_svc
@@ -334,8 +334,8 @@ async def _market_snapshot(
         observed_at = observed.isoformat()
         reachable = True
         stale = (now - observed).total_seconds() > FRESH_FOR_SECONDS
-    except BinanceError:
-        pass
+    except BinanceError as exc:
+        log_unreachable(environment, "mark_price", exc)
     now = utc_now()
 
     return MarketSnapshot(

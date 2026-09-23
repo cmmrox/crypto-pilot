@@ -193,6 +193,11 @@ jobs:
             qa/test-results/
           if-no-files-found: ignore
           retention-days: 14
+      - name: Backend logs on failure
+        # Without these an e2e failure against real Binance cannot be diagnosed.
+        # The stack's secrets are generated per run and never logged.
+        if: failure()
+        run: docker compose -f deploy/docker-compose.yml logs --no-color --tail=300 backend
       - name: Stop stack
         if: always()
         run: |

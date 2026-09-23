@@ -63,6 +63,13 @@ ExitAll(reason)                          # regime death, breaker, manual, kill
 Halt(until)                              # monthly breakers stand-aside
 ```
 
+`BotService.evaluate_once` (`app/bot/service.py`) executes a decision as named steps
+(reconcile, missed-close guard, monthly breakers, trade state, strategy, intents, equity
+snapshot). Each intent has one handler, registered in `_INTENT_HANDLERS`, which applies
+its own guard. Extending the vocabulary therefore means a new intent type, its handler
+and table entry, and the regression and parity evidence, never a change to other
+handlers.
+
 Registered at launch: `trend_rider_v6_4h` (default), `trend_rider_v52_4h` (long-only
 fallback), both pinned to the validated parameter sets. **Parity is law:** the
 production `trend_rider_v6_4h` must reproduce `research/backtests/final_composite.py`

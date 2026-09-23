@@ -195,3 +195,57 @@ async def test_mark_withdrawn_idempotent(app_client: httpx.AsyncClient, owner: s
     assert Decimal(july["withdrawable"]) == D("0")  # already withdrawn
     r2 = await app_client.post("/api/monthly/mark-withdrawn", json={"month": "2026-07"}, headers=h)
     assert "already" in r2.json()["message"]
+
+
+@pytest.mark.asyncio
+async def test_monthly_ledger_buckets_months_in_utc(
+    app_client: httpx.AsyncClient, owner: str
+) -> None:
+    """A database whose default time zone is not UTC must not move a trade to another month.
+
+    Production shares its Postgres server with other applications, so the server's
+    default time zone is not ours to assume. 2026-08-31 20:00 UTC is already
+    2026-09-01 01:30 in Asia/Colombo.
+    """
+    import os
+
+    from app.db.session import dispose_engine
+    from sqlalchemy import text
+
+    admin = create_async_engine(os.environ["CP_DATABASE_URL"], isolation_level="AUTOCOMMIT")
+    async with admin.connect() as conn:
+        database = (await conn.execute(text("select current_database()"))).scalar_one()
+        await conn.execute(text(f"ALTER DATABASE \"{database}\" SET timezone TO 'Asia/Colombo'"))
+    try:
+        await dispose_engine()  # reconnect so the app's sessions inherit the new default
+        async with AsyncSession(admin) as s:
+            s.add(
+                Trade(
+                    side="LONG",
+                    entry_px=D("60000"),
+                    exit_px=D("61000"),
+                    qty=D("0.01"),
+                    fees=D("1"),
+                    realized_pnl=D("10"),
+                    r_multiple=D("0.5"),
+                    opened_at=dt.datetime(2026, 8, 31, 20, 0, tzinfo=dt.UTC),
+                    closed_at=dt.datetime(2026, 9, 1, 8, 0, tzinfo=dt.UTC),
+                    exit_reason="month boundary fixture",
+                    strategy="trend_rider_v6_4h",
+                    environment="DEMO",
+                )
+            )
+            await s.commit()
+        h = await _headers(app_client, owner)
+        ledger = (await app_client.get("/api/monthly", headers=h)).json()
+        assert [row["month"] for row in ledger] == ["2026-08"], ledger
+        withdrawal = await app_client.post(
+            "/api/monthly/mark-withdrawn", json={"month": "2026-08"}, headers=h
+        )
+        assert withdrawal.status_code == 200
+        assert "0.90" in withdrawal.json()["message"]  # 10% of (10 - 1)
+    finally:
+        async with admin.connect() as conn:
+            await conn.execute(text(f'ALTER DATABASE "{database}" RESET timezone'))
+        await admin.dispose()
+        await dispose_engine()

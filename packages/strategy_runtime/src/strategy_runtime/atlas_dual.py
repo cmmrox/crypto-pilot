@@ -111,7 +111,7 @@ def _resumed(
     )
     if not back_on_side:
         return False
-    times = df["dt"] if "dt" in df else None
+    times = df.get("dt")
     for index in range(len(df) - 2, -1, -1):
         if not bool(regime.iloc[index]):
             return False
@@ -244,18 +244,14 @@ class AtlasDual:
             if long_signal and not state.halted_long:
                 return [
                     ExitAll(reason="reverse to long"),
-                    EnterLong(
-                        stop_distance=stop_distance, tp_levels=tp_levels, reason=long_reason
-                    ),
+                    EnterLong(stop_distance=stop_distance, tp_levels=tp_levels, reason=long_reason),
                 ]
             if close > bull_line:
                 return [ExitAll(reason="regime exit")]
             return self._trail_short(state, atr)
 
         if long_signal and not state.halted_long:
-            return [
-                EnterLong(stop_distance=stop_distance, tp_levels=tp_levels, reason=long_reason)
-            ]
+            return [EnterLong(stop_distance=stop_distance, tp_levels=tp_levels, reason=long_reason)]
         if short_signal and not state.halted_short:
             return [
                 EnterShortStop(

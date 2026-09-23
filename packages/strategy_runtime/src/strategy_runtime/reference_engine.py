@@ -90,9 +90,7 @@ def long_equity(df: pd.DataFrame) -> tuple[pd.Series[Any], list[dict[str, object
             if halted or not prev["regime"]:
                 cash += pos * o * (1 - FEE)
                 pos = 0.0
-                trades.append(
-                    {"pnl": cash - entry_eq, "exit_i": i, "reason": "regime/halt"}
-                )
+                trades.append({"pnl": cash - entry_eq, "exit_i": i, "reason": "regime/halt"})
             elif low <= sl:
                 px = min(sl, o) if o < sl else sl
                 cash += pos * px * (1 - FEE)
@@ -123,9 +121,7 @@ def long_equity(df: pd.DataFrame) -> tuple[pd.Series[Any], list[dict[str, object
                 if low <= sl:
                     cash = pos * sl * (1 - FEE)
                     pos = 0.0
-                    trades.append(
-                        {"pnl": cash - entry_eq, "exit_i": i, "reason": "same_bar_stop"}
-                    )
+                    trades.append({"pnl": cash - entry_eq, "exit_i": i, "reason": "same_bar_stop"})
                 was_below = False
 
         if row["close"] < row["ema20"]:
@@ -170,9 +166,9 @@ def _sleeve_raw_returns(df: pd.DataFrame) -> tuple[pd.Series[Any], pd.Series[Any
     """
     ret = df["close"].pct_change().fillna(0.0)
     target = short_target(df)
-    rv = (
-        ret.ewm(span=SLEEVE_VOL_SPAN, adjust=False).std() * np.sqrt(BARS_PER_YEAR)
-    ).replace(0, np.nan)
+    rv = (ret.ewm(span=SLEEVE_VOL_SPAN, adjust=False).std() * np.sqrt(BARS_PER_YEAR)).replace(
+        0, np.nan
+    )
     scale = (SLEEVE_VOL_TARGET / rv).clip(upper=1.0).fillna(0.0)
     pos = (target * scale).clip(-1.0, 1.0)
     pos_l = pos.shift(1).fillna(0.0)  # exposure held during the bar

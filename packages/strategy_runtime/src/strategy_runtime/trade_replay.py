@@ -25,14 +25,10 @@ class TradeReplayEngine(PluginReplayEngine):
         self._funding_rows = list(self.funding.sort_values("dt").to_dict("records"))
         self.actual_trade_count = 0
 
-    def _apply_funding_at_open(
-        self, timestamp: pd.Timestamp, fallback_price: Decimal
-    ) -> None:
+    def _apply_funding_at_open(self, timestamp: pd.Timestamp, fallback_price: Decimal) -> None:
         self._apply_funding_until(timestamp, fallback_price)
 
-    def _apply_funding_until(
-        self, timestamp: pd.Timestamp, fallback_price: Decimal
-    ) -> None:
+    def _apply_funding_until(self, timestamp: pd.Timestamp, fallback_price: Decimal) -> None:
         while self._funding_cursor < len(self._funding_rows):
             row = self._funding_rows[self._funding_cursor]
             if row["dt"] > timestamp:
@@ -44,11 +40,7 @@ class TradeReplayEngine(PluginReplayEngine):
             if not mark.is_finite() or mark <= 0:
                 raise ValueError("Trade replay requires actual funding mark prices")
             notional = self.position.qty * mark
-            payment = (
-                notional
-                * row["funding_rate"]
-                * (-1 if self.position.side == "LONG" else 1)
-            )
+            payment = notional * row["funding_rate"] * (-1 if self.position.side == "LONG" else 1)
             self.cash += payment
             self.position.funding += payment
             self.funding_events_applied += 1
@@ -67,9 +59,7 @@ class TradeReplayEngine(PluginReplayEngine):
             raise ValueError("Trade replay has a candle without actual trade coverage")
         prices = [tick[1] for tick in self._bar_ticks]
         observed = (prices[0], max(prices), min(prices), prices[-1])
-        expected = tuple(
-            Decimal(str(row[key])) for key in ("open", "high", "low", "close")
-        )
+        expected = tuple(Decimal(str(row[key])) for key in ("open", "high", "low", "close"))
         if observed != expected:
             raise ValueError("Actual trade OHLC does not reconcile with Binance candle")
         timestamp, price = self._bar_ticks[0]
@@ -82,14 +72,8 @@ class TradeReplayEngine(PluginReplayEngine):
     def _process_intrabar(self, i: int, row: pd.Series[Any]) -> None:
         for timestamp, price in self._bar_ticks:
             self._apply_funding_until(timestamp, price)
-            tick = pd.Series(
-                {"dt": timestamp, "open": price, "high": price, "low": price}
-            )
+            tick = pd.Series({"dt": timestamp, "open": price, "high": price, "low": price})
             super()._process_intrabar(i, tick)
             self.actual_trade_count += 1
-        end = pd.Timestamp(row["dt"]) + pd.Timedelta(
-            minutes=INTERVAL_MINUTES[self.config.interval]
-        )
-        self._apply_funding_until(
-            end - pd.Timedelta(milliseconds=1), Decimal(str(row["close"]))
-        )
+        end = pd.Timestamp(row["dt"]) + pd.Timedelta(minutes=INTERVAL_MINUTES[self.config.interval])
+        self._apply_funding_until(end - pd.Timedelta(milliseconds=1), Decimal(str(row["close"])))

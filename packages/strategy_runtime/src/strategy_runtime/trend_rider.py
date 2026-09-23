@@ -14,8 +14,6 @@ from decimal import Decimal
 import numpy as np
 import pandas as pd
 
-from strategy_runtime.indicators import add_indicators
-from strategy_runtime.parameters import INTERVAL_MINUTES, TrendRiderParameters
 from strategy_runtime.contracts import (
     Candle,
     EnterLong,
@@ -28,6 +26,7 @@ from strategy_runtime.contracts import (
     TradeState,
     WatchRule,
 )
+from strategy_runtime.indicators import add_indicators
 from strategy_runtime.manifest import (
     MarketSpec,
     RiskSpec,
@@ -35,6 +34,7 @@ from strategy_runtime.manifest import (
     StrategyManifest,
     ValidationEvidence,
 )
+from strategy_runtime.parameters import INTERVAL_MINUTES, TrendRiderParameters
 
 
 class TrendRider:
@@ -118,9 +118,7 @@ class TrendRider:
             market=replace(
                 self.manifest.market,
                 interval=interval,
-                warmup_bars=max(
-                    200, parameters.slow_period, parameters.sleeve_vol_span
-                ),
+                warmup_bars=max(200, parameters.slow_period, parameters.sleeve_vol_span),
             ),
             risk=replace(
                 self.manifest.risk,
@@ -167,15 +165,9 @@ class TrendRider:
                 intents.append(ExitAll(reason="regime off"))
             elif state.tp1_done and state.long_stop is not None:
                 highest = (
-                    state.highest_high
-                    if state.highest_high is not None
-                    else float(cur["high"])
+                    state.highest_high if state.highest_high is not None else float(cur["high"])
                 )
-                breakeven = (
-                    state.long_entry
-                    if state.long_entry is not None
-                    else state.long_stop
-                )
+                breakeven = state.long_entry if state.long_entry is not None else state.long_stop
                 new_stop = max(
                     state.long_stop,
                     breakeven,
@@ -199,9 +191,7 @@ class TrendRider:
         # --- flat: look for entries ---
         if regime and not state.halted_long:
             fresh = not bool(prev["regime"])
-            resume = _was_below_then_back(
-                df, state.last_long_closed_at_ms, self.interval_ms
-            )
+            resume = _was_below_then_back(df, state.last_long_closed_at_ms, self.interval_ms)
             if fresh or resume:
                 # The just-closed signal candle is ``cur``; execution occurs at
                 # the next bar open, matching engine.long_equity's ``prev`` row.
@@ -241,11 +231,7 @@ class TrendRider:
         deep_bear = close < sma200 and ema50 < ema200 and close < deep_bear_threshold
         pullback_resume = _was_below_then_back(frame, None)
         pullback_status = (
-            "Ready at last close"
-            if pullback_resume
-            else "Monitoring"
-            if long_regime
-            else "Waiting"
+            "Ready at last close" if pullback_resume else "Monitoring" if long_regime else "Waiting"
         )
         rules = [
             WatchRule(
@@ -254,7 +240,10 @@ class TrendRider:
                 status="Active" if long_regime else "Waiting",
                 tone="ok" if long_regime else "neutral",
                 active=long_regime,
-                condition=f"Close > SMA{self.parameters.slow_period} and EMA{self.parameters.medium_period} > EMA{self.parameters.slow_period}",
+                condition=(
+                    f"Close > SMA{self.parameters.slow_period} and "
+                    f"EMA{self.parameters.medium_period} > EMA{self.parameters.slow_period}"
+                ),
                 threshold=sma200,
             ),
             WatchRule(
@@ -279,7 +268,10 @@ class TrendRider:
                     tone="err" if deep_bear else "neutral",
                     active=deep_bear,
                     condition=(
-                        f"Close < SMA{self.parameters.slow_period}, EMA{self.parameters.medium_period} < EMA{self.parameters.slow_period}, and close < SMA{self.parameters.slow_period} - {self.parameters.sleeve_depth_atr:g} ATR"
+                        f"Close < SMA{self.parameters.slow_period}, "
+                        f"EMA{self.parameters.medium_period} < EMA{self.parameters.slow_period}, "
+                        f"and close < SMA{self.parameters.slow_period} - "
+                        f"{self.parameters.sleeve_depth_atr:g} ATR"
                     ),
                     threshold=deep_bear_threshold,
                 )
@@ -300,13 +292,11 @@ class TrendRider:
             rv = float(df["sleeve_realized_vol"].iloc[-1])
             if not np.isfinite(rv) or rv <= 0:
                 return 0.0
-            return self.parameters.sleeve_weight * min(
-                1.0, self.parameters.sleeve_vol_target / rv
-            )
+            return self.parameters.sleeve_weight * min(1.0, self.parameters.sleeve_vol_target / rv)
         ret = df["close"].pct_change().fillna(0.0)
-        vol_series = ret.ewm(
-            span=self.parameters.sleeve_vol_span, adjust=False
-        ).std() * np.sqrt(self.bars_per_year)
+        vol_series = ret.ewm(span=self.parameters.sleeve_vol_span, adjust=False).std() * np.sqrt(
+            self.bars_per_year
+        )
         rv = float(vol_series.iloc[-1])
         if not np.isfinite(rv) or rv <= 0:
             return 0.0
@@ -317,9 +307,7 @@ class TrendRider:
 def _to_frame(candles: list[Candle]) -> pd.DataFrame:
     return pd.DataFrame(
         {
-            "dt": pd.to_datetime(
-                [c.open_time_ms for c in candles], unit="ms", utc=True
-            ),
+            "dt": pd.to_datetime([c.open_time_ms for c in candles], unit="ms", utc=True),
             "open": [c.open for c in candles],
             "high": [c.high for c in candles],
             "low": [c.low for c in candles],
@@ -347,8 +335,7 @@ def _was_below_then_back(
             break
         if (
             last_long_closed_at_ms is not None
-            and int(df.iloc[i]["dt"].timestamp() * 1000) + interval_ms
-            <= last_long_closed_at_ms
+            and int(df.iloc[i]["dt"].timestamp() * 1000) + interval_ms <= last_long_closed_at_ms
         ):
             break
         if bool(below.iloc[i]):

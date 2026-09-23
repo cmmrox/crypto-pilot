@@ -79,9 +79,7 @@ def size_by_risk(
     long and stop-protected short books share one sizing rule.
     """
     if stop_distance <= 0 or price <= 0 or equity <= 0:
-        return SizingResult(
-            Decimal("0"), Decimal("0"), Decimal("0"), False, "invalid inputs"
-        )
+        return SizingResult(Decimal("0"), Decimal("0"), Decimal("0"), False, "invalid inputs")
     risk_capital = equity * (risk_pct / Decimal("100"))
     raw_qty = risk_capital / stop_distance
     raw_qty = _leverage_capped_qty(raw_qty, price, equity, leverage_cap)
@@ -120,14 +118,10 @@ def size_short(
     notional = equity * weight% * min(1, vol_target/realized_vol), leverage-capped.
     """
     if price <= 0 or equity <= 0:
-        return SizingResult(
-            Decimal("0"), Decimal("0"), Decimal("0"), False, "invalid inputs"
-        )
+        return SizingResult(Decimal("0"), Decimal("0"), Decimal("0"), False, "invalid inputs")
     scale = sleeve_scale(vol_target, realized_vol)
     if scale <= 0:
-        return SizingResult(
-            Decimal("0"), Decimal("0"), Decimal("0"), False, "vol scale zero"
-        )
+        return SizingResult(Decimal("0"), Decimal("0"), Decimal("0"), False, "vol scale zero")
     notional = equity * (weight_pct / Decimal("100")) * scale
     raw_qty = notional / price
     raw_qty = _leverage_capped_qty(raw_qty, price, equity, leverage_cap)

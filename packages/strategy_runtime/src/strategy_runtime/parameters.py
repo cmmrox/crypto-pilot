@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, fields
 from decimal import Decimal, InvalidOperation
-from typing import Mapping
 
 
 @dataclass(frozen=True)
@@ -20,12 +20,8 @@ class ParameterDefinition:
 
 
 DEFINITIONS = (
-    ParameterDefinition(
-        "stop_atr", "Long stop distance", "ATR", "2.5", "0.5", "6", "0.1", "entry"
-    ),
-    ParameterDefinition(
-        "tp1_r", "First profit target", "R", "1", "0.5", "5", "0.1", "entry"
-    ),
+    ParameterDefinition("stop_atr", "Long stop distance", "ATR", "2.5", "0.5", "6", "0.1", "entry"),
+    ParameterDefinition("tp1_r", "First profit target", "R", "1", "0.5", "5", "0.1", "entry"),
     ParameterDefinition(
         "tp1_frac",
         "Partial close fraction",
@@ -79,9 +75,7 @@ DEFINITIONS = (
         "1",
         "volatility",
     ),
-    ParameterDefinition(
-        "fast_period", "Pullback EMA", "bars", "20", "5", "50", "1", "indicators"
-    ),
+    ParameterDefinition("fast_period", "Pullback EMA", "bars", "20", "5", "50", "1", "indicators"),
     ParameterDefinition(
         "medium_period", "Regime EMA", "bars", "50", "20", "100", "1", "indicators"
     ),
@@ -95,12 +89,8 @@ DEFINITIONS = (
         "1",
         "indicators",
     ),
-    ParameterDefinition(
-        "atr_period", "ATR lookback", "bars", "14", "5", "40", "1", "indicators"
-    ),
-    ParameterDefinition(
-        "risk_pct", "Long risk", "percent", "15", "0.5", "15", "0.5", "sizing"
-    ),
+    ParameterDefinition("atr_period", "ATR lookback", "bars", "14", "5", "40", "1", "indicators"),
+    ParameterDefinition("risk_pct", "Long risk", "percent", "15", "0.5", "15", "0.5", "sizing"),
     ParameterDefinition(
         "leverage_cap", "Leverage ceiling", "multiple", "6", "1", "6", "1", "sizing"
     ),
@@ -132,9 +122,7 @@ def validate_parameters(values: Mapping[str, object]) -> dict[str, str]:
     """Reject unknown, nonfinite, off-grid and inconsistent inputs; fill defaults."""
     known = {item.key for item in DEFINITIONS}
     if set(values) - known:
-        raise ValueError(
-            "Unknown parameters: " + ", ".join(sorted(set(values) - known))
-        )
+        raise ValueError("Unknown parameters: " + ", ".join(sorted(set(values) - known)))
     result: dict[str, str] = {}
     for item in DEFINITIONS:
         raw = values.get(item.key, item.default)

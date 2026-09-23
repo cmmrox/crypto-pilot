@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import math
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from decimal import Decimal
 from typing import Any, Literal, cast
 
 import numpy as np
 import pandas as pd
-from strategy_runtime.filters import SymbolFilters, clamp_qty, round_price
-from strategy_runtime.sizing import margin_capped_qty, size_long, size_short
+
+from strategy_runtime import reference_engine as engine
+from strategy_runtime.contracts import Candle as StrategyCandle
 from strategy_runtime.contracts import (
     EnterLong,
     EnterShort,
@@ -19,11 +20,11 @@ from strategy_runtime.contracts import (
     ResizeShort,
     TradeState,
 )
-from strategy_runtime.contracts import Candle as StrategyCandle
-from strategy_runtime import reference_engine as engine
-from strategy_runtime.trend_rider import TrendRider
-from strategy_runtime.parameters import TrendRiderParameters, INTERVAL_MINUTES
+from strategy_runtime.filters import SymbolFilters, clamp_qty, round_price
 from strategy_runtime.indicators import add_indicators
+from strategy_runtime.parameters import INTERVAL_MINUTES, TrendRiderParameters
+from strategy_runtime.sizing import margin_capped_qty, size_long, size_short
+from strategy_runtime.trend_rider import TrendRider
 
 ZERO = Decimal("0")
 ONE = Decimal("1")
@@ -32,7 +33,7 @@ DEFAULT_MANIFEST = TrendRider().manifest
 
 @dataclass(frozen=True)
 class ReplayConfig:
-    parameters: TrendRiderParameters = TrendRiderParameters()
+    parameters: TrendRiderParameters = field(default_factory=TrendRiderParameters)
     interval: str = "4h"
     initial_capital: Decimal = Decimal("100")
     risk_pct: Decimal = DEFAULT_MANIFEST.risk.long_risk_pct
@@ -114,12 +115,8 @@ class ReferenceReplayEngine:
         if frame["dt"].duplicated().any():
             raise ValueError("duplicate candle timestamps are not allowed")
         steps = frame["dt"].diff().dropna()
-        if not bool(
-            (steps == pd.Timedelta(minutes=INTERVAL_MINUTES[config.interval])).all()
-        ):
-            raise ValueError(
-                f"candle data must be a continuous {config.interval} series"
-            )
+        if not bool((steps == pd.Timedelta(minutes=INTERVAL_MINUTES[config.interval])).all()):
+            raise ValueError(f"candle data must be a continuous {config.interval} series")
         for column in ("open", "high", "low", "close", "volume"):
             frame[column] = pd.to_numeric(frame[column], errors="raise")
         self.df = add_indicators(frame, config.parameters)
@@ -127,9 +124,7 @@ class ReferenceReplayEngine:
         self.vol_scale = self._vol_scale(self.df)
         self.funding = funding.copy()
         if not self.funding.empty:
-            self.funding["dt"] = pd.to_datetime(
-                self.funding["dt"], utc=True, format="mixed"
-            )
+            self.funding["dt"] = pd.to_datetime(self.funding["dt"], utc=True, format="mixed")
             # Binance's "30m" means minutes; pandas interprets it as month-end.
             interval_delta = pd.Timedelta(minutes=INTERVAL_MINUTES[config.interval])
             self.funding["bar_open"] = self.funding["dt"].dt.floor(interval_delta)
@@ -222,12 +217,7 @@ class ReferenceReplayEngine:
         end_dt = pd.Timestamp(equity_frame.iloc[-1]["dt"])
         years = Decimal(str((end_dt - start_dt).total_seconds() / (365.2425 * 86400)))
         cagr = (
-            Decimal(
-                str(
-                    float(final_equity / self.config.initial_capital)
-                    ** (1 / float(years))
-                )
-            )
+            Decimal(str(float(final_equity / self.config.initial_capital) ** (1 / float(years))))
             - ONE
             if years > 0 and final_equity > 0
             else Decimal("-1")
@@ -277,14 +267,8 @@ class ReferenceReplayEngine:
         self.month_start_equity = self._mark_equity(open_price)
         self.previous_equity = self.month_start_equity
 
-    def _apply_funding_at_open(
-        self, timestamp: pd.Timestamp, fallback_price: Decimal
-    ) -> None:
-        if (
-            not self.config.funding_enabled
-            or self.position is None
-            or self.funding.empty
-        ):
+    def _apply_funding_at_open(self, timestamp: pd.Timestamp, fallback_price: Decimal) -> None:
+        if not self.config.funding_enabled or self.position is None or self.funding.empty:
             return
         rows = self.funding[self.funding["bar_open"] == timestamp]
         for _, funding_row in rows.iterrows():
@@ -294,9 +278,7 @@ class ReferenceReplayEngine:
                 mark = fallback_price
                 self.funding_mark_fallbacks += 1
             notional = self.position.qty * mark
-            payment = (
-                -notional * rate if self.position.side == "LONG" else notional * rate
-            )
+            payment = -notional * rate if self.position.side == "LONG" else notional * rate
             self.cash += payment
             self.position.funding += payment
             self.funding_events_applied += 1
@@ -316,17 +298,11 @@ class ReferenceReplayEngine:
 
         if self.position is not None:
             return
-        if (
-            bool(prev["regime"])
-            and not self.halted_long
-            and not pd.isna(prev["sma200"])
-        ):
+        if bool(prev["regime"]) and not self.halted_long and not pd.isna(prev["sma200"]):
             fresh = not self.reg_prev
             resume = self.was_below and float(prev["close"]) > float(prev["ema20"])
             if fresh or resume:
-                self._open_long(
-                    open_price, Decimal(str(prev["atr"])), pd.Timestamp(row["dt"])
-                )
+                self._open_long(open_price, Decimal(str(prev["atr"])), pd.Timestamp(row["dt"]))
                 self.was_below = False
                 return
         if bool(self.deep_bear.iloc[i - 1]) and not self.halted_short:
@@ -469,22 +445,16 @@ class ReferenceReplayEngine:
                 position.fees += fee
                 position.qty -= tp_qty
                 position.tp1_done = True
-                position.stop = round_price(
-                    position.entry_price, self.filters.tick_size
-                )
+                position.stop = round_price(position.entry_price, self.filters.tick_size)
         if self.position is None:
             return
         position.highest = max(position.highest or high, high)
         if position.tp1_done and position.stop is not None:
             trail = position.highest - Decimal(str(engine.TRAIL_ATR)) * atr
-            position.stop = max(
-                position.stop, round_price(trail, self.filters.tick_size)
-            )
+            position.stop = max(position.stop, round_price(trail, self.filters.tick_size))
         del i
 
-    def _close_position(
-        self, price: Decimal, timestamp: pd.Timestamp, reason: str
-    ) -> None:
+    def _close_position(self, price: Decimal, timestamp: pd.Timestamp, reason: str) -> None:
         position = self.position
         if position is None:
             return
@@ -659,35 +629,17 @@ class PluginReplayEngine(ReferenceReplayEngine):
                 and self.position is not None
                 and self.position.side == "SHORT"
             ):
-                self._resize_short_from_weight(
-                    Decimal(str(intent.target_weight)), open_price
-                )
-            elif (
-                isinstance(intent, EnterLong)
-                and self.position is None
-                and not self.halted_long
-            ):
+                self._resize_short_from_weight(Decimal(str(intent.target_weight)), open_price)
+            elif isinstance(intent, EnterLong) and self.position is None and not self.halted_long:
                 self._open_long_from_intent(intent, open_price, timestamp)
-            elif (
-                isinstance(intent, EnterShort)
-                and self.position is None
-                and not self.halted_short
-            ):
-                self._open_short_from_weight(
-                    Decimal(str(intent.weight)), open_price, timestamp
-                )
+            elif isinstance(intent, EnterShort) and self.position is None and not self.halted_short:
+                self._open_short_from_weight(Decimal(str(intent.weight)), open_price, timestamp)
 
     def _plugin_state(self, i: int, prev: pd.Series[Any]) -> TradeState:
         position = self.position
         short_weight = 0.0
-        if (
-            position is not None
-            and position.side == "SHORT"
-            and self.previous_equity > 0
-        ):
-            short_weight = float(
-                position.qty * Decimal(str(prev["close"])) / self.previous_equity
-            )
+        if position is not None and position.side == "SHORT" and self.previous_equity > 0:
+            short_weight = float(position.qty * Decimal(str(prev["close"])) / self.previous_equity)
         return TradeState(
             equity=float(self.previous_equity),
             long_position=position is not None and position.side == "LONG",
@@ -699,22 +651,16 @@ class PluginReplayEngine(ReferenceReplayEngine):
             ),
             long_stop=(
                 float(position.stop)
-                if position is not None
-                and position.side == "LONG"
-                and position.stop is not None
+                if position is not None and position.side == "LONG" and position.stop is not None
                 else None
             ),
             highest_high=(
                 float(position.highest)
-                if position is not None
-                and position.side == "LONG"
-                and position.highest is not None
+                if position is not None and position.side == "LONG" and position.highest is not None
                 else None
             ),
             tp1_done=(
-                position.tp1_done
-                if position is not None and position.side == "LONG"
-                else False
+                position.tp1_done if position is not None and position.side == "LONG" else False
             ),
             last_long_closed_at_ms=self._last_long_closed_at_ms(),
             halted_long=self.halted_long,
@@ -758,9 +704,7 @@ class PluginReplayEngine(ReferenceReplayEngine):
             entry_equity=equity,
             entry_fee=fee,
             stop=round_price(price - stop_distance, self.filters.tick_size),
-            tp1=round_price(
-                price + Decimal(str(tp_r)) * stop_distance, self.filters.tick_size
-            ),
+            tp1=round_price(price + Decimal(str(tp_r)) * stop_distance, self.filters.tick_size),
             highest=price,
             fees=fee,
         )
@@ -860,9 +804,7 @@ def _exit_reason(intent: ExitAll) -> str:
     return intent.reason
 
 
-def _production_tp_qty(
-    qty: Decimal, fraction: Decimal, filters: SymbolFilters
-) -> Decimal:
+def _production_tp_qty(qty: Decimal, fraction: Decimal, filters: SymbolFilters) -> Decimal:
     """Mirror OrderManager precision rounding, then keep the order exchange-valid."""
     exponent = qty.as_tuple().exponent
     raw = qty * fraction

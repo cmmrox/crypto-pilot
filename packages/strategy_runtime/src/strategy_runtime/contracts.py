@@ -88,14 +88,7 @@ class Halt:
 
 
 Intent = (
-    EnterLong
-    | EnterShort
-    | EnterShortStop
-    | ResizeShort
-    | MoveStop
-    | TakePartial
-    | ExitAll
-    | Halt
+    EnterLong | EnterShort | EnterShortStop | ResizeShort | MoveStop | TakePartial | ExitAll | Halt
 )
 
 

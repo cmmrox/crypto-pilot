@@ -19,9 +19,7 @@ def add_indicators(
     df["ema200"] = close.ewm(span=params.slow_period, adjust=False).mean()
     true_range = np.maximum(
         df["high"] - df["low"],
-        np.maximum(
-            (df["high"] - close.shift()).abs(), (df["low"] - close.shift()).abs()
-        ),
+        np.maximum((df["high"] - close.shift()).abs(), (df["low"] - close.shift()).abs()),
     )
     df["atr"] = true_range.ewm(alpha=1 / params.atr_period, adjust=False).mean()
     df["regime"] = (close > df["sma200"]) & (df["ema50"] > df["ema200"])

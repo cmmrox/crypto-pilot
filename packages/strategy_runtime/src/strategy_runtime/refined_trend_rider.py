@@ -36,8 +36,8 @@ class RefinedTrendRider(TrendRider):
                 "Longs also exit when the bull regime ends.",
                 "Shorts cover when the deep-bear condition ends; no short price stop.",
             ),
-            caveats=TrendRider.manifest.education.caveats
-            + (
+            caveats=(
+                *TrendRider.manifest.education.caveats,
                 "Aggressive profile: 15% long risk and up to 6x leverage. Monthly "
                 "breakers do not guarantee a four-percent maximum loss.",
                 "Historical candle replay improved three-year profit, but had a "

@@ -92,40 +92,33 @@ def add_indicators(
     return out
 
 
-def _resumed(
-    df: pd.DataFrame, *, bullish: bool, since_ms: int | None = None, interval_ms: int = 14_400_000
-) -> bool:
-    """True when price closed back on the trend side of the pullback EMA.
+def _resumed(df: pd.DataFrame, *, bullish: bool) -> bool:
+    """True when the latest closed candle fires the research pullback-resume signal.
 
-    The pullback must have happened inside the current regime run *and* after this
-    book last closed a position, so one pullback is traded once: without that
-    memory a stopped-out trade would re-enter on the very next candle.
+    Mirrors the validated research engine (experiments/monthly_income_research,
+    ``strategies.dual``) line for line: inside one regime run, a close on the far side
+    of the pullback EMA arms a resume; the next close back on the trend side fires it
+    and disarms it; leaving the regime disarms it. The signal depends on candles
+    alone, so a pullback is traded at most once and no position state is involved.
     """
-    regime = df["bull"] if bullish else df["bear"]
-    if not bool(regime.iloc[-1]):
+    regime = (df["bull"] if bullish else df["bear"]).to_numpy(dtype=bool)
+    last = len(df) - 1
+    if last < 1 or not regime[last]:
         return False
-    close = df["close"]
-    ema_fast = df["ema_fast"]
-    back_on_side = (
-        close.iloc[-1] > ema_fast.iloc[-1] if bullish else close.iloc[-1] < ema_fast.iloc[-1]
-    )
-    if not back_on_side:
-        return False
-    times = df.get("dt")
-    for index in range(len(df) - 2, -1, -1):
-        if not bool(regime.iloc[index]):
-            return False
-        if since_ms is not None and times is not None:
-            closed_at_ms = int(pd.Timestamp(times.iloc[index]).timestamp() * 1000) + interval_ms
-            if closed_at_ms <= since_ms:
-                return False
-        pulled_back = (
-            close.iloc[index] < ema_fast.iloc[index]
-            if bullish
-            else close.iloc[index] > ema_fast.iloc[index]
-        )
-        if pulled_back:
-            return True
+    close = df["close"].to_numpy(dtype=float)
+    ema_fast = df["ema_fast"].to_numpy(dtype=float)
+    against = close < ema_fast if bullish else close > ema_fast
+    with_trend = close > ema_fast if bullish else close < ema_fast
+    start = last
+    while start > 0 and regime[start - 1]:
+        start -= 1
+    armed = False
+    for index in range(max(start, 1), last + 1):
+        armed = armed or bool(against[index - 1])
+        if armed and with_trend[index]:
+            if index == last:
+                return True
+            armed = False
     return False
 
 
@@ -136,7 +129,7 @@ class AtlasDual:
         contract_version=2,
         strategy_id="atlas_dual_v1_4h",
         display_name="Atlas 7 Dual · 4h",
-        release="1.0",
+        release="1.1",
         packaged_default=False,
         direction="LONG + SHORT",
         capabilities=(
@@ -170,7 +163,8 @@ class AtlasDual:
                 "use the same rules, sizing and protective stop."
             ),
             entries=(
-                "Pullback: price closes back through the 20 EMA inside the regime.",
+                "Pullback: the first close back through the 20 EMA after a close beyond it, "
+                "inside the regime; each pullback is traded at most once.",
                 "Breakout: a tight 24-candle range breaks in the regime direction.",
             ),
             exits=(
@@ -218,12 +212,8 @@ class AtlasDual:
         tp_levels = ((self.parameters.tp1_r, self.parameters.tp1_frac),)
         bull_line = float(current["bull_line"])
         bear_line = float(current["bear_line"])
-        long_signal, long_reason = self._entry(
-            df, bullish=True, since_ms=state.last_long_closed_at_ms
-        )
-        short_signal, short_reason = self._entry(
-            df, bullish=False, since_ms=state.last_short_closed_at_ms
-        )
+        long_signal, long_reason = self._entry(df, bullish=True)
+        short_signal, short_reason = self._entry(df, bullish=False)
 
         # A qualifying opposite signal reverses in one decision; otherwise the
         # buffered regime line closes the trade. Order matters: the reversal is
@@ -260,9 +250,7 @@ class AtlasDual:
             ]
         return []
 
-    def _entry(
-        self, df: pd.DataFrame, *, bullish: bool, since_ms: int | None = None
-    ) -> tuple[bool, str]:
+    def _entry(self, df: pd.DataFrame, *, bullish: bool) -> tuple[bool, str]:
         """Pullback or breakout entry for one side, with the reason that fired."""
         current = df.iloc[-1]
         previous = df.iloc[-2]
@@ -273,7 +261,7 @@ class AtlasDual:
             fresh = not bool(previous["bull"] if bullish else previous["bear"])
             if fresh:
                 return True, "fresh regime"
-            if _resumed(df, bullish=bullish, since_ms=since_ms):
+            if _resumed(df, bullish=bullish):
                 return True, "pullback resume"
         if bool(current["was_tight"]):
             level = float(current["range_high"] if bullish else current["range_low"])

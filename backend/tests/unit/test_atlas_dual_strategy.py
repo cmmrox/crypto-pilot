@@ -246,8 +246,8 @@ def test_warmup_boundary(bars: int) -> None:
     assert _strategy().on_candle(_series(_noisy_base(bars)), FLAT) == []
 
 
-def test_pullback_is_traded_once_per_book() -> None:
-    """After a position closes, the same old pullback must not re-arm an entry."""
+def test_pullback_resume_fires_once_on_the_first_close_back() -> None:
+    """Research rule: a pullback arms one resume; the first close back fires and disarms it."""
     rally = [100.0 + i * 1.5 for i in range(1, 61)]
     # EMA20 sits ~14 below the last close here, so dip clearly under it, then recover.
     dip = [rally[-1] - 20.0, rally[-1] - 24.0]
@@ -256,18 +256,19 @@ def test_pullback_is_traded_once_per_book() -> None:
     candles = _series(closes)
     df = _indicators(closes)
     assert closes[-4] < float(df.iloc[-4]["ema_fast"]), "the dip must close below EMA20"
-    assert closes[-1] > float(df.iloc[-1]["ema_fast"]), "price must close back above EMA20"
-    intents = _strategy().on_candle(candles, FLAT)
-    assert any(isinstance(i, EnterLong) and i.reason == "pullback resume" for i in intents), (
-        "the pullback must arm an entry"
-    )
-    # A long that closed after that pullback consumes it: no immediate re-entry.
-    closed_after_pullback = candles[-1].open_time_ms
-    used = replace(FLAT, last_long_closed_at_ms=closed_after_pullback)
-    assert _strategy().on_candle(candles, used) == []
-    # A long that closed *before* the pullback leaves it available.
-    stale = replace(FLAT, last_long_closed_at_ms=candles[-6].open_time_ms)
+    assert closes[-2] > float(df.iloc[-2]["ema_fast"]), "the first recovery closes above EMA20"
+    assert closes[-1] > float(df.iloc[-1]["ema_fast"]), "and so does the next one"
+
+    first_close_back = _strategy().on_candle(candles[:-1], FLAT)
     assert any(
+        isinstance(i, EnterLong) and i.reason == "pullback resume" for i in first_close_back
+    ), "the first close back above EMA20 fires the armed resume"
+    # The resume was consumed on the previous candle: no second entry from the same dip.
+    assert not any(
         isinstance(i, EnterLong) and i.reason == "pullback resume"
-        for i in _strategy().on_candle(candles, stale)
+        for i in _strategy().on_candle(candles, FLAT)
     )
+    # Candles alone decide it: when the last long closed makes no difference.
+    for closed_at in (candles[-6].open_time_ms, candles[-2].open_time_ms):
+        state = replace(FLAT, last_long_closed_at_ms=closed_at)
+        assert _strategy().on_candle(candles[:-1], state) == first_close_back

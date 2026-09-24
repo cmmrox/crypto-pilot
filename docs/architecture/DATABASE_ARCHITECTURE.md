@@ -40,7 +40,11 @@ state (balance/positions/income) — the DB records it, never invents it.
 3. **Trades reconcile to Binance income history** — `realized_pnl + fees + funding`
    must match the exchange's income records per round-trip; the reconciler flags drift.
 4. **Breaker math derives from `equity_snapshots`** (month-start equity) + live sleeve
-   accrual — persisted so restarts cannot forget a tripped breaker.
+   accrual — persisted so restarts cannot forget a tripped breaker. Each book's
+   `month_to_date_pnl` / `sleeve_month_pnl` includes that book's own trading costs: a
+   snapshot is taken after the decision's orders, so every order it places (entry, exit,
+   reversal, sleeve resize, breaker flatten) charges its equity change to its book. The
+   month-start equity is the first snapshot's equity with those recorded costs added back.
 5. **Secrets:** only `*_encrypted` columns hold secret material (AES-GCM, master key
    from env). Plaintext secrets must never touch the DB, logs, or API responses.
 

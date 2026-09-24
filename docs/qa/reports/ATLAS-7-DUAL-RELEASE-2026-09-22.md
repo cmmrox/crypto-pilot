@@ -37,7 +37,7 @@ stays green.
    reverses in one decision. Fixed by checking the qualifying opposite signal first;
    covered by `test_reversal_exits_then_enters_the_other_side` and by the replay's
    same-decision reversal assertion.
-2. **A pullback could be traded repeatedly.** `_resumed()` recomputed from candles only, so
+2. **A pullback could be traded repeatedly.** *(Superseded by release 1.1, which uses the research rule.)* `_resumed()` recomputed from candles only, so
    after a stop-out the same old pullback re-armed on the very next candle (86 entry signals
    in 400 DEMO candles when scanned from a flat state). Fixed the way v6 does it: the
    pullback must have occurred after that book last closed, using
@@ -115,14 +115,34 @@ and honest caveats, read-only parameters, API manifest, audited selection while 
 HTTP 409 refusal while running, and the watch panel's three rules with its disclaimer.
 `stage-03` and `refined-strategy` pass unchanged, so the older releases still behave.
 
+## Release 1.1 - research pullback rule (2026-09-23)
+
+The pre-release audit replayed the real bot against this strategy's research backtest
+(`experiments/monthly_income_research`, `strategies.dual`, chosen parameters) from
+2023-09-01 to 2026-09-22. Every rule matched except pullback re-arming, so 1.1 ports the
+research state machine exactly: inside a regime run, a close beyond EMA20 arms a resume,
+the first close back on the trend side fires it and disarms it, and leaving the regime
+disarms it. The signal depends on candles alone; no position state is involved.
+
+| Evidence | 1.0 | 1.1 |
+|---|---|---|
+| Entry signals vs research oracle, every candle of the 1,233-bar fixture (833 after warm-up) | 219 mismatches | **0** |
+| Real bot vs research, three years, breakers off: positions reproduced | 116 of 120 | **120 of 120** |
+
+In the 1.1 run 119 positions have the identical entry and exit candle; the 120th has the
+identical entry and was still open when the data ended (research closes it at the last bar).
+`tests/unit/test_atlas_dual_research_parity.py` keeps the signal equivalence in CI. The
+strategy ID is unchanged; trades recorded under 1.0 keep their release tag.
+
 ## Limits
 
 - DEMO klines differ slightly from mainnet: a signal chosen from mainnet research did not
   reproduce on the DEMO series, so the drill used a DEMO-derived signal. Research numbers
   come from mainnet data.
-- The plugin gates re-entry on "this book's last close", while the research engine consumed
-  an armed pullback. Both stop immediate re-entry after a stop-out; they are not identical,
-  so live trade counts may differ slightly from the backtest.
+- Release 1.0 gated re-entry on "this book's last close", while the research engine
+  consumes an armed pullback. This report originally said both stop immediate re-entry
+  after a stop-out; that was wrong - research re-enters when the pullback happened while
+  the stopped trade was open. Release 1.1 adopts the research rule; see below.
 - Replay fills are simulated (next-open entries, stop-before-TP on ambiguous bars, no
   funding, no latency, no liquidity or liquidation model).
 - One DEMO round trip is not a soak. No LIVE key was used and no LIVE gate was opened.

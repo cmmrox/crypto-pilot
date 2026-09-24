@@ -4,7 +4,8 @@ Automated BTCUSDT trading platform executing the validated **Trend Rider v6** lo
 strategy on Binance USDT-M Futures (DEMO testnet first, then LIVE), with a secure web
 dashboard, notify.lk SMS alerts, pluggable strategies and an isolated AI news briefing.
 
-**Source of truth:** [`docs/BUSINESS_SOLUTION_v2.pdf`](docs/BUSINESS_SOLUTION_v2.pdf) (BSD v2.0, 17 Jul 2026).
+**Source of truth:** `docs/BUSINESS_SOLUTION_v2.pdf` (BSD v2.0, 17 Jul 2026). It contains
+backtest results, so it is kept private and is not published in this repository.
 
 ## Repository layout
 
@@ -22,7 +23,7 @@ dashboard, notify.lk SMS alerts, pluggable strategies and an isolated AI news br
 
 | Document | What it defines |
 |---|---|
-| [`BUSINESS_SOLUTION_v2.pdf`](docs/BUSINESS_SOLUTION_v2.pdf) | **Source of truth** — requirements, scope, rollout |
+| `BUSINESS_SOLUTION_v2.pdf` | **Source of truth** — requirements, scope, rollout (kept private, not in this repo) |
 | [`plan/IMPLEMENTATION_PLAN.md`](docs/plan/IMPLEMENTATION_PLAN.md) | Stage-by-stage build plan with QA gates (Stages 0–12) |
 | [`plan/CREDENTIALS.md`](docs/plan/CREDENTIALS.md) | Every key/service the owner must provide, per phase |
 | [`architecture/ARCHITECTURE.md`](docs/architecture/ARCHITECTURE.md) | System architecture, module boundaries, approved BSD deviations |
@@ -30,7 +31,6 @@ dashboard, notify.lk SMS alerts, pluggable strategies and an isolated AI news br
 | [`architecture/INTEGRATIONS.md`](docs/architecture/INTEGRATIONS.md) | Binance (verified 2026 endpoints), notify.lk, Codex SDK (GPT-5.5 news LLM) |
 | [`qa/QA_STRATEGY.md`](docs/qa/QA_STRATEGY.md) | Test pyramid, Playwright conventions, stage gates, acceptance |
 | [`guidelines/`](docs/guidelines/) | Development · Backend · Frontend · UI/UX · Clean code · Code review · Testing · Logging · Security · Maintainability |
-| [`reports/`](docs/reports/) | Validated research reports (why the strategy rules exist) |
 
 **AI development:** Claude Code and Codex share the same canonical skill at
 `.agents/skills/cryptopilot-dev/SKILL.md`. Claude's `.claude/skills/cryptopilot-dev`

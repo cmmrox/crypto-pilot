@@ -5,11 +5,6 @@
 //  v6 = the validated v5.2 long engine, unchanged, PLUS a stop-free
 //  vol-sized short sleeve for bear markets (LONGSHORT_REPORT.md).
 //
-//  Backtest (real Binance 4h, 2023-06 → 2026-07, fees included):
-//  +204.5% (CAGR 42.7%), Sharpe 1.48, max DD −17.2%, worst month −7.9%,
-//  23/37 green months. Out-of-sample bear year 2025-07→2026-07: +31.7%
-//  (long-only v5.2: −2.1%, buy & hold: −41.4%).
-//
 //  LONG ENGINE (v5.2, unchanged):
 //    regime: close > SMA200 AND EMA50 > EMA200
 //    entries: fresh regime, or EMA20 pullback-resumption
@@ -59,7 +54,7 @@ useShorts  = input.bool(true, "Trade the short sleeve", group=grpS)
 depthAtr   = input.float(0.5, "Deep-bear depth (×ATR below SMA200)", step=0.25, group=grpS,
      tooltip="Short only while close < SMA200 − depth×ATR and EMA50 < EMA200. Robust 0–1.")
 shortW     = input.float(75, "Sleeve weight (% of equity)", minval=10, maxval=100, step=5, group=grpS,
-     tooltip="The smoothness dial. 50% = smoothest (Sharpe 1.54), 75% = chosen balance, 100% = max bear profit.")
+     tooltip="The smoothness dial: lower = smoother, higher = more bear-market exposure.")
 volTgt     = input.float(40, "Vol target (% annualized)", minval=10, maxval=100, step=5, group=grpS,
      tooltip="Short size is scaled by min(1, target/realized vol). Robust 30–50, or off via 100.")
 volSpan    = input.int(48, "Realized-vol window (4h bars)", group=grpS)

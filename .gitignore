@@ -88,3 +88,28 @@ var/experiment-lab/
 
 # TypeScript incremental build cache
 *.tsbuildinfo
+
+# Strategy research results and findings — kept local, never published.
+# The strategy code is public; anyone using it must run their own backtests.
+private/
+research/results/
+experiments/monthly_income_research/results/
+experiments/backtesting/results/
+experiments/experiment_lab/src/experiment_lab/research/*.md
+docs/reports/
+docs/design/*.png
+docs/BUSINESS_SOLUTION_v2.pdf
+docs/archive/BUSINESS_SOLUTION.pdf
+docs/tools/make_bsd.py
+tradingview/ATLAS_6_AND_52_QA.md
+docs/qa/reports/MONTHLY-INCOME-STRATEGY-RESEARCH-*.md
+docs/qa/reports/MONTHLY_CONSISTENCY_RESEARCH_*.md
+docs/qa/reports/TIMEFRAME_PROFIT_RESEARCH_*.md
+docs/qa/reports/REFINED-4H-RELEASE-*.md
+docs/qa/reports/TREND-RIDER-RUNTIME-PARITY-*.md
+docs/qa/reports/ATLAS-7-DUAL-RELEASE-*.md
+docs/qa/reports/LIVE-STRATEGY-AUDIT-*.md
+docs/qa/reports/ALL-STRATEGY-PATH-AUDIT-*.md
+docs/qa/reports/PRODUCTION-STRATEGY-FIX-*.md
+docs/qa/reports/EXPERIMENT_LAB_IMPLEMENTATION_QA.md
+docs/qa/reports/STAGE-03-REPORT.md

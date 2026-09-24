@@ -1,9 +1,6 @@
 """Short-sleeve laboratory: stop-free bear-regime shorts, tested in isolation.
 
-Finding from sweep1: the raw 'short while bear regime' exposure made +15.6%
-in the OOS bear year -- the old managed shorts failed because ATR stops got
-whipsawed by bear rallies, not because the short edge is absent. Here we
-refine the SLEEVE (exposure-based, no stops) and validate IS/OOS.
+Refines the SLEEVE (exposure-based, no stops) and validates IS/OOS.
 """
 import numpy as np
 import pandas as pd

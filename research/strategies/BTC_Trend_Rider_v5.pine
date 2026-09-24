@@ -2,11 +2,6 @@
 // ═══════════════════════════════════════════════════════════════════════════
 //  BTC TREND RIDER v5.2  —  4H BTCUSDT
 //
-//  Built and validated on 3 years of real Binance data (2023-06 → 2026-07),
-//  fees included. Full 3y: +137.3%, Sharpe 1.45, max DD −13.2%, PF 1.84,
-//  100 trades, 48% win rate, worst month −5.6%. Out-of-sample bear year
-//  2025-07→2026-07: −4.1% vs buy&hold −45% (the edge in bear markets is
-//  staying out).
 //
 //  v5.1: added monthly loss circuit-breaker (validated in- and out-of-sample):
 //  if equity drops 4% within a calendar month, close everything and stand
@@ -59,7 +54,7 @@ trailAtr  = input.float(4.0, "Runner Trail (×ATR)", step=0.5, group=grpM)
 
 grpB = "═══ Monthly Circuit Breaker (validated) ═══"
 useBreaker = input.bool(true, "Halt month after equity loss", group=grpB,
-     tooltip="If equity falls this % within a calendar month, close all and stand aside until next month. Validated: improves return, Sharpe, DD and worst month.")
+     tooltip="If equity falls this % within a calendar month, close all and stand aside until next month.")
 breakerPct = input.float(4.0, "Monthly loss cap (%)", minval=1, maxval=15, step=0.5, group=grpB)
 
 grpV = "═══ Visuals ═══"

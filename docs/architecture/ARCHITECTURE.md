@@ -154,10 +154,8 @@ unless hotfix-critical. Health endpoint + dead-man cron.
    Supersedes the original validated 2%/3x defaults. Each long trade is sized so a
    stop-out loses ~15% of equity (`risk_pct ÷ stop%` ⇒ ~4.7x median leverage, capped
    at 6x). The `LONG_MONTH_CAP` engine constant stays 4%, so a single losing long
-   halts longs for the remainder of that month. Backtest (2023-06→2026-07, faithful
-   stop/breaker model, funding included): $100 → ~$1,330 with a ~-40% max drawdown and
-   no liquidation. This accepts materially higher single-trade and drawdown risk than
-   the validated set; it relies on stops filling near their price (gap risk) and on the
+   halts longs for the remainder of that month. This accepts materially higher
+   single-trade and drawdown risk than the validated set; it relies on stops filling near their price (gap risk) and on the
    short sleeve remaining at its native vol-targeted sizing. On 2026-07-29 the owner
    explicitly approved applying this same immutable DEMO profile to LIVE, superseding
    the previous DEMO-only restriction and the BSD Stage 12 minimum-risk pilot profile.

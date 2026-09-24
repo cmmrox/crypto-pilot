@@ -29,7 +29,6 @@ fail() {
   fail "Claude and Codex do not resolve to the same bootstrap file"
 
 required_paths=(
-  docs/BUSINESS_SOLUTION_v2.pdf
   docs/strategies/NAMING.md
   docs/strategies/CREATING_A_STRATEGY.md
   docs/guidelines/AGENT_SETUP.md
@@ -51,6 +50,10 @@ for path in "${required_paths[@]}"; do
   [[ -e "$path" ]] || fail "referenced path is missing: $path"
   [[ "$(realpath "$path")" == "$repo_root/"* ]] || fail "reference escapes repository: $path"
 done
+
+# The BSD holds backtest results, so it is kept private and absent from public clones.
+[[ -e docs/BUSINESS_SOLUTION_v2.pdf ]] ||
+  echo "note: docs/BUSINESS_SOLUTION_v2.pdf is private and not present in this checkout"
 
 while IFS= read -r -d '' path; do
   [[ "$(realpath "$path")" == "$repo_root/"* ]] ||

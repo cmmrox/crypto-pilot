@@ -87,18 +87,18 @@ const navItems = [
 
 const equityData = [
   { date: "Jul 23", strategy: 10000, hold: 10000 },
-  { date: "Oct 23", strategy: 11940, hold: 10920 },
-  { date: "Jan 24", strategy: 14580, hold: 15120 },
-  { date: "Apr 24", strategy: 17820, hold: 16600 },
-  { date: "Jul 24", strategy: 19420, hold: 15880 },
-  { date: "Oct 24", strategy: 22240, hold: 18320 },
-  { date: "Jan 25", strategy: 25110, hold: 20480 },
-  { date: "Apr 25", strategy: 26940, hold: 21720 },
-  { date: "Jul 25", strategy: 23180, hold: 19240 },
-  { date: "Oct 25", strategy: 24980, hold: 15120 },
-  { date: "Jan 26", strategy: 26880, hold: 13240 },
-  { date: "Apr 26", strategy: 28620, hold: 14820 },
-  { date: "Jul 26", strategy: 30450, hold: 13460 },
+  { date: "Oct 23", strategy: 10300, hold: 10920 },
+  { date: "Jan 24", strategy: 10600, hold: 15120 },
+  { date: "Apr 24", strategy: 10900, hold: 16600 },
+  { date: "Jul 24", strategy: 11200, hold: 15880 },
+  { date: "Oct 24", strategy: 11500, hold: 18320 },
+  { date: "Jan 25", strategy: 11800, hold: 20480 },
+  { date: "Apr 25", strategy: 12100, hold: 21720 },
+  { date: "Jul 25", strategy: 12400, hold: 19240 },
+  { date: "Oct 25", strategy: 12700, hold: 15120 },
+  { date: "Jan 26", strategy: 13000, hold: 13240 },
+  { date: "Apr 26", strategy: 13300, hold: 14820 },
+  { date: "Jul 26", strategy: 13600, hold: 13460 },
 ];
 
 const liveShortMarks = [
@@ -919,8 +919,8 @@ function Overview({ setActiveView, setSettingsTab, showToast }) {
           </div>
           <div className="chart-proof">
             <strong>Bear-year divergence</strong>
-            <p>Trend Rider v6 returned +31.7% OOS while buy-and-hold fell 41.4%.</p>
-            <small>Backtest 2023–2026 · fees included · past performance is not a guarantee</small>
+            <p>Illustrative placeholder curve, not a backtest result.</p>
+            <small>Prototype mock data · run your own backtest</small>
           </div>
         </Panel>
       </div>

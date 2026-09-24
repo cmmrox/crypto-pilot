@@ -90,9 +90,7 @@ The business source of truth is `BUSINESS_SOLUTION_v2.pdf`. The strategy source 
 
 ## Key validated context
 
-- Composite v6: +204.5% total return, 42.7% CAGR, 1.48 Sharpe, -17.2% max drawdown, worst month -7.9%, 23/37 green months.
-- OOS bear year: +31.7% with -13.8% drawdown; long-only -2.1%; buy-and-hold -41.4%.
-- Performance is historical, fees included, and not a guarantee.
+- Backtest figures are kept private and are not published in this repository.
 
 ## Evaluation rubric
 

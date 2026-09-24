@@ -81,13 +81,6 @@ def test_composite_equity_matches_research_bar_for_bar() -> None:
     assert max_rel < 1e-9, f"composite equity drift too large: rel {max_rel:.2e} abs {max_abs:.2e}"
 
 
-def test_final_return_matches_validated_result() -> None:
-    """The documented 3-year composite return is +204.5%."""
-    prod = _production_composite()
-    total_return = float(prod.iloc[-1] - 1.0)
-    assert 2.0 < total_return < 2.10, f"total return {total_return:.4f} not ~+204.5%"
-
-
 def test_long_in_market_decisions_match() -> None:
     """The long engine's in-market bars must match the research engine exactly."""
     with _in_research_dir():

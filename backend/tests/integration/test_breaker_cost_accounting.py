@@ -19,7 +19,15 @@ from app.execution.orders import OrderManager
 from app.services.settings_store import get_settings_row
 from app.strategies import get_strategy
 from app.strategies.base import Candle as StrategyCandle
-from app.strategies.base import EnterLong, EnterShortStop, ExitAll, Intent, TradeState
+from app.strategies.base import (
+    EnterLong,
+    EnterShort,
+    EnterShortStop,
+    ExitAll,
+    Intent,
+    ResizeShort,
+    TradeState,
+)
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -167,3 +175,32 @@ async def test_reversal_charges_each_book_its_own_costs(
     snapshot = await _snapshot(db_session, candles[21])
     assert snapshot.month_to_date_pnl == -long_fees
     assert snapshot.sleeve_month_pnl == -short_fee
+
+
+@pytest.mark.asyncio
+async def test_sleeve_resize_charges_only_its_own_cost(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Growing the stop-free short sleeve costs its commission, nothing more."""
+    service, exchange, orders, candles = await _bot(
+        db_session,
+        monkeypatch,
+        "trend_rider_v6_4h",
+        [[EnterShort(weight=0.3, vol_target=0.4)], [ResizeShort(target_weight=0.6)]],
+    )
+    assert await service.evaluate_once(db_session, exchange, orders, candles=candles[:21]) == [
+        "open_short"
+    ]
+    after_entry = (await _snapshot(db_session, candles[20])).sleeve_month_pnl
+    before_qty = abs((await exchange.get_position("BTCUSDT")).qty)
+    exchange.mark = D("61000")  # the short is losing when the sleeve grows
+
+    assert await service.evaluate_once(db_session, exchange, orders, candles=candles[:22]) == [
+        "resize_short"
+    ]
+    added = abs((await exchange.get_position("BTCUSDT")).qty) - before_qty
+    assert added > 0
+    price_loss = before_qty * D("1000")
+    resize_fee = added * D("61000") * COMMISSION
+    snapshot = await _snapshot(db_session, candles[21])
+    assert snapshot.sleeve_month_pnl == after_entry - price_loss - resize_fee

@@ -100,6 +100,9 @@ class FakeExchange:
         signed = qty if side == "BUY" else -qty
         if self._pos == 0:
             self._entry = self.mark
+        elif (self._pos > 0) == (signed > 0):
+            # Adding to a position averages its entry price, as Binance does.
+            self._entry = (abs(self._pos) * self._entry + qty * self.mark) / (abs(self._pos) + qty)
         self._pos += signed
         if self._pos == 0:
             self._entry = Decimal("0")

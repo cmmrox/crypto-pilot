@@ -102,14 +102,10 @@ docs/BUSINESS_SOLUTION_v2.pdf
 docs/archive/BUSINESS_SOLUTION.pdf
 docs/tools/make_bsd.py
 tradingview/ATLAS_6_AND_52_QA.md
-docs/qa/reports/MONTHLY-INCOME-STRATEGY-RESEARCH-*.md
-docs/qa/reports/MONTHLY_CONSISTENCY_RESEARCH_*.md
-docs/qa/reports/TIMEFRAME_PROFIT_RESEARCH_*.md
-docs/qa/reports/REFINED-4H-RELEASE-*.md
-docs/qa/reports/TREND-RIDER-RUNTIME-PARITY-*.md
-docs/qa/reports/ATLAS-7-DUAL-RELEASE-*.md
-docs/qa/reports/LIVE-STRATEGY-AUDIT-*.md
-docs/qa/reports/ALL-STRATEGY-PATH-AUDIT-*.md
-docs/qa/reports/PRODUCTION-STRATEGY-FIX-*.md
-docs/qa/reports/EXPERIMENT_LAB_IMPLEMENTATION_QA.md
+# QA reports are private by default: research, release and audit reports carry
+# backtest figures. Only stage-gate and incident reports are published; publish
+# any other report deliberately with `git add -f` after checking it has no results.
+docs/qa/reports/*
+!docs/qa/reports/STAGE-*.md
+!docs/qa/reports/INCIDENT-*.md
 docs/qa/reports/STAGE-03-REPORT.md

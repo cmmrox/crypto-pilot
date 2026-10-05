@@ -33,3 +33,15 @@ qa/
 - `@exchange` suites use real Binance DEMO; SMS/LLM are mocked (one recorded real call
   per stage, run manually).
 - No `waitForTimeout`; no retry-masking of flakes; artifacts (trace/video) on failure.
+
+## CI market data
+
+GitHub-hosted runners can be unable to reach Binance. CI explicitly adds
+`deploy/docker-compose.qa-market.yml`, which mounts `fixtures/market_backend.py`
+outside the production image. The bootstrap refuses anything except an isolated
+OTP-test `*_e2e` database with both LIVE gates disabled. It feeds deterministic
+REST-shaped time/mark/ticker/candle responses through the real client decoder,
+API, storage and manual backfill paths, and rejects all signed calls and mutations.
+CI browser success therefore proves those software paths, not Binance reachability.
+Run actual market/exchange acceptance separately against an accessible DEMO account.
+The standard production Compose files and images never enable this fixture.

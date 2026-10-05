@@ -1,7 +1,9 @@
 import { expect, type Page } from "@playwright/test";
 
-export const OWNER_EMAIL = process.env.CP_QA_OWNER_EMAIL ?? "owner@cryptopilot.app";
-export const OWNER_PASSWORD = process.env.CP_QA_OWNER_PASSWORD ?? "PilotOwner!2026";
+export const OWNER_EMAIL =
+  process.env.CP_QA_OWNER_EMAIL ?? "owner@cryptopilot.app";
+export const OWNER_PASSWORD =
+  process.env.CP_QA_OWNER_PASSWORD ?? "PilotOwner!2026";
 
 interface Tokens {
   access_token: string;
@@ -106,6 +108,13 @@ export async function createSession(page: Page): Promise<Tokens> {
 
 async function installSession(page: Page, tokens: Tokens): Promise<void> {
   await page.goto("/");
+  // Let an old session's bootstrap finish before replacing its tokens. Otherwise
+  // a late failed /me response can clear the new session during the reload.
+  await expect(
+    page
+      .getByRole("heading", { name: "Sign in securely" })
+      .or(page.getByTestId("environment-badge")),
+  ).toBeVisible();
   await page.evaluate((value: Tokens) => {
     sessionStorage.setItem("cp_access", value.access_token);
     sessionStorage.setItem("cp_refresh", value.refresh_token);

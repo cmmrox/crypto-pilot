@@ -72,6 +72,8 @@ jobs:
         run: source .venv/bin/activate && pytest -q -m parity
       - name: Unit + integration tests
         run: source .venv/bin/activate && pytest -q --cov=app --cov-report=term-missing
+      - name: CI market fixture safety and REST protocol
+        run: PYTHONPATH=../qa/fixtures .venv/bin/python -m pytest -q ../qa/fixtures/test_market_backend.py
       - name: Experiment Lab workflow, data guards and legacy replay regression
         run: |
           PYTHONPATH=../experiments/experiment_lab/src:../experiments/backtesting/src \
@@ -156,7 +158,10 @@ jobs:
           docker network create gen-one-network
           docker compose -f deploy/docker-compose.postgres.yml up -d
       - name: Build & start stack
-        run: docker compose -f deploy/docker-compose.yml up -d --build
+        # GitHub-hosted runners cannot reliably reach Binance (regional/network
+        # restrictions). This explicit test-only fixture retains real API,
+        # persistence and backfill checks; actual exchange acceptance is separate.
+        run: docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.qa-market.yml up -d --build
       - name: Wait for health
         run: |
           for i in $(seq 1 30); do

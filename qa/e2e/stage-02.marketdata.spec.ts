@@ -10,7 +10,7 @@ import { login, OWNER_PASSWORD } from "./helpers/auth";
 async function gotoEvents(page: Page) {
   const menu = page.getByRole("button", { name: /open navigation/i });
   if (await menu.isVisible()) await menu.click();
-  await page.getByRole("link", { name: /event ledger/i }).click();
+  await page.getByRole("link", { name: "Event ledger", exact: true }).click();
   await expect(page.getByTestId("view-title")).toHaveText("Event ledger");
 }
 

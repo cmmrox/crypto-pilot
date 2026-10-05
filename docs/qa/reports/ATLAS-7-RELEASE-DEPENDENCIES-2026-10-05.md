@@ -19,6 +19,16 @@ selection. The session installer waits for the previous page's authentication
 bootstrap before replacing tokens, preventing late bootstrap failure from clearing
 the newly installed session. Product authentication and strategy code are unchanged.
 
+The first remote follow-up run passed backend, frontend, agent configuration and
+secret checks. Its browser job failed six public-market checks because Binance was
+unreachable from the GitHub runner. CI now explicitly mounts a public-market fixture
+through a separate QA-only Compose overlay, retaining the real decoder, API, candle
+storage and manual-backfill paths. Guards require isolated OTP-test E2E settings and
+disabled LIVE gates; all signed requests and exchange mutations are refused. The
+fixture is absent from production images. A mobile navigation selector was also
+made exact to avoid confusing the sidebar link with the Overview's ledger link.
+This synthetic CI result cannot substitute for actual Binance acceptance.
+
 The cutover notes now record the owner's production deployment request and DEMO
 environment choice. A shared local/production DEMO account is permitted only with
 one executing bot and flat/order-free exchange truth at acceptance/cutover.
@@ -41,15 +51,21 @@ one executing bot and flat/order-free exchange truth at acceptance/cutover.
 | Full desktop and Pixel 5 browser regression, Lab excluded | 147 passed; 25 intentional skips; no retries |
 | Actual Binance DEMO, both long and short | Confirmed fill anchors, CONTRACT_PRICE reduce-only algo stops, lot-floor LIMIT targets, individual stop cancellation/restoration, fresh client/session recovery, no duplicate orders, tracked reduce-only exit and flat/order-free cleanup |
 | Agent bootstrap validation and diff whitespace | Pass |
+| CI fixture safety/protocol tests | 10 passed; guarded environment, mutation refusal and real candle decoding/pagination |
+| Market browser checks against CI fixture, desktop and Pixel 5 | 16 passed; no retries |
 
 Software suites use disposable local PostgreSQL and synthetic account/provider
 fixtures. The separate real DEMO probes use the current Atlas 1.2 OrderManager,
 adapter and trade synchronizer with another disposable local database. Credentials
 are held only in memory; LIVE entry gates stay disabled. DEMO leverage is set to the
 manifest's 3x cap. Probe entries and stop distances are controlled QA fixtures, not
-natural strategy signals. These probes do not certify profitability, user-stream
-reconnect timing, TP partial/full fills or fill-driven breakeven against Binance.
-Those fill/stream checks and real SMS remain external acceptance gates; the broad
+natural strategy signals. Additional controlled DEMO amendments produced subtarget
+fills on both sides: the original planned TP quantity remained the completion
+criterion, with no premature breakeven. Full-target probes observed actual Binance
+fill events after reconnect and exercised breakeven replacement and crossed-level
+reduce-only cleanup. These checks do not certify natural signal/target touches,
+profitability or an order left in PARTIALLY_FILLED status. Real SMS and sustained
+stream/forward monitoring remain external acceptance gates; the broad
 software suites' credential-gated skips are still accurately reported above.
 Detailed command output remains under ignored `output/atlas7-dependency-*`.
 The initial browser pass reported 145 passes, 25 skips and the two harness failures

@@ -1,0 +1,13 @@
+# Explicit CI-only overlay. Never include in a production deployment.
+services:
+  backend:
+    volumes:
+      - ../qa/fixtures/market_backend.py:/qa/market_backend.py:ro
+    command:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        alembic upgrade head
+        chown -R app:app /data/codex
+        exec gosu app env PYTHONPATH=/app python /qa/market_backend.py

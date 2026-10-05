@@ -114,6 +114,7 @@ class Exchange(Protocol):
         *,
         client_order_id: str,
         reduce_only: bool = True,
+        working_type: str = "MARK_PRICE",
     ) -> OrderResult: ...
 
     async def place_take_profit(

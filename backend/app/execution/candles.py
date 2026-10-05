@@ -166,3 +166,31 @@ async def latest_open_time(session: AsyncSession, symbol: str, interval: str) ->
             .limit(1)
         )
     ).scalar_one_or_none()
+
+
+async def repair_gaps(
+    session: AsyncSession,
+    client: BinanceClient,
+    symbol: str,
+    interval: str,
+    gaps: list[dt.datetime],
+) -> int:
+    """Repair every missing historical close, including gaps older than 500 bars."""
+    repaired = 0
+    step = INTERVAL_MS[interval]
+    missing = {int(stamp.timestamp() * 1000) for stamp in gaps}
+    while missing:
+        start = min(missing)
+        batch = await client.get_klines(
+            symbol,
+            interval,
+            start_time_ms=start,
+            end_time_ms=min(max(missing) + step - 1, start + 1500 * step - 1),
+            limit=1500,
+        )
+        closed = [row for row in batch if row.is_closed and row.open_time_ms in missing]
+        if not closed:
+            break
+        repaired += await upsert_klines(session, symbol, interval, closed)
+        missing.difference_update(row.open_time_ms for row in closed)
+    return repaired

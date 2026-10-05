@@ -83,6 +83,28 @@ def test_unknown_environment_rejected() -> None:
         BinanceClient("STAGING")
 
 
+async def test_user_stream_lifecycle_uses_api_key_without_trade_signature() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"listenKey": "test-listen-key"})
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), base_url="https://example.invalid"
+    ) as raw:
+        client = BinanceClient("DEMO", api_key="test-key", api_secret="test-secret", client=raw)
+        key = await client.start_user_stream()
+        await client.keepalive_user_stream(key)
+        await client.close_user_stream(key)
+    assert [r.method for r in requests] == ["POST", "PUT", "DELETE"]
+    for request in requests:
+        assert request.url.path == "/fapi/v1/listenKey"
+        assert request.headers["X-MBX-APIKEY"] == "test-key"
+        assert "signature" not in request.url.params
+        assert "timestamp" not in request.url.params
+
+
 def test_backoff_is_bounded_and_jittered() -> None:
     for attempt in range(6):
         for _ in range(20):

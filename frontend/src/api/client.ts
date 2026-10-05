@@ -324,6 +324,21 @@ export interface Position {
   unrealized_pnl: string;
   leverage: string;
   has_price_stop: boolean;
+  protection_confirmed: boolean;
+  protection_checked_at: string | null;
+  stop_policy: string;
+  stop_price: string | null;
+  stop_qty: string | null;
+  stop_status: string | null;
+  stop_working_type: string | null;
+  original_stop_price: string | null;
+  tp1_price: string | null;
+  tp1_qty: string | null;
+  tp1_filled_qty: string | null;
+  tp1_percent: string | null;
+  tp1_status: string | null;
+  tp1_status_source: string;
+  exit_stage: string;
 }
 
 export interface Breaker {
@@ -460,9 +475,16 @@ export interface OrderRow {
   price: string | null;
   stop_price: string | null;
   reduce_only: boolean;
+  filled_qty: string;
+  avg_fill_px: string | null;
+  placed_at: string | null;
+  filled_at: string | null;
+  working_type: string | null;
 }
 
 export interface TradeDetail extends TradeRow {
+  remaining_qty: string;
+  strategy_release: string;
   orders: OrderRow[];
 }
 

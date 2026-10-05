@@ -11,6 +11,7 @@ import datetime as dt
 import uuid
 from dataclasses import dataclass
 from decimal import Decimal
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.logging import get_logger
 from app.db.models import Order, Trade
 from app.execution.exchange import Exchange, OrderResult
-from app.execution.filters import SymbolFilters, clamp_qty, round_price
+from app.execution.filters import SymbolFilters, clamp_qty, round_price, round_qty
 from app.risk.sizing import SizingResult
 from app.services.events import record_event
 
@@ -94,6 +95,8 @@ class OrderManager:
         stop_price: Decimal,
         tp1_price: Decimal,
         tp1_fraction: Decimal,
+        stop_distance: Decimal | None = None,
+        tp1_r: Decimal | None = None,
         strategy: str,
         strategy_release: str,
         strategy_interval: str,
@@ -107,6 +110,8 @@ class OrderManager:
             stop_price=stop_price,
             tp1_price=tp1_price,
             tp1_fraction=tp1_fraction,
+            stop_distance=stop_distance,
+            tp1_r=tp1_r,
             strategy=strategy,
             strategy_release=strategy_release,
             strategy_interval=strategy_interval,
@@ -121,6 +126,8 @@ class OrderManager:
         stop_price: Decimal,
         tp1_price: Decimal,
         tp1_fraction: Decimal,
+        stop_distance: Decimal | None = None,
+        tp1_r: Decimal | None = None,
         strategy: str,
         strategy_release: str,
         strategy_interval: str,
@@ -138,6 +145,8 @@ class OrderManager:
             stop_price=stop_price,
             tp1_price=tp1_price,
             tp1_fraction=tp1_fraction,
+            stop_distance=stop_distance,
+            tp1_r=tp1_r,
             strategy=strategy,
             strategy_release=strategy_release,
             strategy_interval=strategy_interval,
@@ -153,6 +162,8 @@ class OrderManager:
         stop_price: Decimal,
         tp1_price: Decimal,
         tp1_fraction: Decimal,
+        stop_distance: Decimal | None = None,
+        tp1_r: Decimal | None = None,
         strategy: str,
         strategy_release: str,
         strategy_interval: str,
@@ -164,6 +175,10 @@ class OrderManager:
         immediately and :class:`ProtectiveStopFailed` carries the executed fills,
         so a trade is never left running without its stop.
         """
+        from app.execution.policy import execution_policy
+
+        policy = execution_policy(strategy, strategy_release)
+        filters = await self._ex.get_filters(self._symbol)
         long_side = side == "LONG"
         entry_side = "BUY" if long_side else "SELL"
         exit_side = "SELL" if long_side else "BUY"
@@ -174,6 +189,12 @@ class OrderManager:
             client_order_id=new_client_order_id("CPL" if long_side else "CPSH"),
         )
         _require_confirmed_market_fill(entry, sizing.qty)
+        if policy.anchor_to_fill and stop_distance is not None and tp1_r is not None:
+            direction = Decimal("1") if long_side else Decimal("-1")
+            stop_price = round_price(entry.avg_price - direction * stop_distance, filters.tick_size)
+            tp1_price = round_price(
+                entry.avg_price + direction * stop_distance * tp1_r, filters.tick_size
+            )
         trade = await self._persist_trade(
             session,
             side,
@@ -192,6 +213,9 @@ class OrderManager:
             reduce_only=False,
         )
 
+        stop_options: dict[str, Any] = {}
+        if policy.stop_working_type != "MARK_PRICE":
+            stop_options["working_type"] = policy.stop_working_type
         try:
             stop = await self._ex.place_stop_market(
                 self._symbol,
@@ -199,6 +223,7 @@ class OrderManager:
                 sizing.qty,
                 stop_price,
                 client_order_id=new_client_order_id("CPS"),
+                **stop_options,
             )
         except Exception as stop_error:
             # Capture the real rejection reason at the source — the caller only
@@ -275,23 +300,96 @@ class OrderManager:
             stop_price=stop_price,
         )
 
-        tp_qty = _round_to(sizing.qty * tp1_fraction, sizing.qty)
-        tp1 = await self._ex.place_take_profit(
-            self._symbol,
-            exit_side,
-            tp_qty,
-            tp1_price,
-            client_order_id=new_client_order_id("CPT"),
+        if policy.breakeven_on_tp_fill:
+            # Confirmed protection survives a later TP rejection or process exit.
+            await session.commit()
+
+        tp_qty = (
+            round_qty(sizing.qty * tp1_fraction, filters.step_size)
+            if policy.partial_round_down
+            else _round_to(sizing.qty * tp1_fraction, sizing.qty)
         )
-        await self._persist_order(
-            session,
-            tp1,
-            trade.id,
-            "LIMIT",
-            requested_qty=tp_qty,
-            reduce_only=True,
-            price=tp1_price,
-        )
+        # Research sets tp_done after the level is touched even if floor(q*40%)
+        # is zero. It sells nothing and enables the trail at the next 4h close;
+        # no zero-size order or intrabar breakeven move is sent to Binance.
+        if policy.partial_round_down and tp_qty < filters.min_qty:
+            session.add(
+                Order(
+                    client_order_id=new_client_order_id("CPVT"),
+                    trade_id=trade.id,
+                    type="LIMIT",
+                    status="VIRTUAL",
+                    qty=Decimal("0"),
+                    filled_qty=Decimal("0"),
+                    reduce_only=True,
+                    price=tp1_price,
+                    placed_at=dt.datetime.now(dt.UTC),
+                    raw_json={"virtual_tp": True, "planned_fraction": str(tp1_fraction)},
+                )
+            )
+            await record_event(
+                session,
+                level="WARN",
+                category="trade",
+                ref=f"trade:{trade.id}",
+                message="TP1 below one lot; target enables the trail without a partial sale",
+                payload={"target": str(tp1_price), "tp1_qty": "0"},
+            )
+            await self._refresh_trade_money(session, trade)
+            await session.commit()
+            return trade
+        tp_client_id = new_client_order_id("CPT")
+        pending_tp: Order | None = None
+        if policy.breakeven_on_tp_fill:
+            pending_tp = Order(
+                client_order_id=tp_client_id,
+                trade_id=trade.id,
+                type="LIMIT",
+                status="PENDING",
+                qty=tp_qty,
+                filled_qty=Decimal("0"),
+                reduce_only=True,
+                price=tp1_price,
+                placed_at=dt.datetime.now(dt.UTC),
+                raw_json={"planned_fraction": str(tp1_fraction)},
+            )
+            session.add(pending_tp)
+            await session.commit()
+        try:
+            tp1 = await self._ex.place_take_profit(
+                self._symbol,
+                exit_side,
+                tp_qty,
+                tp1_price,
+                client_order_id=tp_client_id,
+            )
+        except Exception as exc:
+            from app.execution.binance_client import AmbiguousMutationError, BinanceError
+
+            if (
+                pending_tp is not None
+                and isinstance(exc, BinanceError)
+                and not isinstance(exc, AmbiguousMutationError)
+            ):
+                pending_tp.status = "REJECTED"
+                await session.commit()
+            raise
+        if pending_tp is not None:
+            pending_tp.binance_order_id = tp1.exchange_order_id
+            pending_tp.status = tp1.status
+            pending_tp.filled_qty = tp1.filled_qty
+            pending_tp.raw_json = {**pending_tp.raw_json, **tp1.raw}
+            await session.commit()
+        else:
+            await self._persist_order(
+                session,
+                tp1,
+                trade.id,
+                "LIMIT",
+                requested_qty=tp_qty,
+                reduce_only=True,
+                price=tp1_price,
+            )
         await record_event(
             session,
             level="INFO",
@@ -493,6 +591,7 @@ class OrderManager:
         The ratchet is one-way: a long stop only rises, a short stop only falls, so a
         retry or a stale intent can never widen the risk on an open position.
         """
+        requested_at = dt.datetime.now(dt.UTC)
         long_side = side == "LONG"
         active = (
             await session.execute(
@@ -506,13 +605,37 @@ class OrderManager:
                 .limit(1)
             )
         ).scalar_one_or_none()
+        restoring = active is None
+        if restoring:
+            active = await session.scalar(
+                select(Order)
+                .where(
+                    Order.trade_id == trade.id,
+                    Order.type == "STOP_MARKET",
+                    Order.stop_price.is_not(None),
+                    Order.status != "PENDING",
+                )
+                .order_by(Order.id.desc())
+                .limit(1)
+            )
         if active is None or active.stop_price is None:
-            raise StopMoveFailed(f"cannot ratchet {side.lower()} stop: active stop is missing")
+            raise StopMoveFailed(
+                f"cannot ratchet {side.lower()} stop: known protective price is missing"
+            )
+        if restoring:
+            if new_stop_price > 0:
+                new_stop_price = (
+                    max(active.stop_price, new_stop_price)
+                    if long_side
+                    else min(active.stop_price, new_stop_price)
+                )
+            else:
+                new_stop_price = active.stop_price
         rounded_stop = round_price(new_stop_price, filters.tick_size)
         improves = (
             rounded_stop > active.stop_price if long_side else rounded_stop < active.stop_price
         )
-        if not improves:
+        if not improves and not restoring:
             return False
         qty = clamp_qty(remaining_qty, filters)
         if qty <= 0:
@@ -520,34 +643,98 @@ class OrderManager:
                 f"cannot ratchet {side.lower()} stop: remaining quantity is below minimum"
             )
 
-        replacement = await self._ex.place_stop_market(
-            self._symbol,
-            "SELL" if long_side else "BUY",
-            qty,
-            rounded_stop,
-            client_order_id=new_client_order_id("CPSR"),
-        )
-        await self._persist_order(
-            session,
-            replacement,
-            trade.id,
-            "STOP_MARKET",
-            requested_qty=qty,
-            reduce_only=True,
-            stop_price=rounded_stop,
-        )
+        from app.execution.policy import execution_policy
+
+        durable = execution_policy(trade.strategy, trade.strategy_release).breakeven_on_tp_fill
+        client_id = new_client_order_id("CPSR")
+        working_type = active.raw_json.get("workingType", "MARK_PRICE")
+        pending: Order | None = None
+        if durable:
+            pending = Order(
+                client_order_id=client_id,
+                trade_id=trade.id,
+                type="STOP_MARKET",
+                status="PENDING",
+                qty=qty,
+                filled_qty=Decimal("0"),
+                reduce_only=True,
+                stop_price=rounded_stop,
+                placed_at=dt.datetime.now(dt.UTC),
+                raw_json={"workingType": working_type, "replaces": active.client_order_id},
+            )
+            session.add(pending)
+            await session.commit()
+        replacement_options: dict[str, Any] = {}
+        if working_type == "CONTRACT_PRICE":
+            replacement_options["working_type"] = working_type
         try:
-            cancelled = await self._ex.cancel_order(self._symbol, active.client_order_id)
+            replacement = await self._ex.place_stop_market(
+                self._symbol,
+                "SELL" if long_side else "BUY",
+                qty,
+                rounded_stop,
+                client_order_id=client_id,
+                **replacement_options,
+            )
+        except Exception as exc:
+            from app.execution.binance_client import BinanceError
+
+            if pending is not None and isinstance(exc, BinanceError) and exc.code == -2021:
+                pending.status = "REJECTED"
+                await session.commit()
+                position = await self._ex.get_position(self._symbol)
+                if position.qty != 0:
+                    if (position.qty > 0) != long_side:
+                        raise StopMoveFailed(
+                            "stop rejection revealed an opposite position"
+                        ) from exc
+                    await self.flatten(
+                        session,
+                        side=side,
+                        qty=abs(position.qty),
+                        reason="ratchet stop already crossed",
+                    )
+                    await session.commit()
+                return False
+            # PENDING survives rollback. Recovery queries this exact client ID;
+            # unknown exchange outcomes never create a second replacement.
+            raise
+        if pending is not None:
+            pending.status = replacement.status
+            pending.binance_order_id = replacement.exchange_order_id
+            pending.raw_json = {**replacement.raw, "replaces": active.client_order_id}
+            await session.commit()
+        else:
+            await self._persist_order(
+                session,
+                replacement,
+                trade.id,
+                "STOP_MARKET",
+                requested_qty=qty,
+                reduce_only=True,
+                stop_price=rounded_stop,
+            )
+        try:
+            cancelled = (
+                await self._ex.cancel_order(self._symbol, active.client_order_id)
+                if not restoring
+                else await self._ex.get_order(self._symbol, active.client_order_id)
+            )
         except Exception as exc:
             # Determine which stop survived an ambiguous cancel. Never blindly
             # cancel the replacement and risk leaving the position unprotected.
             old_truth = await self._ex.get_order(self._symbol, active.client_order_id)
             if old_truth.status in {"NEW", "PARTIALLY_FILLED"}:
-                await self._ex.cancel_order(self._symbol, replacement.client_order_id)
+                retired = await self._ex.cancel_order(self._symbol, replacement.client_order_id)
+                if pending is not None:
+                    pending.status = retired.status
+                    pending.raw_json = retired.raw
+                    await session.commit()
                 raise StopMoveFailed(
                     "stop ratchet failed; previous protective stop remains active"
                 ) from exc
             cancelled = old_truth
+        confirmed_at = dt.datetime.now(dt.UTC)
         active.status = cancelled.status
         active.raw_json = cancelled.raw
         await record_event(
@@ -559,6 +746,9 @@ class OrderManager:
             payload={
                 "previous_stop": str(active.stop_price),
                 "new_stop": str(rounded_stop),
+                "requested_at": requested_at.isoformat(),
+                "confirmed_at": confirmed_at.isoformat(),
+                "duration_ms": int((confirmed_at - requested_at).total_seconds() * 1000),
                 "qty": str(qty),
             },
         )
@@ -644,6 +834,10 @@ class OrderManager:
         fees = Decimal("0")
         realized = Decimal("0")
         for row in rows:
+            if row.raw_json.get("virtual_tp") or (
+                row.status in {"REJECTED", "CANCELED"} and row.binance_order_id is None
+            ):
+                continue
             truth = await self._ex.get_order(self._symbol, row.client_order_id)
             row.status = truth.status
             row.filled_qty = truth.filled_qty

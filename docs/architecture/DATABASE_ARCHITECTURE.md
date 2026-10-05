@@ -92,3 +92,14 @@ The ORM now declares the server defaults already present in applied migrations f
 was required. A fresh database passed upgrade, Alembic drift check, downgrade to base,
 re-upgrade and a second drift check. Experiment Lab SQLite schema 3 is separate from
 PostgreSQL; its migrations and snapshot recovery are covered by the Lab suite.
+
+### Atlas 7 intrabar book attribution (release 1.2)
+
+Revision `d9e0f1a2b3c4` adds nullable numeric(20,8) `month_start_equity`,
+`long_book_value` and `short_book_value` to `equity_snapshots`. Absolute book values
+include recorded realized P&L minus commissions plus funding income and the open
+book's unrealized value. Their differences retain monthly attribution when a stop
+closed the trade between decisions. The explicit baseline prevents later execution
+marks from redefining month-start equity. Old snapshot rows remain compatible.
+Orders reuse durable PENDING status and JSON `replaces` metadata for stop recovery;
+virtual zero-lot targets are never submitted to the exchange.

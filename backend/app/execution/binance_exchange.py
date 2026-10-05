@@ -186,6 +186,7 @@ class BinanceExchange:
         *,
         client_order_id: str,
         reduce_only: bool = True,
+        working_type: str = "MARK_PRICE",
     ) -> OrderResult:
         params: dict[str, Any] = {
             "algoType": "CONDITIONAL",
@@ -196,7 +197,7 @@ class BinanceExchange:
             "triggerPrice": _fmt(stop_price),
             "clientAlgoId": client_order_id,
             "reduceOnly": "true" if reduce_only else "false",
-            "workingType": "MARK_PRICE",
+            "workingType": working_type,
         }
         try:
             data = await self._c.signed_request("POST", "/fapi/v1/algoOrder", params)

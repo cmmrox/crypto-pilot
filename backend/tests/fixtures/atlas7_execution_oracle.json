@@ -1,0 +1,46 @@
+{
+  "reference": "MIR dual / final_eval.PARAMS",
+  "hashes": {
+    "experiments/monthly_income_research/src/mir/engine.py": "83881dfded011e881eed9dac26fcdcd292895e76a1d664b076017c3867a47e8e",
+    "experiments/monthly_income_research/src/mir/strategies.py": "558b7a5b54e7c616747747f49084942dfa73ffd8df890a6c9d2cf51512bf0bba",
+    "experiments/monthly_income_research/src/mir/indicators.py": "2124898b7f4134bf80a81c03e5bf9ba4e8325bd3d85fbd9334513b884dea5c66",
+    "backend/tests/fixtures/atlas7_1h_2026.csv": "5473a87a00d0bbd0e17d6e8934f1d9a64935155f4697bd3cab470fa8b1f6bf91",
+    "experiments/monthly_income_research/src/mir/data.py": "7189090d1a38fc65434759e224709818b7d621d8df2a2d5a801e2794de7ec28b"
+  },
+  "params": {
+    "fast": 20,
+    "slow": 200,
+    "stop_t": 2.5,
+    "stop_b": 2.5,
+    "tp_r": 2.0,
+    "trail": 3.0,
+    "n": 24,
+    "look": 360,
+    "q": 0.35,
+    "er": 0.0,
+    "er_n": 84,
+    "short": 1,
+    "hyst": 1.0
+  },
+  "config": {
+    "init_eq": 1000.0,
+    "risk_pct": 0.04,
+    "lev_cap": 3.0,
+    "taker": 0.0007,
+    "maker": 0.0002,
+    "max_hold": 0,
+    "size_mode": 0,
+    "notional_frac": 1.0,
+    "tp_frac": 0.4,
+    "be_after_tp": true,
+    "breaker_pct": 0.08,
+    "breaker_flatten": true,
+    "qty_step": 0.0001,
+    "min_notional": 50.0,
+    "trail_ref": 1,
+    "trail_after_tp": true,
+    "month_target": 0.0,
+    "month_stop": 0.0
+  },
+  "warmup": 400
+}

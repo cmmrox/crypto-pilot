@@ -21,8 +21,8 @@ from app.bot.scheduler import (
     seconds_until_next_close,
     utc_now,
 )
-from app.bot.service import bot_service
-from app.db.models import Briefing, Candle, EquitySnapshot, Event, Trade
+from app.bot.service import _book_values, bot_service
+from app.db.models import Briefing, Candle, EquitySnapshot, Event, Order, Trade
 from app.execution import candles as candle_svc
 from app.execution.binance_client import BinanceError, console_client, log_unreachable
 from app.execution.binance_exchange import BinanceExchange
@@ -54,6 +54,21 @@ class PositionSnapshot:
     unrealized_pnl: str
     leverage: str
     has_price_stop: bool
+    protection_confirmed: bool = False
+    protection_checked_at: str | None = None
+    stop_policy: str = "required"
+    stop_price: str | None = None
+    stop_qty: str | None = None
+    stop_status: str | None = None
+    stop_working_type: str | None = None
+    original_stop_price: str | None = None
+    tp1_price: str | None = None
+    tp1_qty: str | None = None
+    tp1_filled_qty: str | None = None
+    tp1_percent: str | None = None
+    tp1_status: str | None = None
+    tp1_status_source: str = "unavailable"
+    exit_stage: str = "unverified"
 
 
 @dataclass(frozen=True)
@@ -198,6 +213,8 @@ async def build_overview(session: AsyncSession) -> OverviewSnapshot:
         now,
         account.equity,
         strategy_risk,
+        environment=environment,
+        unrealized=account.unrealized_pnl,
     )
     watch = _watch_snapshot(history.watch, market.mark_price, strategy_plugin)
     engine = _engine_snapshot(now, history.gap_count)
@@ -257,7 +274,14 @@ async def _account_snapshot(
             api_key=api_key,
             api_secret=api_secret,
         ) as client:
-            account = await BinanceExchange(client).get_account()
+            exchange = BinanceExchange(client)
+            account = await exchange.get_account()
+            try:
+                live_orders = await exchange.get_open_orders(symbol)
+                protection_confirmed = True
+            except BinanceError:
+                live_orders = []
+                protection_confirmed = False
     except BinanceError as exc:
         log_unreachable(environment, "account", exc)
         return _unavailable_account()
@@ -281,9 +305,112 @@ async def _account_snapshot(
             mark_price=None,
             unrealized_pnl=_decimal(account.unrealized_pnl),
             leverage=f"{leverage:.2f}",
-            has_price_stop=side == "LONG",
+            has_price_stop=False,
         )
 
+    if position_out is not None and position is not None:
+        trade = await session.scalar(
+            select(Trade)
+            .where(
+                Trade.environment == environment,
+                Trade.closed_at.is_(None),
+                Trade.side == position_out.side,
+            )
+            .order_by(Trade.id.desc())
+            .limit(1)
+        )
+        tracked = (
+            (
+                await session.scalars(
+                    select(Order).where(Order.trade_id == trade.id).order_by(Order.id)
+                )
+            ).all()
+            if trade is not None
+            else []
+        )
+        exit_side = "SELL" if position_out.side == "LONG" else "BUY"
+        active = [
+            row
+            for row in live_orders
+            if row.status in {"NEW", "PARTIALLY_FILLED"}
+            and row.raw.get("side") == exit_side
+            and str(row.raw.get("reduceOnly", "false")).lower() == "true"
+        ]
+        stops = [
+            row for row in active if row.raw.get("type", row.raw.get("orderType")) == "STOP_MARKET"
+        ]
+        limits = [row for row in active if row.raw.get("type") == "LIMIT"]
+        stop = stops[-1] if stops else None
+        target = limits[-1] if limits else None
+        original = next((row for row in tracked if row.type == "STOP_MARKET"), None)
+        tp_row = next((row for row in tracked if row.type == "LIMIT" and row.reduce_only), None)
+        policy = "required"
+        if trade is not None:
+            plugin = get_strategy(trade.strategy)
+            if (
+                position_out.side == "SHORT"
+                and "protective_stop_both_sides" not in plugin.manifest.capabilities
+            ):
+                policy = "none"
+        stop_price = (
+            str(stop.raw.get("triggerPrice", stop.raw.get("stopPrice")))
+            if stop is not None
+            else None
+        )
+        stop_qty = str(stop.raw.get("quantity", stop.raw.get("origQty", "0"))) if stop else None
+        has_stop = stop is not None and Decimal(stop_qty or "0") >= abs(position.qty)
+        stage = "initial"
+        if not protection_confirmed:
+            stage = "unverified"
+        elif policy == "none":
+            stage = "size_managed"
+        elif not has_stop:
+            stage = "missing_protection"
+        elif stop_price is not None:
+            stop_px = Decimal(stop_price)
+            if stop_px == position.entry_price:
+                stage = "breakeven"
+            elif (
+                stop_px > position.entry_price if side == "LONG" else stop_px < position.entry_price
+            ):
+                stage = "trailing"
+        position_out = replace(
+            position_out,
+            has_price_stop=has_stop,
+            protection_confirmed=protection_confirmed,
+            protection_checked_at=utc_now().isoformat() if protection_confirmed else None,
+            stop_policy=policy,
+            stop_price=stop_price,
+            stop_qty=stop_qty,
+            stop_status=stop.status if stop else None,
+            stop_working_type=str(stop.raw.get("workingType")) if stop else None,
+            original_stop_price=str(original.stop_price) if original else None,
+            tp1_price=str(target.raw.get("price"))
+            if target
+            else (str(tp_row.price) if tp_row else None),
+            tp1_qty=str(target.raw.get("origQty", target.raw.get("quantity")))
+            if target
+            else (str(tp_row.qty) if tp_row else None),
+            tp1_filled_qty=str(target.filled_qty)
+            if target
+            else (str(tp_row.filled_qty) if tp_row else None),
+            tp1_status=(
+                target.status
+                if target
+                else (
+                    tp_row.status
+                    if tp_row and tp_row.status not in {"NEW", "PENDING", "PARTIALLY_FILLED"}
+                    else "UNCONFIRMED"
+                    if tp_row
+                    else None
+                )
+            ),
+            tp1_status_source="exchange" if target else "recorded" if tp_row else "unavailable",
+            tp1_percent=f"{tp_row.qty / trade.qty * 100:.2f}"
+            if tp_row and trade and trade.qty
+            else None,
+            exit_stage=stage,
+        )
     return _AccountSnapshot(
         available=True,
         balance=account.balance,
@@ -473,25 +600,45 @@ async def _breaker_snapshots(
     now: dt.datetime,
     equity: Decimal,
     risk: RiskSpec,
+    *,
+    environment: str = "DEMO",
+    unrealized: Decimal = Decimal("0"),
 ) -> tuple[list[BreakerSnapshot], Decimal]:
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     output: list[BreakerSnapshot] = []
     month_realized = Decimal("0")
     available = equity > 0
 
+    latest = await session.scalar(
+        select(EquitySnapshot)
+        .where(EquitySnapshot.environment == environment, EquitySnapshot.ts >= month_start)
+        .order_by(EquitySnapshot.ts.desc())
+        .limit(1)
+    )
+    book_values = await _book_values(session, environment, unrealized)
     for book, sides, cap in (
         ("Long book", ("LONG",), risk.long_monthly_loss_cap),
         ("Short sleeve", ("SHORT",), risk.short_monthly_loss_cap),
     ):
         statement = select(func.coalesce(func.sum(Trade.realized_pnl), 0)).where(
-            Trade.closed_at >= month_start, Trade.side.in_(sides)
+            Trade.environment == environment, Trade.closed_at >= month_start, Trade.side.in_(sides)
         )
         pnl = Decimal(str((await session.execute(statement)).scalar_one()))
         month_realized += pnl
+        baseline = equity
+        if latest is not None:
+            baseline = latest.month_start_equity or equity
+            if sides == ("LONG",) and latest.long_book_value is not None:
+                pnl = latest.month_to_date_pnl + book_values[0] - latest.long_book_value
+            elif sides == ("SHORT",) and latest.short_book_value is not None:
+                pnl = latest.sleeve_month_pnl + book_values[1] - latest.short_book_value
         state = evaluate_breaker(
-            month_start_equity=equity if available else Decimal("1"),
+            month_start_equity=baseline if available else Decimal("1"),
             month_to_date_pnl=pnl,
             cap=cap,
+        )
+        halted = await bot_service._breaker_event_exists(
+            session, book=sides[0], month=month_start.strftime("%Y-%m"), environment=environment
         )
         output.append(
             BreakerSnapshot(
@@ -500,7 +647,7 @@ async def _breaker_snapshots(
                 drawdown_pct=f"{state.drawdown_pct:.4f}",
                 progress_pct=_breaker_progress(state.drawdown_pct, cap),
                 cap_pct=f"{cap * Decimal('100'):.1f}",
-                tripped=state.tripped if available else False,
+                tripped=(halted or state.tripped) if available else halted,
                 available=available,
             )
         )

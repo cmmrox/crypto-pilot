@@ -51,8 +51,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         log.info("legacy_api_keys_encrypted", count=migrated_keys)
 
     from app.bot.ingest import ingest_service
+    from app.bot.protection import protection_service
 
     if settings.environment != "test":
+        await protection_service.start()
         await ingest_service.start()
         from app.news.scheduler import news_scheduler
 
@@ -61,6 +63,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
 
     if settings.environment != "test":
+        await protection_service.stop()
         await ingest_service.stop()
         from app.news.scheduler import news_scheduler
 

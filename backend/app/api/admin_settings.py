@@ -13,10 +13,10 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUserDep
+from app.bot.coordination import trading_session
 from app.bot.service import bot_service
 from app.bot.state import BotStatus
 from app.core.config import get_settings
-from app.db.session import get_session
 from app.services import execution_service as exec_svc
 from app.services.events import record_event
 from app.services.settings_store import get_settings_row
@@ -28,7 +28,7 @@ from app.services.strategy_selection import (
 
 router = APIRouter(prefix="/api/settings", tags=["settings-admin"])
 
-SessionDep = Annotated[AsyncSession, Depends(get_session)]
+SessionDep = Annotated[AsyncSession, Depends(trading_session)]
 
 
 class EnvironmentIn(BaseModel):

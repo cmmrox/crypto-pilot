@@ -7,8 +7,9 @@ own clocks, I/O, sizing calculations, reconciliation, and order placement.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
+from typing import Literal
 
 
 @dataclass(frozen=True)
@@ -55,6 +56,16 @@ class ValidationEvidence:
 
 
 @dataclass(frozen=True)
+class ExecutionSpec:
+    """Release-owned execution rules; defaults preserve established releases."""
+
+    anchor_to_fill: bool = False
+    partial_round_down: bool = False
+    breakeven_on_tp_fill: bool = False
+    stop_working_type: Literal["MARK_PRICE", "CONTRACT_PRICE"] = "MARK_PRICE"
+
+
+@dataclass(frozen=True)
 class StrategyManifest:
     """The complete application-facing identity of one strategy release."""
 
@@ -70,3 +81,4 @@ class StrategyManifest:
     education: StrategyEducation
     validation: ValidationEvidence
     legacy_ids: tuple[str, ...] = ()
+    execution: ExecutionSpec = field(default_factory=ExecutionSpec)

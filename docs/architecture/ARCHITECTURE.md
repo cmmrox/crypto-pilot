@@ -245,3 +245,13 @@ DEMO and LIVE do not share a known run's halt. Unattributable legacy halt events
 remain fail-closed. Same-environment halts still survive strategy changes and
 restarts. These local corrections and their production deployment status are
 recorded in `docs/qa/reports/ALL-STRATEGY-PATH-AUDIT-2026-09-15.md`.
+
+### Atlas 7 execution contract 1.2
+
+See `docs/strategies/ATLAS_7_EXECUTION_CONTRACT.md`. Strategy signals remain pure and
+closed-candle-only. ExecutionSpec declares fill anchoring, lot-floor partials,
+CONTRACT_PRICE protection and fill-driven breakeven outside strategy signal math.
+Single-worker lifecycle, recovery and decisions share a transaction-duration mutex.
+Durable replacement intents prevent losing accepted stop orders across restart.
+Monthly book snapshots preserve fees/funding/realized attribution after intrabar
+exits. Legacy execution policies, including the stop-free short sleeve, are retained.

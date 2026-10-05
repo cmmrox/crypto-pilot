@@ -29,6 +29,7 @@ from strategy_runtime.contracts import (
     WatchRule,
 )
 from strategy_runtime.manifest import (
+    ExecutionSpec,
     MarketSpec,
     RiskSpec,
     StrategyEducation,
@@ -129,7 +130,8 @@ class AtlasDual:
         contract_version=2,
         strategy_id="atlas_dual_v1_4h",
         display_name="Atlas 7 Dual · 4h",
-        release="1.1",
+        release="1.2",
+        execution=ExecutionSpec(True, True, True, "CONTRACT_PRICE"),
         packaged_default=False,
         direction="LONG + SHORT",
         capabilities=(
@@ -169,7 +171,8 @@ class AtlasDual:
             ),
             exits=(
                 "Protective stop 2.5 ATR from entry on both sides.",
-                "40% at twice the risk, then a 3 ATR trail from the best price reached.",
+                "Up to 40% at twice the risk, rounded down to the lot; then a 3 ATR trail.",
+                "After the planned partial fills, the remaining stop moves to entry immediately.",
                 "Regime exit when the close crosses the buffered 200 SMA against the trade.",
             ),
             risk_controls=(
@@ -184,9 +187,9 @@ class AtlasDual:
             ),
         ),
         validation=ValidationEvidence(
-            method="unit rules, chronological bot replay, DEMO order lifecycle",
+            method="independent 1h research oracle, execution recovery, local owner-console QA",
             status="verified",
-            reference="docs/qa/reports/ATLAS-7-DUAL-RELEASE-2026-09-22.md",
+            reference="docs/qa/reports/ATLAS-7-EXECUTION-PARITY-2026-10-05.md",
         ),
     )
 
@@ -278,7 +281,13 @@ class AtlasDual:
         extreme = state.highest_high if state.highest_high is not None else state.long_entry
         if extreme is None:
             return []
-        breakeven = state.long_entry if state.long_entry is not None else state.long_stop
+        breakeven = (
+            state.long_stop
+            if state.extra.get("tp1_zero_qty")
+            else state.long_entry
+            if state.long_entry is not None
+            else state.long_stop
+        )
         new_stop = max(state.long_stop, breakeven, extreme - self.parameters.trail_atr * atr)
         return [MoveStop(price=new_stop)] if new_stop > state.long_stop else []
 
@@ -288,7 +297,13 @@ class AtlasDual:
         extreme = state.lowest_low if state.lowest_low is not None else state.short_entry
         if extreme is None:
             return []
-        breakeven = state.short_entry if state.short_entry is not None else state.short_stop
+        breakeven = (
+            state.short_stop
+            if state.extra.get("tp1_zero_qty")
+            else state.short_entry
+            if state.short_entry is not None
+            else state.short_stop
+        )
         new_stop = min(state.short_stop, breakeven, extreme + self.parameters.trail_atr * atr)
         return [MoveStop(price=new_stop)] if new_stop < state.short_stop else []
 

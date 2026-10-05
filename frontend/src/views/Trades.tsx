@@ -324,7 +324,9 @@ function TradeDrawer({ trade, onClose }: { trade: TradeDetail; onClose: () => vo
         <dl className="detail-grid">
           <div>
             <dt>Strategy</dt>
-            <dd>{trade.strategy}</dd>
+            <dd>
+              {trade.strategy} · release {trade.strategy_release}
+            </dd>
           </div>
           <div>
             <dt>Entry / exit</dt>
@@ -335,7 +337,9 @@ function TradeDrawer({ trade, onClose }: { trade: TradeDetail; onClose: () => vo
           </div>
           <div>
             <dt>Quantity</dt>
-            <dd>{trade.qty} BTC</dd>
+            <dd>
+              {trade.qty} BTC · remaining {trade.remaining_qty} BTC
+            </dd>
           </div>
           <div>
             <dt>Fees</dt>
@@ -355,6 +359,18 @@ function TradeDrawer({ trade, onClose }: { trade: TradeDetail; onClose: () => vo
                 <small>
                   {o.type}
                   {o.reduce_only ? " · reduce-only" : ""}
+                  {` · quantity ${o.qty} BTC`}
+                  {o.stop_price
+                    ? ` · stop ${formatUsd(o.stop_price)}`
+                    : o.price
+                      ? ` · target ${formatUsd(o.price)}`
+                      : ""}
+                  {` · filled ${o.filled_qty} BTC`}
+                  {o.avg_fill_px ? ` @ ${formatUsd(o.avg_fill_px)}` : ""}
+                  {o.working_type
+                    ? ` · ${o.working_type === "CONTRACT_PRICE" ? "traded-price trigger" : "mark-price trigger"}`
+                    : ""}
+                  {o.filled_at ? ` · filled ${o.filled_at}` : ""}
                 </small>
               </div>
               <span className={`pill ${o.status === "FILLED" ? "ok" : "warn"}`}>{o.status}</span>
@@ -362,7 +378,7 @@ function TradeDrawer({ trade, onClose }: { trade: TradeDetail; onClose: () => vo
           ))}
           {trade.orders.length === 0 && <p className="tone-muted">No linked orders recorded.</p>}
         </div>
-        {trade.side === "SHORT" && (
+        {trade.side === "SHORT" && !trade.orders.some((o) => o.type === "STOP_MARKET") && (
           <div className="short-risk-callout">
             <div>
               <strong>No short price stop</strong>

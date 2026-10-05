@@ -242,6 +242,9 @@ class EquitySnapshot(Base):
     unrealized_pnl: Mapped[Decimal] = mapped_column(default=Decimal("0"))
     month_to_date_pnl: Mapped[Decimal] = mapped_column(default=Decimal("0"))
     sleeve_month_pnl: Mapped[Decimal] = mapped_column(default=Decimal("0"))
+    month_start_equity: Mapped[Decimal | None] = mapped_column(nullable=True)
+    long_book_value: Mapped[Decimal | None] = mapped_column(nullable=True)
+    short_book_value: Mapped[Decimal | None] = mapped_column(nullable=True)
 
 
 class Event(Base):

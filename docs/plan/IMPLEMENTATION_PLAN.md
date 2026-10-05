@@ -14,6 +14,11 @@ green. Only then does the next stage begin. No stage-skipping, no "we'll test la
 
 Credentials needed per stage: `docs/plan/CREDENTIALS.md`.
 
+Atlas 7 execution release 1.2 has a local implementation/QA record at
+`docs/qa/reports/ATLAS-7-EXECUTION-PARITY-2026-10-05.md` and a cutover procedure at
+`deploy/atlas7-release-1.2.md`. Its local checks do not close dedicated flat-DEMO
+exchange acceptance or the Stage 12 production approval/forward-validation gates.
+
 ---
 
 ## Stage 0 — Foundations & walking skeleton

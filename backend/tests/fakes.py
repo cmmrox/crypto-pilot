@@ -6,6 +6,7 @@ orders. Idempotent on client_order_id.
 from __future__ import annotations
 
 import datetime as dt
+from collections.abc import Callable
 from decimal import Decimal
 
 from app.execution.exchange import (
@@ -36,7 +37,13 @@ class FakeExchange:
         balance: Decimal = Decimal("10000"),
         margin_leverage: Decimal | None = None,
         book_fills: bool = False,
+        taker_fee: Decimal = Decimal("0.0004"),
+        maker_fee: Decimal = Decimal("0.0004"),
+        clock: Callable[[], dt.datetime] | None = None,
     ) -> None:
+        self.taker_fee = taker_fee
+        self.maker_fee = maker_fee
+        self.clock = clock or (lambda: dt.datetime.now(dt.UTC))
         self.mark = mark_price
         self._balance = balance
         # Opt-in Binance-like wallet: realized P&L and commission move the balance.
@@ -122,20 +129,35 @@ class FakeExchange:
                 side=side,
                 qty=qty,
                 price=self.mark,
-                commission=qty * self.mark * Decimal("0.0004"),
+                commission=qty * self.mark * self.taker_fee,
                 realized_pnl=realized,
-                filled_at=dt.datetime.now(dt.UTC),
+                filled_at=self.clock(),
             )
         ]
         self._book(self._fills[order_id][0])
         return result
 
     async def place_stop_market(
-        self, symbol, side, qty, stop_price, *, client_order_id, reduce_only=True
+        self,
+        symbol,
+        side,
+        qty,
+        stop_price,
+        *,
+        client_order_id,
+        reduce_only=True,
+        working_type="MARK_PRICE",
     ) -> OrderResult:
         self.placed.append(("STOP_MARKET", side, qty))
         self.price_by_order[client_order_id] = stop_price
-        r = OrderResult(client_order_id, f"S{client_order_id}", "NEW", Decimal("0"), Decimal("0"))
+        r = OrderResult(
+            client_order_id,
+            f"S{client_order_id}",
+            "NEW",
+            Decimal("0"),
+            Decimal("0"),
+            {"workingType": working_type},
+        )
         self._open_orders[client_order_id] = r
         self._orders[client_order_id] = r
         self._resting[client_order_id] = (side, qty)
@@ -185,6 +207,7 @@ class FakeExchange:
         """Simulate an exchange-side stop/TP fill between candle decisions."""
         row = self._open_orders.pop(client_order_id)
         side, qty = self._resting.pop(client_order_id)
+        qty = min(qty, abs(self._pos))  # exchange reduce-only execution cannot reverse
         previous_entry = self._entry
         signed = qty if side == "BUY" else -qty
         self._pos += signed
@@ -208,9 +231,15 @@ class FakeExchange:
                 side=side,
                 qty=qty,
                 price=price,
-                commission=qty * price * Decimal("0.0004"),
+                commission=qty
+                * price
+                * (
+                    self.taker_fee
+                    if client_order_id.startswith(("CPS-", "CPSR-"))
+                    else self.maker_fee
+                ),
                 realized_pnl=realized,
-                filled_at=dt.datetime.now(dt.UTC),
+                filled_at=self.clock(),
             )
         ]
         self._book(self._fills[row.exchange_order_id][0])

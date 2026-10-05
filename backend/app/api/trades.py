@@ -57,10 +57,17 @@ class OrderOut(BaseModel):
     price: str | None
     stop_price: str | None
     reduce_only: bool
+    filled_qty: str
+    avg_fill_px: str | None
+    placed_at: str | None
+    filled_at: str | None
+    working_type: str | None
 
 
 class TradeDetailOut(TradeOut):
     orders: list[OrderOut]
+    remaining_qty: str
+    strategy_release: str
 
 
 class TradePageOut(BaseModel):
@@ -207,6 +214,8 @@ async def trade_detail(
     base = _to_out(t)
     return TradeDetailOut(
         **base.model_dump(),
+        remaining_qty=str(t.remaining_qty),
+        strategy_release=t.strategy_release,
         orders=[
             OrderOut(
                 client_order_id=o.client_order_id,
@@ -217,6 +226,11 @@ async def trade_detail(
                 price=str(o.price) if o.price is not None else None,
                 stop_price=str(o.stop_price) if o.stop_price is not None else None,
                 reduce_only=o.reduce_only,
+                filled_qty=str(o.filled_qty),
+                avg_fill_px=str(o.avg_fill_px) if o.avg_fill_px is not None else None,
+                placed_at=o.placed_at.isoformat() if o.placed_at else None,
+                filled_at=o.filled_at.isoformat() if o.filled_at else None,
+                working_type=o.raw_json.get("workingType"),
             )
             for o in orders
         ],

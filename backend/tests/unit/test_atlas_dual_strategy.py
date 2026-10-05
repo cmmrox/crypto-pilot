@@ -272,3 +272,34 @@ def test_pullback_resume_fires_once_on_the_first_close_back() -> None:
     for closed_at in (candles[-6].open_time_ms, candles[-2].open_time_ms):
         state = replace(FLAT, last_long_closed_at_ms=closed_at)
         assert _strategy().on_candle(candles[:-1], state) == first_close_back
+
+
+@pytest.mark.parametrize("side", ["LONG", "SHORT"])
+def test_zero_lot_target_does_not_invent_breakeven_when_atr_expands(side: str) -> None:
+    """MIR enables the trail after a zero-lot TP touch, but sells/moves BE only for q>0."""
+    from strategy_runtime.atlas_dual import AtlasDual
+    from strategy_runtime.contracts import TradeState
+
+    strategy = AtlasDual()
+    if side == "LONG":
+        state = TradeState(
+            equity=100,
+            long_entry=100,
+            long_stop=90,
+            highest_high=110,
+            tp1_done=True,
+            extra={"tp1_zero_qty": True},
+        )
+        intents = strategy._trail_long(state, atr=5)
+        assert intents[0].price == 95
+    else:
+        state = TradeState(
+            equity=100,
+            short_entry=100,
+            short_stop=110,
+            lowest_low=90,
+            tp1_done=True,
+            extra={"tp1_zero_qty": True},
+        )
+        intents = strategy._trail_short(state, atr=5)
+        assert intents[0].price == 105

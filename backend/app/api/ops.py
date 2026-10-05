@@ -14,15 +14,15 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUserDep
+from app.bot.coordination import trading_session
 from app.bot.service import bot_service
-from app.db.session import get_session
 from app.execution.self_check import run_execution_self_check
 from app.services import execution_service as exec_svc
 from app.services.events import record_event
 
 router = APIRouter(prefix="/api/ops", tags=["ops"])
 
-SessionDep = Annotated[AsyncSession, Depends(get_session)]
+SessionDep = Annotated[AsyncSession, Depends(trading_session)]
 
 
 class KillResult(BaseModel):

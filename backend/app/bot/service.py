@@ -307,6 +307,7 @@ class BotService:
         snapshot_at: dt.datetime,
         long_month_pnl: Decimal,
         short_month_pnl: Decimal,
+        month_start_equity: Decimal | None = None,
     ) -> None:
         """Record an equity snapshot (every 4h close — FR-12)."""
         acct = await exchange.get_account()
@@ -329,6 +330,12 @@ class BotService:
         row.unrealized_pnl = acct.unrealized_pnl
         row.month_to_date_pnl = long_month_pnl
         row.sleeve_month_pnl = short_month_pnl
+        row.month_start_equity = month_start_equity
+        if get_strategy(settings_row.active_strategy).manifest.execution.breakeven_on_tp_fill:
+            books = await _book_values(
+                session, settings_row.active_environment, acct.unrealized_pnl
+            )
+            row.long_book_value, row.short_book_value = books
         if existing is None:
             session.add(row)
 
@@ -355,6 +362,7 @@ class BotService:
             exchange,
             environment=environment,
             symbol=market.symbol,
+            decision_candle=candles[-1],
         )
         if not synced.matched:
             return await self._block_on_mismatch(
@@ -379,7 +387,16 @@ class BotService:
             allow_new_entries = False
 
         account = await exchange.get_account()
-        equity = account.balance + account.unrealized_pnl
+        execution_equity = account.balance + account.unrealized_pnl
+        decision_unrealized = account.unrealized_pnl
+        if strategy.manifest.execution.breakeven_on_tp_fill:
+            # Research breakers mark the closed traded candle, not a mark fetched
+            # seconds later. Entry/exit fills still use actual exchange truth.
+            decision_unrealized = synced.position.qty * (
+                candles[-1].close - synced.position.entry_price
+            )
+        equity = account.balance + decision_unrealized
+        opening_gap = execution_equity - equity
         filters = await exchange.get_filters(market.symbol)
         execution_price = await exchange.get_mark_price(market.symbol)
         snapshot_at = decision_candle_at + dt.timedelta(seconds=INTERVAL_SECONDS[market.interval])
@@ -389,6 +406,7 @@ class BotService:
             snapshot_at=snapshot_at,
             equity=equity,
             active_trade=synced.trade,
+            unrealized_pnl=decision_unrealized,
         )
         breakers = await self._enforce_breakers(
             session,
@@ -445,13 +463,15 @@ class BotService:
             filters=filters,
             execution_price=execution_price,
             account=account,
-            equity=equity,
+            equity=execution_equity,
             position=synced.position,
             trade=synced.trade,
             state=state,
             entries_allowed=entries_allowed,
             actions=breakers.actions,
         )
+        if opening_gap != 0 and synced.position.qty != 0:
+            decision.execution_pnl["LONG" if synced.position.qty > 0 else "SHORT"] = opening_gap
         for intent in intents:
             handler = _INTENT_HANDLERS.get(type(intent))
             if handler is not None:
@@ -676,6 +696,7 @@ class BotService:
                 else None
             ),
             last_short_closed_at_ms=_epoch_ms(last_short_closed_at),
+            extra={"tp1_zero_qty": True} if synced.tp1_done and not synced.tp1_sold else {},
         )
 
     async def _report_stale_entries(
@@ -734,6 +755,7 @@ class BotService:
             snapshot_at=snapshot_at,
             long_month_pnl=monthly.long_pnl + costs.get("LONG", Decimal("0")),
             short_month_pnl=monthly.short_pnl + costs.get("SHORT", Decimal("0")),
+            month_start_equity=monthly.month_start_equity,
         )
         run.last_evaluated_candle_at = decision_candle_at
 
@@ -795,6 +817,8 @@ class BotService:
             stop_price=stop_price,
             tp1_price=tp1_price,
             tp1_fraction=Decimal(str(tp_frac)),
+            stop_distance=stop_distance,
+            tp1_r=Decimal(str(tp_r)),
             **decision.release_tags(),
         )
         await decision.charge_execution(side)
@@ -909,6 +933,7 @@ class BotService:
         snapshot_at: dt.datetime,
         equity: Decimal,
         active_trade: Trade | None,
+        unrealized_pnl: Decimal | None = None,
     ) -> MonthlyRiskState:
         """Advance independent monthly book P&L from persisted equity snapshots."""
         month_start = snapshot_at.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
@@ -951,7 +976,7 @@ class BotService:
         first = snapshots[0]
         # The first snapshot is taken after that decision's orders and records their
         # cost in its book P&L; adding it back gives the equity the month began with.
-        month_start_equity = (
+        month_start_equity = first.month_start_equity or (
             first.balance + first.unrealized_pnl - first.month_to_date_pnl - first.sleeve_month_pnl
         )
         existing = next((row for row in snapshots if row.ts == snapshot_at), None)
@@ -965,6 +990,26 @@ class BotService:
                 halted_short=halted_short,
             )
         previous = snapshots[-1]
+        settings = await get_settings_row(session)
+        if (
+            get_strategy(settings.active_strategy).manifest.execution.breakeven_on_tp_fill
+            and previous.long_book_value is not None
+            and previous.short_book_value is not None
+        ):
+            # Account equity deltas cannot be attributed using only the *current*
+            # open trade: a stop may have closed it hours ago. Absolute book
+            # ledgers retain its fills, commissions and funding after it is flat.
+            long_value, short_value = await _book_values(
+                session, environment, unrealized_pnl or Decimal("0")
+            )
+            return MonthlyRiskState(
+                month=month,
+                month_start_equity=month_start_equity,
+                long_pnl=previous.month_to_date_pnl + long_value - previous.long_book_value,
+                short_pnl=previous.sleeve_month_pnl + short_value - previous.short_book_value,
+                halted_long=halted_long,
+                halted_short=halted_short,
+            )
         delta = equity - (previous.balance + previous.unrealized_pnl)
         long_pnl = previous.month_to_date_pnl
         short_pnl = previous.sleeve_month_pnl
@@ -1102,3 +1147,18 @@ def _size_short_from_intent(
 
 
 bot_service = BotService()
+
+
+async def _book_values(
+    session: AsyncSession,
+    environment: str,
+    unrealized: Decimal,
+) -> tuple[Decimal, Decimal]:
+    """Absolute cash P&L per book plus the current exchange unrealized value."""
+    trades = (await session.scalars(select(Trade).where(Trade.environment == environment))).all()
+    values = {"LONG": Decimal("0"), "SHORT": Decimal("0")}
+    for trade in trades:
+        values[trade.side] += (trade.realized_pnl or Decimal("0")) - trade.fees + trade.funding
+        if trade.closed_at is None:
+            values[trade.side] += unrealized
+    return values["LONG"], values["SHORT"]

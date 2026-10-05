@@ -20,6 +20,7 @@ from app.api.schemas import (
     SecurityChangeStartOut,
     SecurityStatusOut,
 )
+from app.bot.coordination import trading_session
 from app.bot.service import bot_service
 from app.bot.state import BotStatus
 from app.db.session import get_session
@@ -35,6 +36,7 @@ from app.strategies import get_strategy
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
+TradingSessionDep = Annotated[AsyncSession, Depends(trading_session)]
 
 
 @router.get("/credentials/{environment}/{service}", response_model=CredentialStatusOut)
@@ -56,7 +58,7 @@ async def credential_status(
 
 @router.put("/credentials", response_model=MessageResponse)
 async def save_credential(
-    body: CredentialIn, current: CurrentUserDep, session: SessionDep
+    body: CredentialIn, current: CurrentUserDep, session: TradingSessionDep
 ) -> MessageResponse:
     """Store or replace an encrypted credential pair (write-only)."""
     try:

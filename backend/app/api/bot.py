@@ -9,14 +9,14 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CurrentUserDep
+from app.bot.coordination import trading_session
 from app.bot.service import bot_service
-from app.db.session import get_session
 from app.services import execution_service as exec_svc
 from app.services.settings_store import get_settings_row
 
 router = APIRouter(prefix="/api/bot", tags=["bot"])
 
-SessionDep = Annotated[AsyncSession, Depends(get_session)]
+SessionDep = Annotated[AsyncSession, Depends(trading_session)]
 
 
 class BotStatusOut(BaseModel):

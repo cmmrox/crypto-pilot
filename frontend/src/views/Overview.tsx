@@ -580,7 +580,69 @@ export function Overview() {
                       </strong>
                     </span>
                   </div>
-                  {!data.position.has_price_stop && (
+                  <div className="position-values" data-testid="position-protection">
+                    <span>
+                      <small>Current stop loss</small>
+                      <strong>
+                        {data.position.stop_price
+                          ? signedMoney(data.position.stop_price)
+                          : "Not confirmed"}
+                      </strong>
+                      <small>
+                        {data.position.stop_qty
+                          ? `${data.position.stop_qty} BTC · ${data.position.stop_status}`
+                          : ""}
+                      </small>
+                    </span>
+                    <span>
+                      <small>Take profit 1</small>
+                      <strong>
+                        {data.position.tp1_price
+                          ? signedMoney(data.position.tp1_price)
+                          : "Not confirmed"}
+                      </strong>
+                      <small>
+                        {data.position.tp1_qty
+                          ? `${data.position.tp1_qty} BTC (${data.position.tp1_percent ?? "—"}%) · ${data.position.tp1_status === "VIRTUAL" ? "No sale; trail trigger" : data.position.tp1_status === "VIRTUAL_TRIGGERED" ? "Target touched; trail enabled" : data.position.tp1_status}${data.position.tp1_status_source === "recorded" ? " (recorded)" : ""}`
+                          : ""}
+                      </small>
+                    </span>
+                    <span>
+                      <small>Original stop</small>
+                      <strong>
+                        {data.position.original_stop_price
+                          ? signedMoney(data.position.original_stop_price)
+                          : "—"}
+                      </strong>
+                    </span>
+                    <span>
+                      <small>Exit stage</small>
+                      <strong>{data.position.exit_stage.replaceAll("_", " ")}</strong>
+                      <small>
+                        {data.position.stop_working_type === "CONTRACT_PRICE"
+                          ? "Traded-price trigger"
+                          : data.position.stop_working_type === "MARK_PRICE"
+                            ? "Mark-price trigger"
+                            : ""}
+                      </small>
+                    </span>
+                  </div>
+                  <p className="tone-muted">
+                    TP1 takes a partial profit. The remaining quantity exits through the stop,
+                    trailing stop, regime exit or monthly breaker. Protection checked:{" "}
+                    {data.position.protection_checked_at
+                      ? dateTime(data.position.protection_checked_at)
+                      : "unavailable"}
+                    .
+                  </p>
+                  {(!data.position.protection_confirmed ||
+                    (data.position.stop_policy !== "none" && !data.position.has_price_stop)) && (
+                    <div className="form-error" role="alert">
+                      Stop protection is missing or could not be confirmed. Check Binance and the
+                      event ledger.
+                    </div>
+                  )}
+                  {data.position.stop_policy === "none" && (
                     <div className="short-risk-callout" data-testid="no-stop-callout">
                       <ShieldAlert size={19} />
                       <div>

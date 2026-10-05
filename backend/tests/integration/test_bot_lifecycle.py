@@ -320,6 +320,10 @@ async def test_closed_candle_failure_notifies_owner_with_the_real_error(
 
     monkeypatch.setattr(execution_service, "execution_context", fake_context)
 
+    monkeypatch.setattr(
+        "app.bot.ingest.utc_now",
+        lambda: candles[fresh].open_time + dt.timedelta(hours=4, seconds=1),
+    )
     await ingest_service._drive_bot(db_session, allow_new_entries=True)
 
     assert (await svc.status(db_session)).status == BotStatus.SAFE_MODE

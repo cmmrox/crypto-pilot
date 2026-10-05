@@ -12,6 +12,7 @@ from app.execution.candles import (
     backfill_history,
     detect_gaps,
     latest_open_time,
+    repair_gaps,
     upsert_klines,
 )
 from sqlalchemy import func, select
@@ -19,6 +20,45 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 STEP_MS = 4 * 60 * 60 * 1000
 BASE_MS = 1784318400000  # a 4h boundary
+
+
+async def test_repair_old_gaps_pages_beyond_recent_500_bars(db_session: AsyncSession) -> None:
+    await upsert_klines(db_session, "BTCUSDT", "4h", [_kline(0), _kline(1602)])
+
+    class HistoryClient:
+        def __init__(self) -> None:
+            self.calls: list[tuple[int, int, int]] = []
+
+        async def get_klines(self, symbol, interval, *, start_time_ms, end_time_ms, limit):
+            assert (symbol, interval) == ("BTCUSDT", "4h")
+            self.calls.append((start_time_ms, end_time_ms, limit))
+            return [
+                _kline(i)
+                for i in range(1603)
+                if start_time_ms <= BASE_MS + i * STEP_MS <= end_time_ms
+            ][:limit]
+
+    client = HistoryClient()
+    gaps = await detect_gaps(db_session, "BTCUSDT", "4h")
+    assert len(gaps) == 1601
+    assert await repair_gaps(db_session, client, "BTCUSDT", "4h", gaps) == 1601
+    assert len(client.calls) == 2
+    assert client.calls[0][0] == BASE_MS + STEP_MS
+    assert all(limit == 1500 for _, _, limit in client.calls)
+    assert await detect_gaps(db_session, "BTCUSDT", "4h") == []
+    assert await repair_gaps(db_session, client, "BTCUSDT", "4h", []) == 0
+
+
+async def test_repair_does_not_accept_unfinalized_candles(db_session: AsyncSession) -> None:
+    await upsert_klines(db_session, "BTCUSDT", "4h", [_kline(0), _kline(2)])
+
+    class UnfinalizedClient:
+        async def get_klines(self, *args, **kwargs):
+            return [_kline(1, closed=False)]
+
+    gaps = await detect_gaps(db_session, "BTCUSDT", "4h")
+    assert await repair_gaps(db_session, UnfinalizedClient(), "BTCUSDT", "4h", gaps) == 0
+    assert await detect_gaps(db_session, "BTCUSDT", "4h") == gaps
 
 
 def _kline(i: int, *, closed: bool = True, close: str = "100") -> Kline:

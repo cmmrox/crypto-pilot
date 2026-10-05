@@ -115,3 +115,15 @@ Fresh-start readiness counts both regular `/fapi/v1/openOrders` and conditional
 pending conditional exposure; it must not be reported ready. Read-only resume
 verification retains its existing reconciliation policy. The endpoint was checked
 against the [official Binance trade reference](https://developers.binance.com/en/docs/catalog/core-trading-derivatives-trading-usd-s-m-futures/api/rest-api/trade).
+
+### Atlas 7 release 1.2 stream and protection policy
+
+The existing Binance REST adapter now supports release-owned `workingType`.
+Atlas 1.2 uses CONTRACT_PRICE; legacy stops retain MARK_PRICE. Finalized public
+kline websocket events wake 4h ingest, backed by REST repair. API-key-authenticated
+`POST/PUT/DELETE /fapi/v1/listenKey` manages the private stream; ORDER_TRADE_UPDATE,
+ALGO_UPDATE and ACCOUNT_UPDATE only wake REST reconciliation. Five-second recovery
+continues when the stream disconnects. Listen keys and URLs must never enter logs.
+Official provider verification: [user data REST](https://developers.binance.com/en/docs/catalog/core-trading-derivatives-trading-usd-s-m-futures/api/rest-api/user-data-streams),
+[stream schemas](https://developers.binance.com/en/docs/catalog/core-trading-derivatives-trading-usd-s-m-futures/api/ws-streams/~schemas),
+[trade REST](https://developers.binance.com/en/docs/catalog/core-trading-derivatives-trading-usd-s-m-futures/api/rest-api/trade).

@@ -224,6 +224,21 @@ class BinanceClient:
 
     # --- Signed request (account/orders; used from Stage 4) ---
 
+    async def start_user_stream(self) -> str:
+        """API-key authenticated listen key; deliberately never logged."""
+        data = await self._request("POST", "/fapi/v1/listenKey", signed=True)
+        return str(data["listenKey"])
+
+    async def keepalive_user_stream(self, listen_key: str) -> None:
+        await self._request(
+            "PUT", "/fapi/v1/listenKey", params={"listenKey": listen_key}, signed=True
+        )
+
+    async def close_user_stream(self, listen_key: str) -> None:
+        await self._request(
+            "DELETE", "/fapi/v1/listenKey", params={"listenKey": listen_key}, signed=True
+        )
+
     async def signed_request(
         self, method: str, path: str, params: dict[str, Any] | None = None
     ) -> Any:

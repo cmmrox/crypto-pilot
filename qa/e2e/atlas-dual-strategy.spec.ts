@@ -93,9 +93,10 @@ test("AD-03 switching is refused while the bot runs, and audited when stopped", 
     return;
   }
 
+  const target = before.strategy === dual ? original : dual;
   await page.goto("/settings");
-  const card = page.getByTestId(`strategy-${dual}`);
-  await page.getByTestId(`select-${dual}`).click();
+  const card = page.getByTestId(`strategy-${target}`);
+  await page.getByTestId(`select-${target}`).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog).toContainText("does not start trading");
   await dialog
@@ -111,7 +112,7 @@ test("AD-03 switching is refused while the bot runs, and audited when stopped", 
     expect(
       (await events.json()).items.some(
         (event: { payload_json: { to?: string } }) =>
-          event.payload_json?.to === dual,
+          event.payload_json?.to === target,
       ),
       "strategy switch must be audited",
     ).toBeTruthy();
@@ -143,5 +144,7 @@ test("AD-04 the watch panel explains the active release without predicting a tra
     await expect(panel).toContainText("Pullback entry");
     await expect(panel).toContainText("Squeeze breakout");
   }
-  await expect(panel).toContainText("not a guaranteed trade or execution price");
+  await expect(panel).toContainText(
+    "not a guaranteed trade or execution price",
+  );
 });

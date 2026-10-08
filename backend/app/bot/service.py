@@ -33,6 +33,7 @@ from app.risk.breakers import evaluate_breaker
 from app.risk.sizing import SizingResult, margin_capped_qty, size_by_risk
 from app.services.events import record_event
 from app.services.settings_store import get_settings_row
+from app.services.trade_alerts import format_usdt, plain
 from app.strategies import (
     EnterLong,
     EnterShort,
@@ -220,7 +221,14 @@ class BotService:
         await notify_event(
             session,
             kind="bot_started",
-            payload={"environment": run.environment, "strategy": run.strategy, "equity": "—"},
+            payload={
+                "environment": run.environment,
+                "strategy": run.strategy,
+                "equity": await _equity_text(exchange),
+                "safe_mode_note": (
+                    "" if rec.matched else f" SAFE MODE: {rec.detail}; new entries blocked."
+                ),
+            },
         )
         return run
 
@@ -241,7 +249,14 @@ class BotService:
         )
         from app.services.notify_config import notify_event
 
-        await notify_event(session, kind="bot_stopped", payload={"actor": reason})
+        await notify_event(
+            session,
+            kind="bot_stopped",
+            payload={
+                "actor": reason,
+                "position_note": await _stopped_position_note(session, run.environment),
+            },
+        )
 
     async def stop_and_close(
         self, session: AsyncSession, exchange: Exchange, orders: OrderManager
@@ -274,9 +289,16 @@ class BotService:
         )
         return cancelled
 
-    async def enter_safe_mode(self, session: AsyncSession, *, reason: str) -> None:
+    async def enter_safe_mode(
+        self, session: AsyncSession, *, reason: str, alert: bool = True
+    ) -> None:
+        """Block new entries. Page the owner once per transition into safe mode.
+
+        Callers that already send a more specific error SMS pass ``alert=False``.
+        """
         run = await self._current_run(session)
         if run is not None:
+            entering = run.stop_reason != "safe_mode"
             run.stop_reason = "safe_mode"
             await record_event(
                 session,
@@ -286,6 +308,10 @@ class BotService:
                 ref=f"bot_run:{run.id}",
                 payload={"reason": reason},
             )
+            if alert and entering:
+                from app.services.notify_config import notify_event
+
+                await notify_event(session, kind="safe_mode", payload={"reason": reason})
 
     async def _expected_position(self, session: AsyncSession) -> Decimal:
         """Signed qty the bot believes it holds (from open trades)."""
@@ -548,6 +574,7 @@ class BotService:
                 "one or more closed-candle decisions were missed; "
                 "stale entries are blocked pending owner review"
             ),
+            alert=False,
         )
         await record_event(
             session,
@@ -605,6 +632,7 @@ class BotService:
                 month=monthly.month,
                 pnl=monthly.long_pnl,
                 month_start_equity=monthly.month_start_equity,
+                cap=risk.long_monthly_loss_cap,
             )
             outcome.actions.append("halt_long")
             if position.qty > 0:
@@ -624,6 +652,7 @@ class BotService:
                 month=monthly.month,
                 pnl=monthly.short_pnl,
                 month_start_equity=monthly.month_start_equity,
+                cap=risk.short_monthly_loss_cap,
             )
             outcome.actions.append("halt_short")
             if position.qty < 0:
@@ -902,6 +931,18 @@ class BotService:
         ):
             await decision.charge_execution("SHORT")
             decision.actions.append("resize_short")
+            from app.services.notify_config import notify_event
+
+            await notify_event(
+                decision.session,
+                kind="short_resized",
+                payload={
+                    "previous_qty": plain(current_qty),
+                    "target_qty": plain(target_qty),
+                    "weight": f"{intent.target_weight:.0%}",
+                    "reason": intent.reason.replace("_", " "),
+                },
+            )
 
     async def _take_partial(self, decision: _Decision, intent: TakePartial) -> None:
         await record_event(
@@ -915,14 +956,24 @@ class BotService:
         decision.actions.append("take_partial")
 
     async def _halt(self, decision: _Decision, intent: Halt) -> None:
+        ref = f"strategy_halt:{intent.until}"
+        already_alerted = (
+            await decision.session.scalar(select(Event.id).where(Event.ref == ref).limit(1))
+        ) is not None
         await record_event(
             decision.session,
             level="WARN",
             category="breaker",
             message=f"Strategy halt requested until {intent.until}",
-            ref=f"strategy_halt:{intent.until}",
+            ref=ref,
             payload={"until": intent.until},
         )
+        if not already_alerted:
+            from app.services.notify_config import notify_event
+
+            await notify_event(
+                decision.session, kind="strategy_halt", payload={"until": intent.until}
+            )
         decision.actions.append("halt")
 
     async def _monthly_risk_state(
@@ -1052,6 +1103,7 @@ class BotService:
         month: str,
         pnl: Decimal,
         month_start_equity: Decimal,
+        cap: Decimal,
     ) -> None:
         await record_event(
             session,
@@ -1074,10 +1126,38 @@ class BotService:
             kind="breaker",
             payload={
                 "book": book,
-                "pnl": str(pnl),
+                "pnl": format_usdt(pnl),
+                "pct": f"{pnl / month_start_equity:.1%}" if month_start_equity > 0 else "—",
+                "cap": f"-{cap:.0%}",
                 "month": month,
             },
         )
+
+
+async def _equity_text(exchange: Exchange) -> str:
+    """Account equity for the start SMS; an unreadable account never blocks a start."""
+    try:
+        account = await exchange.get_account()
+    except Exception as exc:
+        _log.warning("start_sms_equity_unavailable", error_type=type(exc).__name__)
+        return "unavailable"
+    return f"{account.balance + account.unrealized_pnl:.2f} USDT"
+
+
+async def _stopped_position_note(session: AsyncSession, environment: str) -> str:
+    """Tell the owner whether a stopped bot leaves an unwatched position behind."""
+    trade = await session.scalar(
+        select(Trade)
+        .where(Trade.environment == environment, Trade.closed_at.is_(None))
+        .order_by(Trade.id.desc())
+        .limit(1)
+    )
+    if trade is None:
+        return "No open position."
+    return (
+        f"Open {trade.side} {plain(trade.remaining_qty)} BTC left with its exchange stops; "
+        "fills are not tracked or alerted until the bot is started again."
+    )
 
 
 def _strategy_candles(candles: list[Candle]) -> list[StratCandle]:

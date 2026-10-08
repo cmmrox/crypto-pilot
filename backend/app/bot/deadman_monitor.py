@@ -40,11 +40,18 @@ async def _alert(*, recovered: bool, failures: int) -> None:
             ref="deadman:backend",
             payload={"consecutive_failures": failures},
         )
-        if not recovered:
+        if recovered:
+            await notify_event(session, kind="health_recovered", payload={"message": message})
+        else:
             await notify_event(
                 session,
-                kind="error",
-                payload={"message": message, "failures": failures},
+                kind="health",
+                payload={
+                    "error": (
+                        f"backend health check failed {failures} times in a row; "
+                        "the bot may not be trading"
+                    )
+                },
             )
         await session.commit()
 

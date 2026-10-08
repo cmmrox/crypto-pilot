@@ -335,6 +335,16 @@ class OrderManager:
                 message="TP1 below one lot; target enables the trail without a partial sale",
                 payload={"target": str(tp1_price), "tp1_qty": "0"},
             )
+            await self._announce_opened(
+                session,
+                trade=trade,
+                side=side,
+                qty=sizing.qty,
+                entry_price=entry.avg_price,
+                stop_price=stop_price,
+                tp1_price=tp1_price,
+                risk_context=f"Stop {stop_price}, TP1 {tp1_price} (below one lot; trail only)",
+            )
             await self._refresh_trade_money(session, trade)
             await session.commit()
             return trade
@@ -390,16 +400,42 @@ class OrderManager:
                 reduce_only=True,
                 price=tp1_price,
             )
+        await self._announce_opened(
+            session,
+            trade=trade,
+            side=side,
+            qty=sizing.qty,
+            entry_price=entry.avg_price,
+            stop_price=stop_price,
+            tp1_price=tp1_price,
+            risk_context=f"Stop {stop_price}, TP1 {tp1_price}",
+        )
+        await self._refresh_trade_money(session, trade)
+        return trade
+
+    async def _announce_opened(
+        self,
+        session: AsyncSession,
+        *,
+        trade: Trade,
+        side: str,
+        qty: Decimal,
+        entry_price: Decimal,
+        stop_price: Decimal,
+        tp1_price: Decimal,
+        risk_context: str,
+    ) -> None:
+        """Record the opened trade and send its SMS, on every protected-entry path."""
         await record_event(
             session,
             level="INFO",
             category="trade",
-            message=f"{side} opened {sizing.qty} {self._symbol} @ {entry.avg_price}",
+            message=f"{side} opened {qty} {self._symbol} @ {entry_price}",
             ref=f"trade:{trade.id}",
             payload={
                 "side": side,
-                "qty": str(sizing.qty),
-                "entry": str(entry.avg_price),
+                "qty": str(qty),
+                "entry": str(entry_price),
                 "stop": str(stop_price),
                 "tp1": str(tp1_price),
             },
@@ -411,14 +447,12 @@ class OrderManager:
             kind="trade_opened",
             payload={
                 "side": side,
-                "qty": str(sizing.qty),
-                "price": str(entry.avg_price),
-                "risk_context": f"Stop {stop_price}, TP1 {tp1_price}",
+                "qty": str(qty),
+                "price": str(entry_price),
+                "risk_context": risk_context,
                 "environment": self._env,
             },
         )
-        await self._refresh_trade_money(session, trade)
-        return trade
 
     async def open_short(
         self,
@@ -516,18 +550,9 @@ class OrderManager:
                     qty=abs(qty),
                 )
             trade.exit_reason = reason[:64]
-            from app.services.notify_config import notify_event
+            from app.services.trade_alerts import notify_trade_closed
 
-            await notify_event(
-                session,
-                kind="trade_closed",
-                payload={
-                    "side": side,
-                    "pnl": str(trade.realized_pnl),
-                    "reason": reason,
-                    "month_pnl": "see dashboard",
-                },
-            )
+            await notify_trade_closed(session, trade, reason=reason)
         await record_event(
             session,
             level="INFO",

@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import Candle, Order, Trade
 from app.execution.exchange import Exchange, Fill, Position
 from app.services.events import record_event
+from app.services.trade_alerts import notify_tp1_filled, notify_trade_closed
 
 
 @dataclass(frozen=True)
@@ -72,6 +73,7 @@ async def sync_open_trade(
         .all()
     )
     fills_by_order: dict[int, list[Fill]] = {}
+    newly_filled_targets: list[Order] = []
     for order in orders:
         if order.raw_json.get("virtual_tp"):
             if (
@@ -90,6 +92,13 @@ async def sync_open_trade(
         if order.status in {"REJECTED", "CANCELED"} and order.binance_order_id is None:
             continue
         result = await exchange.get_order(symbol, order.client_order_id)
+        if (
+            order.type == "LIMIT"
+            and order.reduce_only
+            and order.status != "FILLED"
+            and result.status == "FILLED"
+        ):
+            newly_filled_targets.append(order)
         order.binance_order_id = result.exchange_order_id
         order.status = result.status
         order.filled_qty = result.filled_qty
@@ -187,6 +196,16 @@ async def sync_open_trade(
             expected_qty = Decimal("0")
             matched = position.qty == 0
             stop_price = None
+    if trade.closed_at is None and remaining > 0:
+        for target in newly_filled_targets:
+            await notify_tp1_filled(
+                session,
+                trade,
+                qty=target.filled_qty,
+                price=target.avg_fill_px or target.price,
+                remaining=remaining,
+                stop=stop_price,
+            )
     return SyncedTrade(
         trade=trade,
         position=position,
@@ -232,6 +251,16 @@ async def _close_from_fills(
             "reason": trade.exit_reason,
         },
     )
+    target_sold = any(
+        order.type == "LIMIT" and order.reduce_only and order.filled_qty > 0 for order in orders
+    )
+    if stop_filled and target_sold:
+        alert_reason = "trailing/breakeven stop after TP1"
+    elif stop_filled:
+        alert_reason = "stop loss"
+    else:
+        alert_reason = "take profit / exchange fill"
+    await notify_trade_closed(session, trade, reason=alert_reason)
 
 
 def _fill_payload(fill: Fill) -> dict[str, object]:

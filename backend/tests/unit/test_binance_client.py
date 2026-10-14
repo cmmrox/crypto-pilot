@@ -223,3 +223,144 @@ async def test_signed_mutation_5xx_is_ambiguous_and_not_blindly_retried() -> Non
 
     assert attempts == 1
     assert excinfo.value.status == 503
+
+
+def _signed_params(request: httpx.Request) -> dict[str, str]:
+    """The query a request signed, in sent order, without its signature."""
+    return {k: v for k, v in request.url.params.multi_items() if k != "signature"}
+
+
+@pytest.fixture
+def ticking_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Advance the signing clock 1s per read and make retry backoff instant."""
+    from app.execution import binance_client
+
+    now = [1_791_964_800.0]
+
+    def tick() -> float:
+        now[0] += 1.0
+        return now[0]
+
+    async def no_sleep(_delay: float) -> None:
+        return None
+
+    monkeypatch.setattr(binance_client.time, "time", tick)
+    monkeypatch.setattr(binance_client.asyncio, "sleep", no_sleep)
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("ticking_clock")
+async def test_signed_read_retry_is_resigned_with_a_fresh_timestamp() -> None:
+    """Regression: 2026-10-09 a DNS failure was retried with the original timestamp.
+
+    Every retry of a signed request must carry its own timestamp and signature, or
+    a slow first attempt makes every retry arrive outside Binance's recvWindow.
+    """
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if len(requests) == 1:
+            raise httpx.ConnectError("Name or service not known", request=request)
+        return httpx.Response(200, json={"ok": True})
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), base_url="https://example.invalid"
+    ) as raw:
+        client = BinanceClient("LIVE", api_key="key", api_secret="secret", client=raw)
+        assert await client.signed_request("GET", "/fapi/v2/account") == {"ok": True}
+
+    assert len(requests) == 2
+    first, second = (_signed_params(r) for r in requests)
+    assert int(second["timestamp"]) > int(first["timestamp"])
+    for request in requests:
+        assert request.url.params["signature"] == sign_query("secret", _signed_params(request))
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("ticking_clock")
+async def test_invalid_timestamp_rejection_of_an_order_is_resent_with_same_client_id() -> None:
+    """Regression: 2026-10-14 08:00 UTC the LIVE decision died on Binance -1021.
+
+    Binance rejects an out-of-window request before processing it, so the order was
+    never placed. Resending it freshly signed, with the same idempotent client order
+    ID, is safe and must not push the bot into safe mode.
+    """
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if len(requests) == 1:
+            return httpx.Response(
+                400,
+                json={
+                    "code": -1021,
+                    "msg": "Timestamp for this request is outside of the recvWindow.",
+                },
+            )
+        return httpx.Response(200, json={"orderId": 1, "status": "FILLED"})
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), base_url="https://example.invalid"
+    ) as raw:
+        client = BinanceClient("LIVE", api_key="key", api_secret="secret", client=raw)
+        result = await client.signed_request(
+            "POST", "/fapi/v1/order", {"symbol": "BTCUSDT", "newClientOrderId": "CPL-test"}
+        )
+
+    assert result == {"orderId": 1, "status": "FILLED"}
+    assert len(requests) == 2
+    first, second = (_signed_params(r) for r in requests)
+    assert first["newClientOrderId"] == second["newClientOrderId"] == "CPL-test"
+    assert int(second["timestamp"]) > int(first["timestamp"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("ticking_clock")
+async def test_persistent_invalid_timestamp_is_bounded_and_keeps_binance_code() -> None:
+    attempts = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(
+            400,
+            json={"code": -1021, "msg": "Timestamp for this request is outside of the recvWindow."},
+        )
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), base_url="https://example.invalid"
+    ) as raw:
+        client = BinanceClient(
+            "LIVE", api_key="key", api_secret="secret", client=raw, max_retries=3
+        )
+        with pytest.raises(BinanceError) as excinfo:
+            await client.signed_request("GET", "/fapi/v2/account")
+
+    assert attempts == 3
+    assert excinfo.value.code == -1021
+    assert excinfo.value.endpoint == "GET /fapi/v2/account"
+
+
+@pytest.mark.asyncio
+async def test_definitive_order_rejection_is_not_retried_and_names_its_endpoint() -> None:
+    attempts = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(400, json={"code": -2019, "msg": "Margin is insufficient."})
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), base_url="https://example.invalid"
+    ) as raw:
+        client = BinanceClient("LIVE", api_key="key", api_secret="secret", client=raw)
+        with pytest.raises(BinanceError) as excinfo:
+            await client.signed_request(
+                "POST", "/fapi/v1/order", {"symbol": "BTCUSDT", "newClientOrderId": "CPL-x"}
+            )
+
+    assert attempts == 1
+    assert excinfo.value.code == -2019
+    # Method and path only: never the signed query, key, or signature.
+    assert excinfo.value.endpoint == "POST /fapi/v1/order"

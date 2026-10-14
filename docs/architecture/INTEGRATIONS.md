@@ -17,6 +17,16 @@ Same code path for both — base URL + key pair come from the active `api_creden
 row (BSD FR-01). Docs: [developers.binance.com — USDS-M futures](https://developers.binance.com/docs/derivatives/usds-margined-futures/general-info).
 
 - **Auth:** HMAC-SHA256 signature over query/body + `timestamp` (ms) + optional `recvWindow` (default 5000 ms). Keys are case-sensitive; restrict to TRADE + USER_DATA (read).
+- **Timestamp retries:** every attempt of a signed request is stamped and signed
+  afresh; a retry never reuses an earlier timestamp. Binance rejects a request whose
+  timestamp is outside `recvWindow` before processing it (`-1021`, "Timing security"
+  in the general info), so the client resends it, orders included, with the same
+  idempotent client order ID, within the normal bounded retry budget. `-1007` and
+  HTTP 5xx remain "execution status unknown" and are never blindly resent.
+  Verified on DEMO 2026-10-14: a 10 s stale `POST /fapi/v1/order` returned HTTP 400
+  `-1021` and created no order; the freshly signed resend filled exactly once.
+  Decision failures record the Binance code and the method + path (never the signed
+  query) in the `bot_drive_failed` event.
 - **Rate limits:** three buckets — `RAW_REQUEST`, `REQUEST_WEIGHT`, `ORDER` (per account). HTTP 429 = back off (exponential + jitter); HTTP 418 = IP ban escalating 2 min → 3 days. Never retry-loop a 429 tightly.
 - **Market data:** 4h klines via REST backfill; act only on rows whose kline is closed
   (BSD FR-03) and cache them in PostgreSQL. The owner command center also reads the

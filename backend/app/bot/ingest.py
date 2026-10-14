@@ -22,7 +22,7 @@ from app.bot.scheduler import DeadMan, seconds_until_next_close, utc_now
 from app.core.logging import get_logger
 from app.db.session import get_sessionmaker
 from app.execution import candles as candle_svc
-from app.execution.binance_client import WS_URLS, BinanceClient, Kline
+from app.execution.binance_client import WS_URLS, BinanceClient, BinanceError, Kline
 from app.services.events import record_event
 from app.services.settings_store import get_settings_row
 from app.strategies import default_strategy, get_strategy
@@ -449,6 +449,7 @@ class CandleIngestService:
                 session, reason="closed-candle evaluation failed", alert=False
             )
             cause = exc.__cause__
+            binance = exc if isinstance(exc, BinanceError) else None
             await record_event(
                 session,
                 level="ERROR",
@@ -460,6 +461,8 @@ class CandleIngestService:
                     "error": str(exc),
                     "cause": str(cause) if cause else None,
                     "cause_type": type(cause).__name__ if cause else None,
+                    "binance_code": binance.code if binance else None,
+                    "endpoint": binance.endpoint if binance else None,
                 },
             )
             await self._notify_drive_failure(session, exc, cause)

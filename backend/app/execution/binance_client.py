@@ -35,13 +35,29 @@ WS_URLS: dict[str, str] = {
 }
 
 
-class BinanceError(Exception):
-    """A Binance API error (carries HTTP status and Binance error code)."""
+# Binance rejects a signed request whose timestamp falls outside recvWindow before
+# processing it (USD-M general info, "Timing security"), so nothing executed.
+INVALID_TIMESTAMP = -1021
 
-    def __init__(self, message: str, *, status: int | None = None, code: int | None = None) -> None:
+
+class BinanceError(Exception):
+    """A Binance API error (carries HTTP status, Binance error code and endpoint).
+
+    ``endpoint`` is the method and path only; never the signed query.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status: int | None = None,
+        code: int | None = None,
+        endpoint: str | None = None,
+    ) -> None:
         super().__init__(message)
         self.status = status
         self.code = code
+        self.endpoint = endpoint
 
 
 def log_unreachable(environment: str, probe: str, error: BaseException) -> None:
@@ -245,11 +261,18 @@ class BinanceClient:
         """Perform an HMAC-signed request. Requires api_key + api_secret."""
         if not self._api_key or not self._api_secret:
             raise BinanceError("signed request requires API credentials")
+        return await self._request(method, path, params=params, signed=True, timestamped=True)
+
+    def _timestamp_and_sign(self, params: dict[str, Any] | None) -> dict[str, Any]:
+        """Stamp and sign one attempt. A retry reusing a stale timestamp would
+        arrive outside recvWindow after any slow first attempt."""
+        if not self._api_secret:
+            raise BinanceError("signed request requires API credentials")
         p: dict[str, Any] = dict(params or {})
         p["timestamp"] = int(time.time() * 1000)
         p["recvWindow"] = self._recv_window
         p["signature"] = sign_query(self._api_secret, p)
-        return await self._request(method, path, params=p, signed=True)
+        return p
 
     # --- Core request with retry/backoff ---
 
@@ -260,26 +283,32 @@ class BinanceClient:
         *,
         params: dict[str, Any] | None = None,
         signed: bool = False,
+        timestamped: bool = False,
     ) -> Any:
         headers = {"X-MBX-APIKEY": self._api_key} if signed and self._api_key else {}
         last_exc: Exception | None = None
         method = method.upper()
+        endpoint = f"{method} {path}"
         mutation = method not in {"GET", "HEAD", "OPTIONS"}
         for attempt in range(self._max_retries):
+            query = self._timestamp_and_sign(params) if timestamped else params
             try:
-                resp = await self._client.request(method, path, params=params, headers=headers)
+                resp = await self._client.request(method, path, params=query, headers=headers)
                 if resp.status_code in (418, 429):
                     raise RateLimitError(
-                        f"rate limited ({resp.status_code})", status=resp.status_code
+                        f"rate limited ({resp.status_code})",
+                        status=resp.status_code,
+                        endpoint=endpoint,
                     )
                 if mutation and resp.status_code >= 500:
                     raise AmbiguousMutationError(
                         "ambiguous exchange mutation outcome; query order truth "
                         "and reconcile before acting",
                         status=resp.status_code,
+                        endpoint=endpoint,
                     )
                 if resp.status_code >= 400:
-                    self._raise_api_error(resp)
+                    self._raise_api_error(resp, endpoint)
                 return resp.json()
             except RateLimitError as exc:
                 last_exc = exc
@@ -291,11 +320,22 @@ class BinanceClient:
                 last_exc = exc
                 if mutation:
                     raise AmbiguousMutationError(
-                        "ambiguous exchange mutation outcome; reconciliation required"
+                        "ambiguous exchange mutation outcome; reconciliation required",
+                        endpoint=endpoint,
                     ) from exc
                 _log.warning("binance_transport_error", attempt=attempt, error=str(exc))
                 await asyncio.sleep(self._backoff(attempt))
-        raise BinanceError(f"request failed after {self._max_retries} attempts: {last_exc}")
+            except BinanceError as exc:
+                # Rejected before processing, so even an order is safe to resend
+                # freshly signed with its same idempotent client order ID.
+                if exc.code != INVALID_TIMESTAMP or attempt + 1 >= self._max_retries:
+                    raise
+                last_exc = exc
+                _log.warning("binance_timestamp_rejected", attempt=attempt, endpoint=endpoint)
+                await asyncio.sleep(self._backoff(attempt))
+        raise BinanceError(
+            f"request failed after {self._max_retries} attempts: {last_exc}", endpoint=endpoint
+        )
 
     @staticmethod
     def _backoff(attempt: int, *, base: float = 0.5, cap: float = 8.0) -> float:
@@ -303,7 +343,7 @@ class BinanceClient:
         return random.uniform(0, min(cap, base * (2**attempt)))
 
     @staticmethod
-    def _raise_api_error(resp: httpx.Response) -> None:
+    def _raise_api_error(resp: httpx.Response, endpoint: str) -> None:
         code: int | None = None
         message = resp.text
         try:
@@ -312,7 +352,7 @@ class BinanceClient:
             message = body.get("msg", message)
         except ValueError:
             pass
-        raise BinanceError(message, status=resp.status_code, code=code)
+        raise BinanceError(message, status=resp.status_code, code=code, endpoint=endpoint)
 
 
 # --- Owner-console reads ---------------------------------------------------

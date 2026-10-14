@@ -292,7 +292,9 @@ async def test_closed_candle_failure_notifies_owner_with_the_real_error(
     exchange = FakeExchange(mark_price=D("150"))
 
     async def reject_entry(*_args: object, **_kwargs: object) -> None:
-        raise BinanceError("Margin is insufficient.", status=400, code=-2019)
+        raise BinanceError(
+            "Margin is insufficient.", status=400, code=-2019, endpoint="POST /fapi/v1/order"
+        )
 
     monkeypatch.setattr(exchange, "place_market", reject_entry)
 
@@ -331,6 +333,9 @@ async def test_closed_candle_failure_notifies_owner_with_the_real_error(
         await db_session.execute(select(Event).where(Event.ref == "bot_drive_failed"))
     ).scalar_one()
     assert failure.payload_json["error"] == "Margin is insufficient."
+    # The ledger names the failing Binance call, so an incident is diagnosable.
+    assert failure.payload_json["binance_code"] == -2019
+    assert failure.payload_json["endpoint"] == "POST /fapi/v1/order"
     # The owner must be paged for the failure itself, carrying the real reason.
     assert [kind for kind, _ in notifications] == ["bot_started", "error"]
     assert "Margin is insufficient." in str(notifications[-1][1])

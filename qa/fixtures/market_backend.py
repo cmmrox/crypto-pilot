@@ -26,10 +26,10 @@ def require_test_stack():
         )
 
 
-async def public_response(self, method, path, *, params=None, signed=False):
+async def public_response(self, method, path, *, params=None, signed=False, timestamped=False):
     from app.execution.binance_client import BinanceError
 
-    if signed or method != "GET":
+    if signed or timestamped or method != "GET":
         raise BinanceError("CI fixture refuses signed requests and exchange mutations")
     now_ms = int(time.time() * 1000)
     if path == "/fapi/v1/time":

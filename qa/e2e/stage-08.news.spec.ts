@@ -20,7 +20,7 @@ test("QA-8.01 News view renders with isolation notice and macro calendar", async
   page,
 }) => {
   await login(page);
-  await go(page, /news/i, /market briefing/i);
+  await go(page, /^news briefing$/i, /market briefing/i);
   await expect(page.getByTestId("briefing-panel")).toBeVisible();
   await expect(page.getByTestId("isolation-notice")).toContainText(
     /never feeds the strategy/i,

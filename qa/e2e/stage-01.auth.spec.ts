@@ -182,7 +182,7 @@ test("QA-1.06 session persists across reload", async ({ page }) => {
 test("QA-1.07 sidebar navigation switches views", async ({ page }) => {
   await login(page);
   await openNavIfMobile(page);
-  await page.getByRole("link", { name: /event ledger/i }).click();
+  await page.getByRole("link", { name: /^event ledger$/i }).click();
   await expect(page.getByTestId("view-title")).toHaveText("Event ledger");
   await openNavIfMobile(page);
   await page.getByRole("link", { name: /settings/i }).click();

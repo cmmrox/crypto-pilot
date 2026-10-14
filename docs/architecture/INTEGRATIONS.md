@@ -59,6 +59,31 @@ Docs: [developer.notify.lk](https://developer.notify.lk/api-endpoints/).
   audited and surfaced for retry; it never issues tokens or commits the requested
   security change. OTP delivery ignores the alerts on/off toggle.
 - Use the approved custom sender ID in production; `NotifyDemo` only for early smoke tests.
+- **Trading alert coverage (FR-06, §8, §10).** Every path that changes the owner's
+  position or bot state sends an SMS. Templates live in `app/notifier/templates.py`.
+  - **Trade opened** (`trade_opened`): every protected entry, including entries
+    whose TP1 is below one lot.
+  - **Short sleeve opened** (`short_opened`).
+  - **Trade closed** (`trade_closed`): exit price, P&L net of fees/funding and
+    month-to-date closed P&L. Bot-initiated closes (manual, regime exit, reversal,
+    breaker, kill switch, crossed ratchet) and exchange stop or target fills share
+    `app/services/trade_alerts.py`.
+  - **TP1 filled** (`tp1_filled`): sent once, with the remaining quantity and its
+    confirmed stop.
+  - **Short sleeve resized** (`short_resized`).
+  - **Bot started** (`bot_started`): equity, and the mismatch if the start entered
+    safe mode.
+  - **Bot stopped** (`bot_stopped`): warns when an open position is left unwatched.
+    A stopped bot makes no exchange calls, so a stop fill while stopped is reported
+    after the next start.
+  - **Safe mode** (`safe_mode`): sent once per transition into safe mode. Callers
+    that already send a more specific `error` SMS pass `alert=False`.
+  - **Breaker** (`breaker`): names the book, its loss and its cap.
+  - **Strategy halt** (`strategy_halt`): sent once per halt.
+  - **Kill switch** (`kill_switch`).
+  - **Errors** (`error`): failed or ambiguous decisions and protection failures.
+  - **Health** (`health`, `health_recovered`): both dead-man checks and unrepaired
+    candle gaps.
 
 ## 3. Codex SDK + GPT-5.5 (AI news assistant)
 

@@ -135,8 +135,8 @@ class CandleIngestService:
                 )
                 await notify_event(
                     session,
-                    kind="error",
-                    payload={"error": "missed 4h candle tick (dead-man)"},
+                    kind="health",
+                    payload={"error": "missed 4h candle tick (in-process dead-man)"},
                 )
                 await session.commit()
         except Exception as exc:
@@ -212,6 +212,18 @@ class CandleIngestService:
                         message="Trading decision blocked until candle gaps are repaired",
                         ref="candle_gap_block",
                         payload={"gaps": len(gaps)},
+                    )
+                    from app.services.notify_config import notify_event
+
+                    await notify_event(
+                        session,
+                        kind="health",
+                        payload={
+                            "error": (
+                                f"{len(gaps)} candle gap(s) could not be repaired; "
+                                "this close's trading decision was skipped"
+                            )
+                        },
                     )
                     await session.commit()
                 self._dead_man.beat(utc_now())
@@ -347,7 +359,7 @@ class CandleIngestService:
             # that actually executed on the exchange plus safe mode — one clean commit.
             await session.rollback()
             await bot_service.enter_safe_mode(
-                session, reason="protective stop failed at candle close"
+                session, reason="protective stop failed at candle close", alert=False
             )
             await persist_emergency_exit(session, exc.record)
             cause = exc.__cause__
@@ -388,6 +400,7 @@ class CandleIngestService:
             await bot_service.enter_safe_mode(
                 session,
                 reason="ambiguous Binance mutation outcome; emergency recovery executed",
+                alert=False,
             )
             await record_event(
                 session,
@@ -432,7 +445,9 @@ class CandleIngestService:
             )
         except Exception as exc:
             await session.rollback()
-            await bot_service.enter_safe_mode(session, reason="closed-candle evaluation failed")
+            await bot_service.enter_safe_mode(
+                session, reason="closed-candle evaluation failed", alert=False
+            )
             cause = exc.__cause__
             await record_event(
                 session,

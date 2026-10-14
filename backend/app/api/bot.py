@@ -78,5 +78,6 @@ async def stop_and_close(current: CurrentUserDep, session: SessionDep) -> Messag
 
 @router.post("/safe-mode", response_model=MessageOut)
 async def safe_mode(current: CurrentUserDep, session: SessionDep) -> MessageOut:
-    await bot_service.enter_safe_mode(session, reason="manual")
+    # The owner asked for this from the console; no SMS is needed to confirm it.
+    await bot_service.enter_safe_mode(session, reason="manual", alert=False)
     return MessageOut(message="safe mode enabled; new entries blocked")

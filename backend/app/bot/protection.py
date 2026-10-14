@@ -97,7 +97,7 @@ class ProtectionService:
             except Exception as exc:
                 await session.rollback()
                 await bot_service.enter_safe_mode(
-                    session, reason="intrabar protection recovery failed"
+                    session, reason="intrabar protection recovery failed", alert=False
                 )
                 await record_event(
                     session,

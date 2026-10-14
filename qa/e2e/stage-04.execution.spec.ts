@@ -76,7 +76,7 @@ test("QA-4.03 self-check trade event appears in the audit ledger", async ({
   await login(page);
   const menu = page.getByRole("button", { name: /open navigation/i });
   if (await menu.isVisible()) await menu.click();
-  await page.getByRole("link", { name: /event ledger/i }).click();
+  await page.getByRole("link", { name: /^event ledger$/i }).click();
   await expect(page.getByTestId("view-title")).toHaveText("Event ledger");
   await page.getByLabel("Search events").fill("self-check");
   await expect(

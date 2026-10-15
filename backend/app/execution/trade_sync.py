@@ -8,6 +8,7 @@ changes still fail reconciliation and enter safe mode.
 from __future__ import annotations
 
 import datetime as dt
+from asyncio import sleep
 from collections.abc import Sequence
 from dataclasses import dataclass
 from decimal import Decimal
@@ -16,10 +17,14 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
+from app.core.logging import get_logger
 from app.db.models import Candle, Order, Trade
 from app.execution.exchange import Exchange, Fill, Position
 from app.services.events import record_event
 from app.services.trade_alerts import notify_tp1_filled, notify_trade_closed
+
+_log = get_logger("trade_sync")
 
 
 @dataclass(frozen=True)
@@ -72,65 +77,64 @@ async def sync_open_trade(
         .scalars()
         .all()
     )
-    fills_by_order: dict[int, list[Fill]] = {}
-    newly_filled_targets: list[Order] = []
-    for order in orders:
-        if order.raw_json.get("virtual_tp"):
-            if (
-                decision_candle is not None
-                and order.status == "VIRTUAL"
-                and order.price is not None
-            ):
-                crossed = (
-                    decision_candle.high >= order.price
-                    if trade.side == "LONG"
-                    else decision_candle.low <= order.price
-                )
-                if crossed and decision_candle.open_time + dt.timedelta(hours=4) > trade.opened_at:
-                    order.status = "VIRTUAL_TRIGGERED"
-            continue
-        if order.status in {"REJECTED", "CANCELED"} and order.binance_order_id is None:
-            continue
-        result = await exchange.get_order(symbol, order.client_order_id)
-        if (
-            order.type == "LIMIT"
-            and order.reduce_only
-            and order.status != "FILLED"
-            and result.status == "FILLED"
-        ):
-            newly_filled_targets.append(order)
-        order.binance_order_id = result.exchange_order_id
-        order.status = result.status
-        order.filled_qty = result.filled_qty
-        order.avg_fill_px = result.avg_price if result.avg_price > 0 else None
-        order.filled_at = (
-            dt.datetime.now(dt.UTC)
-            if result.status == "FILLED" and order.filled_at is None
-            else order.filled_at
+    pending_targets = {
+        order.id
+        for order in orders
+        if order.type == "LIMIT" and order.reduce_only and order.status != "FILLED"
+    }
+    settings = get_settings()
+    observations: list[dict[str, Any]] = []  # allowlisted JSON audit snapshots
+    for attempt in range(settings.reconciliation_max_attempts):
+        if attempt:
+            await sleep(settings.reconciliation_retry_delay_seconds)
+        # Only refresh reads here. Never replay stop/target recovery, cancel, close,
+        # or notification side effects on a mismatched intermediate snapshot.
+        fills_by_order = await _refresh_order_fills(
+            exchange, orders, trade=trade, symbol=symbol, decision_candle=decision_candle
         )
-        order.raw_json = {**order.raw_json, **result.raw}
-        if result.filled_qty > 0 and result.exchange_order_id:
-            fills = await exchange.get_order_fills(symbol, result.exchange_order_id)
-            fills_by_order[order.id] = fills
-            if result.status == "FILLED" and fills:
-                order.filled_at = max(fill.filled_at for fill in fills)
-            order.raw_json = {
-                **order.raw_json,
-                "fills": [_fill_payload(fill) for fill in fills],
+        entry_qty = sum(
+            (order.filled_qty for order in orders if not order.reduce_only), Decimal("0")
+        )
+        reduction_qty = sum(
+            (order.filled_qty for order in orders if order.reduce_only), Decimal("0")
+        )
+        remaining = max(Decimal("0"), entry_qty - reduction_qty)
+        expected_qty = remaining if trade.side == "LONG" else -remaining
+        position = await exchange.get_position(symbol)
+        matched = position.qty == expected_qty
+        if not matched or observations:
+            observation = {
+                "attempt": attempt + 1,
+                "expected_qty": str(expected_qty),
+                "actual_qty": str(position.qty),
+                "orders": [
+                    {"id": o.id, "status": o.status, "filled_qty": str(o.filled_qty)}
+                    for o in orders
+                ],
             }
-
-    entry_qty = sum(
-        (order.filled_qty for order in orders if not order.reduce_only),
-        Decimal("0"),
-    )
-    reduction_qty = sum(
-        (order.filled_qty for order in orders if order.reduce_only),
-        Decimal("0"),
-    )
-    remaining = max(Decimal("0"), entry_qty - reduction_qty)
-    expected_qty = remaining if trade.side == "LONG" else -remaining
-    position = await exchange.get_position(symbol)
-    matched = position.qty == expected_qty
+            observations.append(observation)
+            # Survives a later transaction rollback if a verification read fails.
+            _log.info("fill_reconciliation_snapshot", trade_id=trade.id, **observation)
+        if matched:
+            break
+    if observations:
+        await record_event(
+            session,
+            level="INFO" if matched else "WARN",
+            category="reconciliation",
+            ref=f"trade:{trade.id}",
+            message=(
+                "Fill reconciliation recovered" if matched else "Fill reconciliation unresolved"
+            ),
+            payload={
+                "recovered": matched,
+                "attempts": len(observations),
+                "snapshots": observations,
+            },
+        )
+    newly_filled_targets = [
+        order for order in orders if order.id in pending_targets and order.status == "FILLED"
+    ]
 
     all_fills = [fill for fills in fills_by_order.values() for fill in fills]
     trade.fees = sum((abs(fill.commission) for fill in all_fills), Decimal("0"))
@@ -215,6 +219,53 @@ async def sync_open_trade(
         tp1_done=tp1_done,
         tp1_sold=partial_sold,
     )
+
+
+async def _refresh_order_fills(
+    exchange: Exchange,
+    orders: Sequence[Order],
+    *,
+    trade: Trade,
+    symbol: str,
+    decision_candle: Candle | None,
+) -> dict[int, list[Fill]]:
+    """Read each tracked order and its fills without submitting exchange mutations."""
+    fills_by_order: dict[int, list[Fill]] = {}
+    for order in orders:
+        if order.raw_json.get("virtual_tp"):
+            if (
+                decision_candle is not None
+                and order.status == "VIRTUAL"
+                and order.price is not None
+            ):
+                crossed = (
+                    decision_candle.high >= order.price
+                    if trade.side == "LONG"
+                    else decision_candle.low <= order.price
+                )
+                if crossed and decision_candle.open_time + dt.timedelta(hours=4) > trade.opened_at:
+                    order.status = "VIRTUAL_TRIGGERED"
+            continue
+        if order.status in {"REJECTED", "CANCELED"} and order.binance_order_id is None:
+            continue
+        result = await exchange.get_order(symbol, order.client_order_id)
+        order.binance_order_id = result.exchange_order_id
+        order.status = result.status
+        order.filled_qty = result.filled_qty
+        order.avg_fill_px = result.avg_price if result.avg_price > 0 else None
+        order.filled_at = (
+            dt.datetime.now(dt.UTC)
+            if result.status == "FILLED" and order.filled_at is None
+            else order.filled_at
+        )
+        order.raw_json = {**order.raw_json, **result.raw}
+        if result.filled_qty > 0 and result.exchange_order_id:
+            fills = await exchange.get_order_fills(symbol, result.exchange_order_id)
+            fills_by_order[order.id] = fills
+            if result.status == "FILLED" and fills:
+                order.filled_at = max(fill.filled_at for fill in fills)
+            order.raw_json = {**order.raw_json, "fills": [_fill_payload(fill) for fill in fills]}
+    return fills_by_order
 
 
 async def _close_from_fills(

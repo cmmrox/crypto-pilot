@@ -45,6 +45,20 @@ events are absent, duplicated, delayed or reordered. Listen keys are renewed eve
 25 minutes and recreated on expiry/reconnect. Credentials and stream URLs are never
 logged. A stopped bot does not resume position management automatically.
 
+Order and position REST reads are separate snapshots. A tracked trade's quantity
+mismatch is confirmed by refreshing all tracked orders, fills and position before
+latching safe mode (default: three attempts, 0.5 seconds between attempts). No
+close, cancellation, stop replacement or notification is repeated inside this
+confirmation loop. A normal stop/TP fill that reconciles in that window continues
+without pausing new entries; persistent discrepancies and failed verification still
+fail closed. Confirmation never clears a previously established safe mode.
+`CP_RECONCILIATION_MAX_ATTEMPTS` (1–5) and
+`CP_RECONCILIATION_RETRY_DELAY_SECONDS` (0.1–2.0) configure the bounded confirmation
+policy; defaults require no deployment configuration change. These bound attempts
+and pauses, not total elapsed time, which also includes the client's bounded network
+requests. Reconciliation events contain expected/actual quantities and order status
+snapshots for each attempt; structured snapshot logs survive a later rollback.
+
 One backend worker is required, as in the existing deployment. Lifecycle controls,
 credential/environment/strategy changes, account recovery and candle execution share
 a mutex held through database commit/rollback. Slow read-only credential tests do not

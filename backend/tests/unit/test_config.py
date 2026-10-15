@@ -65,3 +65,25 @@ def test_otp_test_throttle_override_rejected_outside_test(
     monkeypatch.setenv("CP_OTP_TEST_DISABLE_THROTTLE", "true")
     with pytest.raises(ValidationError):
         Settings()
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("CP_RECONCILIATION_MAX_ATTEMPTS", "0"),
+        ("CP_RECONCILIATION_MAX_ATTEMPTS", "6"),
+        ("CP_RECONCILIATION_RETRY_DELAY_SECONDS", "0"),
+        ("CP_RECONCILIATION_RETRY_DELAY_SECONDS", "2.1"),
+        ("CP_RECONCILIATION_RETRY_DELAY_SECONDS", "nan"),
+    ],
+)
+def test_reconciliation_retries_cannot_be_unbounded_or_tight_loop(
+    monkeypatch: pytest.MonkeyPatch,
+    name: str,
+    value: str,
+) -> None:
+    for key, setting in _BASE_ENV.items():
+        monkeypatch.setenv(key, setting)
+    monkeypatch.setenv(name, value)
+    with pytest.raises(ValidationError):
+        Settings()

@@ -59,6 +59,11 @@ class Settings(BaseSettings):
     live_trading_approved: bool = False
     live_key_permissions_verified: bool = False
 
+    # Order and position REST snapshots can straddle a fill. Bound confirmation
+    # reads before safe mode; this never enables automatic safe-mode exit.
+    reconciliation_max_attempts: int = Field(default=3, ge=1, le=5)
+    reconciliation_retry_delay_seconds: float = Field(default=0.5, ge=0.1, le=2.0)
+
     # --- CORS / frontend ---
     frontend_origin: str = "http://localhost:5173"
 

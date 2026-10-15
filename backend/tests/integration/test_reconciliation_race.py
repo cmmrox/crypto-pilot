@@ -286,3 +286,53 @@ async def test_matched_snapshot_does_not_wait_or_emit_retry_audit(
     assert not (
         await db_session.scalars(select(Event).where(Event.category == "reconciliation"))
     ).all()
+
+
+@pytest.mark.parametrize("pending_type", ["LIMIT", "STOP_MARKET"])
+async def test_pending_order_recovery_is_not_resubmitted_by_confirmation_retry(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+    pending_type: str,
+) -> None:
+    class MissingOrderExchange(FillDuringOrderRead):
+        async def get_order(self, symbol, client_order_id):
+            if client_order_id not in self._orders:
+                raise BinanceError("unknown order", code=-2013)
+            return await super().get_order(symbol, client_order_id)
+
+    exchange = MissingOrderExchange(mark_price=D("60000"))
+    trade, old_stop, tp = await opened(db_session, exchange)
+    if pending_type == "LIMIT":
+        # Crash after persisting TP intent, before its submission reached Binance.
+        pending = tp
+        pending.status = "PENDING"
+        pending.binance_order_id = None
+        for book in (exchange._orders, exchange._open_orders, exchange._resting):
+            del book[pending.client_order_id]
+        exchange.fill_id = old_stop.client_order_id
+    else:
+        # Crash after persisting a replacement stop; old protection is still live.
+        pending = Order(
+            trade_id=trade.id,
+            client_order_id="CPSR-pending-race",
+            type="STOP_MARKET",
+            status="PENDING",
+            qty=trade.qty,
+            filled_qty=D("0"),
+            reduce_only=True,
+            stop_price=D("59000"),
+            raw_json={"replaces": old_stop.client_order_id, "workingType": "CONTRACT_PRICE"},
+        )
+        db_session.add(pending)
+        exchange.fill_id = pending.client_order_id
+    worker = await running_worker(db_session, monkeypatch, exchange)
+    before = len(exchange.placed)
+
+    await worker.recover_once()
+
+    assert (await protection.bot_service.status(db_session)).status == BotStatus.RUNNING
+    assert trade.closed_at is not None
+    assert exchange.placed[before:] == [(pending_type, "SELL", pending.qty)]
+    assert not await exchange.get_open_orders("BTCUSDT")
+    await worker.recover_once()
+    assert len(exchange.placed) == before + 1

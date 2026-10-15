@@ -33,7 +33,7 @@ the fake exchange, and returns the post-fill position to the real worker. Agains
 the original code both initial cases failed: RUNNING incorrectly became SAFE_MODE,
 and a previously safe run did not synchronize the closed trade in that recovery.
 
-After the fix, 35 focused tests passed using disposable PostgreSQL and a deterministic
+After the fix, 37 focused tests passed using disposable PostgreSQL and a deterministic
 exchange adapter. Tests cover:
 
 - Long and short stop fills, preserving both RUNNING and pre-existing SAFE_MODE.
@@ -45,6 +45,8 @@ exchange adapter. Tests cover:
 - Closed-candle evaluation using the same confirmation path.
 - Already-matched snapshots incurring no retry wait or mismatch event.
 - Configuration bounds preventing zero attempts, tight loops or excessive retries.
+- Pending target/replacement-stop recovery submits once, even when subsequent
+  confirmation retries after a fill (restart/ambiguous-submission boundary).
 
 Command (from `backend/`):
 
@@ -58,6 +60,18 @@ Command (from `backend/`):
 
 Ruff lint/format, strict mypy (99 source files), and all four import-boundary
 contracts passed. Frontend lint/types, 12 unit tests, and production build passed.
+
+The full local backend run passed 459 tests with three real-DEMO tests skipped
+(credentials not configured). Two additional pending-order recovery regressions
+then passed within the final 37-test focused run; application code was unchanged.
+Combined coverage: execution 91.47%, risk 100%, strategies 95.91%, backend 77%.
+The existing research oracle emitted its known pandas timezone-to-period warning.
+
+The isolated production-image build and `restart-mid-trade.sh` health smoke passed.
+This was an API/database restart smoke, not a real open-position restart; test mode
+intentionally disables background ingest/protection startup. Desktop/mobile browser
+regression passed 147 tests with 25 existing conditional skips. Browser tests use
+synthetic public market data and make no real exchange orders.
 
 ## Release gates and limits
 

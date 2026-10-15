@@ -92,6 +92,14 @@ strategy-agnostic. Software parity is not profitability or live-fill certificati
   persists in PostgreSQL; on process restart the bot auto-resumes if it was running.
 - **Safe mode:** reconciliation mismatch or margin error → no new entries, management
   and reconciliation continue, SMS sent, banner shown.
+  For an existing tracked trade, order and position reads can straddle a fill.
+  Both intrabar and closed-candle synchronization confirm mismatches with up to
+  three complete order/fill/position snapshots, waiting 0.5 seconds between reads.
+  The trading mutex remains held, blocking new decisions during confirmation;
+  exchange protection remains active. Only reads repeat, never order submissions.
+  A confirmed match continues normally; exhausted confirmation or a read failure
+  follows the existing safe-mode path. Existing safe mode is never auto-cleared.
+  An untracked exchange position still fails reconciliation immediately.
 - **WebSocket push:** position, P&L, bot state, breaker meters stream to the dashboard;
   REST covers everything else.
 

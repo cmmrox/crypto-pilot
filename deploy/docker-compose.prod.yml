@@ -15,10 +15,10 @@ services:
     environment:
       CP_ENVIRONMENT: production
       CP_LOG_JSON: "true"
-    deploy:
-      resources:
-        limits:
-          memory: 768M
+    # Tighter ceiling for the small single-purpose VPS in RUNBOOK §1. Uses the
+    # same key as the base file: Compose rejects a `deploy.resources` limit that
+    # differs from `mem_limit`.
+    mem_limit: 768m
 
   frontend:
     restart: always

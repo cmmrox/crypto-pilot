@@ -6,6 +6,13 @@ services:
       context: ..
       dockerfile: backend/Dockerfile
     restart: always
+    # Protected like the backend (RUNBOOK §10): the monitor must outlive whatever
+    # is starving the host, or it cannot report it.
+    mem_limit: 256m
+    memswap_limit: 512m
+    mem_reservation: 64m
+    cpu_shares: 2048
+    oom_score_adj: -500
     command: ["python", "-m", "app.bot.deadman_monitor"]
     environment:
       CP_ENVIRONMENT: ${CP_ENVIRONMENT}
@@ -26,6 +33,8 @@ services:
   backup:
     image: postgres:16-alpine
     restart: always
+    mem_limit: 256m
+    memswap_limit: 512m
     environment:
       CP_DB_HOST: ${CP_DB_HOST}
       POSTGRES_USER: ${POSTGRES_USER}

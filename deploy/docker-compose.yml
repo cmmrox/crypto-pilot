@@ -6,6 +6,14 @@ services:
       context: ..
       dockerfile: backend/Dockerfile
     restart: unless-stopped
+    # Resource policy (RUNBOOK §10). The ceiling is a leak guard at about twice
+    # the observed peak. The reservation, CPU weight and OOM score keep the
+    # trading loop running when co-hosted applications compete for the host.
+    mem_limit: 1g
+    memswap_limit: 2g
+    mem_reservation: 512m
+    cpu_shares: 2048
+    oom_score_adj: -500
     # Connects to an EXISTING shared Postgres reachable on the `database`
     # network as ${CP_DB_HOST}. There is no postgres service here anymore —
     # see docker-compose.postgres.yml for the optional standalone instance.
@@ -42,12 +50,17 @@ services:
       context: ../frontend
       dockerfile: Dockerfile
     restart: unless-stopped
+    mem_limit: 96m
+    memswap_limit: 192m
     networks:
       - default
 
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
+    mem_limit: 192m
+    memswap_limit: 384m
+    mem_reservation: 32m
     depends_on:
       - backend
       - frontend

@@ -141,3 +141,40 @@ docker compose exec backend python -m app.cli reset-2fa --email you@example.com
 This disables 2FA, clears the enrolled number, revokes active sessions, and writes a
 `security` event. Sign in with the password, restore/test notify.lk, and re-enable 2FA
 immediately. There is intentionally no web recovery endpoint.
+
+## 10. Resource limits
+
+The memory and CPU policy lives in `docker-compose.yml` (backend, frontend, caddy) and
+`docker-compose.ops.yml` (deadman, backup), so every deploy, rollback and drill command
+applies it without an extra `-f` file.
+
+| Service | Memory limit | Memory + swap | Reservation | CPU shares | OOM score adj |
+|---|---|---|---|---|---|
+| `backend` | 1g | 2g | 512m | 2048 | -500 |
+| `deadman` | 256m | 512m | 64m | 2048 | -500 |
+| `caddy` | 192m | 384m | 32m | default | default |
+| `backup` | 256m | 512m | none | default | default |
+| `frontend` | 96m | 192m | none | default | default |
+
+- The limits are leak guards at about twice the peak seen over 28 days of production
+  (backend 468 MiB, deadman 100 MiB, caddy 52 MiB, backup 49 MiB, frontend 13 MiB). A
+  container that reaches its limit is killed and restarted by its restart policy, so
+  re-measure before lowering one.
+- There is no CPU ceiling. `cpu_shares` gives the backend and the monitor priority only
+  when the host is contended; the backend averaged 9% of one core, and its peak during
+  heavy trading has not been measured.
+- A limit is a ceiling for that container, not a reservation. On a shared host, cap the
+  other applications as well, and protect the shared Postgres the same way as the
+  backend: trading stops when the database is starved.
+- `docker-compose.prod.yml` lowers the backend limit to 768m for the small VPS in §1.
+- Rootless Docker cannot set a negative `oom_score_adj`; run the stack with a rootful
+  daemon or override that key locally.
+- Changing any value recreates the container on the next `up -d`. Follow the upgrade
+  rule in §8: not with an open position unless hotfix-critical.
+
+Read the live values back with:
+
+```sh
+docker inspect -f '{{.Name}} mem={{.HostConfig.Memory}} res={{.HostConfig.MemoryReservation}} shares={{.HostConfig.CpuShares}} oom={{.HostConfig.OomScoreAdj}}' \
+  $(docker compose -f docker-compose.yml -f docker-compose.ops.yml ps -q)
+```

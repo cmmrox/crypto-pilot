@@ -42,7 +42,12 @@ the worst case is bounded (no withdrawal permission — ever).
 - Input validation at the edge (Pydantic strict); output encoding by React defaults —
   no `dangerouslySetInnerHTML`.
 - Dependencies: audit in CI (pip-audit / npm audit); base images pinned by digest;
-  non-root containers, read-only root FS where possible.
+  non-root containers, read-only root FS where possible. A frontend high/critical
+  advisory fails CI unless `frontend/audit-exceptions.json` excepts its ID with an
+  owner-approved reason and an expiry of at most 30 days. An exception is allowed
+  only when no patched release exists and the package is unreachable from the
+  production bundle (`npm audit --omit=dev` clean). An expired exception fails CI
+  again; remove an exception as soon as a fix ships.
 - WebSocket: auth on connect (token), origin-checked, per-connection rate cap.
 
 ## Server (VPS)

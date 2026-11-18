@@ -21,8 +21,17 @@ row (BSD FR-01). Docs: [developers.binance.com — USDS-M futures](https://devel
   afresh; a retry never reuses an earlier timestamp. Binance rejects a request whose
   timestamp is outside `recvWindow` before processing it (`-1021`, "Timing security"
   in the general info), so the client resends it, orders included, with the same
-  idempotent client order ID, within the normal bounded retry budget. `-1007` and
-  HTTP 5xx remain "execution status unknown" and are never blindly resent.
+  idempotent client order ID, within the normal bounded retry budget. For a write,
+  `-1007` and HTTP 5xx remain "execution status unknown" and are never blindly
+  resent.
+- **Server-side read failures:** a read (GET) that returns HTTP 5xx or 408, or
+  `-1001` DISCONNECTED, `-1006` UNEXPECTED_RESP, `-1007` TIMEOUT or `-1008`
+  throttled, is resent freshly signed within the same bounded retry budget with
+  exponential backoff and jitter. Binance's "execution status unknown" cannot
+  apply to a read, which changes nothing; its docs call "Service Unavailable" and
+  `-1008` a definite failure to retry with backoff (re-verified 2026-11-18). An
+  exhausted read, network failure or 429 is marked transient; an IP ban (418) and
+  business rejections are not. Writes keep the ambiguous-mutation path above.
   Verified on DEMO 2026-10-14: a 10 s stale `POST /fapi/v1/order` returned HTTP 400
   `-1021` and created no order; the freshly signed resend filled exactly once.
   Decision failures record the Binance code and the method + path (never the signed

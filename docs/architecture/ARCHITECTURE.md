@@ -97,9 +97,20 @@ strategy-agnostic. Software parity is not profitability or live-fill certificati
   three complete order/fill/position snapshots, waiting 0.5 seconds between reads.
   The trading mutex remains held, blocking new decisions during confirmation;
   exchange protection remains active. Only reads repeat, never order submissions.
-  A confirmed match continues normally; exhausted confirmation or a read failure
-  follows the existing safe-mode path. Existing safe mode is never auto-cleared.
+  A confirmed match continues normally; exhausted confirmation follows the existing
+  safe-mode path. Existing safe mode is never auto-cleared.
   An untracked exchange position still fails reconciliation immediately.
+- **Intrabar check failures:** the 5-second protection check tolerates a
+  transient read failure (Binance 5xx/408/`-1001`/`-1006`/`-1007`/`-1008`, network
+  error or 429 after the client's bounded retries). It logs a warning and writes
+  one `WARN` ledger row per streak; the next pass retries. The exchange-resident
+  stop keeps protecting the position meanwhile, and every closed-candle decision
+  reconciles afresh under the trading mutex before acting. Three consecutive
+  failures enter safe mode with one SMS. Safe mode is immediate for any other
+  failure: a business rejection, an IP ban (418), an unexpected error, missing
+  credentials, a reconciliation mismatch, or any failure after the check placed or
+  cancelled an order. Events record the error type, Binance status and code, and
+  method + path only. Incident: `docs/qa/reports/INCIDENT-PROTECTION-RECOVERY-2026-11-17.md`.
 - **WebSocket push:** position, P&L, bot state, breaker meters stream to the dashboard;
   REST covers everything else.
 
@@ -117,6 +128,7 @@ code path differs — this is what makes 4 weeks of DEMO evidence transferable t
 | WS drop | auto-reconnect with backoff; REST backfill missed candles; catch-up decisions on closed candles only |
 | Process crash / VPS reboot | Docker restarts container; bot resumes from persisted state; reconcile before acting |
 | Binance 429/418 | exponential backoff + jitter; never tight-loop; order placement uses idempotent client IDs so retries are safe |
+| Binance 5xx/408 on a read | bounded retry with backoff (reads change nothing); intrabar check enters safe mode only after 3 consecutive failed passes |
 | Margin error −2019 | pause bot + SMS |
 | SMS failure | retry ×3 → ERROR event + banner; trading never blocked |
 | Missed 4h tick | dead-man's-switch cron alerts owner by SMS |

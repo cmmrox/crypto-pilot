@@ -39,6 +39,12 @@ WS_URLS: dict[str, str] = {
 # processing it (USD-M general info, "Timing security"), so nothing executed.
 INVALID_TIMESTAMP = -1021
 
+# Failures on Binance's side (USD-M general info, "HTTP Return Codes"; error codes
+# -1001 DISCONNECTED, -1006 UNEXPECTED_RESP, -1007 TIMEOUT, -1008 throttled). Their
+# "execution status unknown" matters only for writes: a read changes nothing, so a
+# read is resent within the bounded retry budget. Writes stay ambiguous.
+SERVER_SIDE_CODES = frozenset({-1001, -1006, -1007, -1008})
+
 
 class BinanceError(Exception):
     """A Binance API error (carries HTTP status, Binance error code and endpoint).
@@ -53,11 +59,21 @@ class BinanceError(Exception):
         status: int | None = None,
         code: int | None = None,
         endpoint: str | None = None,
+        transient: bool = False,
     ) -> None:
         super().__init__(message)
         self.status = status
         self.code = code
         self.endpoint = endpoint
+        # True only for a read that kept failing for a server-side or network
+        # reason after the bounded retries; a later read may well succeed.
+        self.transient = transient
+
+    @property
+    def server_side(self) -> bool:
+        """Binance failed to serve the request (5xx, 408, or a server-side code)."""
+        status = self.status or 0
+        return status >= 500 or status == 408 or self.code in SERVER_SIDE_CODES
 
 
 def log_unreachable(environment: str, probe: str, error: BaseException) -> None:
@@ -326,15 +342,35 @@ class BinanceClient:
                 _log.warning("binance_transport_error", attempt=attempt, error=str(exc))
                 await asyncio.sleep(self._backoff(attempt))
             except BinanceError as exc:
-                # Rejected before processing, so even an order is safe to resend
-                # freshly signed with its same idempotent client order ID.
-                if exc.code != INVALID_TIMESTAMP or attempt + 1 >= self._max_retries:
+                # A timestamp rejection happens before processing, so even an order
+                # is safe to resend freshly signed with its same client order ID.
+                # A server-side failure is resent only for a read.
+                server_side_read = not mutation and exc.server_side
+                if exc.code != INVALID_TIMESTAMP and not server_side_read:
+                    raise
+                if attempt + 1 >= self._max_retries:
+                    exc.transient = server_side_read
                     raise
                 last_exc = exc
-                _log.warning("binance_timestamp_rejected", attempt=attempt, endpoint=endpoint)
+                if server_side_read:
+                    _log.warning(
+                        "binance_server_error_retry",
+                        attempt=attempt,
+                        endpoint=endpoint,
+                        status=exc.status,
+                        code=exc.code,
+                    )
+                else:
+                    _log.warning("binance_timestamp_rejected", attempt=attempt, endpoint=endpoint)
                 await asyncio.sleep(self._backoff(attempt))
+        # Only rate limits and network failures of reads reach here. Both can clear
+        # on a later read; an IP ban (418) must not be hammered.
+        status = last_exc.status if isinstance(last_exc, RateLimitError) else None
         raise BinanceError(
-            f"request failed after {self._max_retries} attempts: {last_exc}", endpoint=endpoint
+            f"request failed after {self._max_retries} attempts: {last_exc}",
+            status=status,
+            endpoint=endpoint,
+            transient=not mutation and status != 418,
         )
 
     @staticmethod

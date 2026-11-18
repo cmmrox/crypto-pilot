@@ -364,3 +364,165 @@ async def test_definitive_order_rejection_is_not_retried_and_names_its_endpoint(
     assert excinfo.value.code == -2019
     # Method and path only: never the signed query, key, or signature.
     assert excinfo.value.endpoint == "POST /fapi/v1/order"
+
+
+# --- Transient server-side failures on reads (incident 2026-11-17) -------------
+
+
+def _flaky(responses: list[httpx.Response]):
+    """Serve `responses` in order, then 200 OK; count every attempt."""
+    attempts: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        attempts.append(request)
+        if len(attempts) <= len(responses):
+            return responses[len(attempts) - 1]
+        return httpx.Response(200, json={"ok": True})
+
+    return handler, attempts
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("ticking_clock")
+@pytest.mark.parametrize(
+    "response",
+    [
+        httpx.Response(503, text="Service Unavailable"),
+        httpx.Response(502, text="<html>Bad Gateway</html>"),
+        httpx.Response(408, json={"code": -1007, "msg": "Timeout waiting for response"}),
+        httpx.Response(503, json={"code": -1008, "msg": "Server is currently overloaded"}),
+        httpx.Response(400, json={"code": -1001, "msg": "Internal error; unable to process"}),
+    ],
+    ids=["503", "502", "408-1007", "503-1008", "400-1001"],
+)
+async def test_signed_read_transient_server_error_is_retried(response: httpx.Response) -> None:
+    """Regression: 2026-11-17 16:00 UTC one rejected read latched LIVE safe mode.
+
+    A read changes nothing on the exchange, so Binance's "execution status unknown"
+    does not apply: resending it, freshly signed, is safe.
+    """
+    handler, attempts = _flaky([response])
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), base_url="https://example.invalid"
+    ) as raw:
+        client = BinanceClient("LIVE", api_key="key", api_secret="secret", client=raw)
+        assert await client.signed_request("GET", "/fapi/v2/positionRisk") == {"ok": True}
+
+    assert len(attempts) == 2
+    first, second = (_signed_params(r) for r in attempts)
+    assert int(second["timestamp"]) > int(first["timestamp"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("ticking_clock")
+async def test_persistent_read_server_error_is_bounded_and_marked_transient() -> None:
+    handler, attempts = _flaky(
+        [httpx.Response(503, json={"code": -1008, "msg": "Server is currently overloaded"})] * 9
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), base_url="https://example.invalid"
+    ) as raw:
+        client = BinanceClient(
+            "LIVE", api_key="key", api_secret="secret", client=raw, max_retries=3
+        )
+        with pytest.raises(BinanceError) as excinfo:
+            await client.signed_request("GET", "/fapi/v1/income")
+
+    assert len(attempts) == 3
+    assert excinfo.value.transient
+    assert excinfo.value.status == 503
+    assert excinfo.value.code == -1008
+    assert excinfo.value.endpoint == "GET /fapi/v1/income"
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("ticking_clock")
+async def test_exhausted_read_transport_failure_is_marked_transient() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("Name or service not known", request=request)
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), base_url="https://example.invalid"
+    ) as raw:
+        client = BinanceClient(
+            "LIVE", api_key="key", api_secret="secret", client=raw, max_retries=2
+        )
+        with pytest.raises(BinanceError) as excinfo:
+            await client.signed_request("GET", "/fapi/v2/account")
+
+    assert excinfo.value.transient
+    assert excinfo.value.endpoint == "GET /fapi/v2/account"
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("ticking_clock")
+async def test_read_business_rejection_is_not_retried_or_transient() -> None:
+    handler, attempts = _flaky(
+        [httpx.Response(401, json={"code": -2015, "msg": "Invalid API-key, IP, or permissions"})]
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), base_url="https://example.invalid"
+    ) as raw:
+        client = BinanceClient("LIVE", api_key="key", api_secret="secret", client=raw)
+        with pytest.raises(BinanceError) as excinfo:
+            await client.signed_request("GET", "/fapi/v2/account")
+
+    assert len(attempts) == 1
+    assert not excinfo.value.transient
+    assert excinfo.value.code == -2015
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("ticking_clock")
+async def test_ip_ban_is_not_marked_transient() -> None:
+    handler, _attempts = _flaky([httpx.Response(418, text="banned")] * 9)
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), base_url="https://example.invalid"
+    ) as raw:
+        client = BinanceClient(
+            "LIVE", api_key="key", api_secret="secret", client=raw, max_retries=2
+        )
+        with pytest.raises(BinanceError) as excinfo:
+            await client.signed_request("GET", "/fapi/v2/account")
+
+    assert not excinfo.value.transient
+    assert excinfo.value.status == 418
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("ticking_clock")
+@pytest.mark.parametrize("method", ["POST", "DELETE"])
+async def test_mutation_server_error_code_is_still_not_resent(method: str) -> None:
+    handler, attempts = _flaky(
+        [httpx.Response(503, json={"code": -1008, "msg": "Server is currently overloaded"})]
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), base_url="https://example.invalid"
+    ) as raw:
+        client = BinanceClient("LIVE", api_key="key", api_secret="secret", client=raw)
+        with pytest.raises(AmbiguousMutationError) as excinfo:
+            await client.signed_request(
+                method, "/fapi/v1/order", {"symbol": "BTCUSDT", "origClientOrderId": "CPL-x"}
+            )
+
+    assert len(attempts) == 1
+    assert not excinfo.value.transient
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("ticking_clock")
+async def test_rate_limited_mutation_is_not_marked_transient() -> None:
+    handler, _attempts = _flaky([httpx.Response(429, text="slow down")] * 9)
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), base_url="https://example.invalid"
+    ) as raw:
+        client = BinanceClient(
+            "LIVE", api_key="key", api_secret="secret", client=raw, max_retries=2
+        )
+        with pytest.raises(BinanceError) as excinfo:
+            await client.signed_request(
+                "POST", "/fapi/v1/order", {"symbol": "BTCUSDT", "newClientOrderId": "CPL-x"}
+            )
+
+    assert not excinfo.value.transient
+    assert excinfo.value.status == 429

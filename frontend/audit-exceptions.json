@@ -1,0 +1,7 @@
+{
+  "GHSA-fc5q-39xc-vjpf": {
+    "package": "picomatch",
+    "expires": "2026-12-18",
+    "reason": "ReDoS via extglobs; no patched release exists. Reached only through build, lint and test tooling (vite, vitest, eslint) with repository-authored globs; the production bundle audits clean (npm audit --omit=dev)."
+  }
+}
